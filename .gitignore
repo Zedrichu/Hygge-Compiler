@@ -16,5 +16,6 @@ bin
 .ionide/
 TestResults
 
+.idea
 .fake
 .vscode
