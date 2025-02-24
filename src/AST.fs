@@ -32,7 +32,7 @@ type Position =
            $"(%d{this.LineStart}:%d{this.ColStart}-%d{this.LineEnd}:%d{this.ColEnd})"
 
 
-/// Node of the Abstract Syntex Tree of a 'pretype', i.e. something that
+/// Node of the Abstract Syntax Tree of a 'pretype', i.e. something that
 /// syntactically looks like a Hygge type (found e.g. in type ascriptions).
 [<RequireQualifiedAccess>]
 type PretypeNode =
@@ -88,6 +88,10 @@ and Expr<'E,'T> =
 
     /// Addition between lhs and rhs.
     | Add of lhs: Node<'E,'T>
+           * rhs: Node<'E,'T>
+    
+    /// Subtraction of lhs with rhs    
+    | Sub of lhs: Node<'E,'T>
            * rhs: Node<'E,'T>
 
     /// Multiplication between lhs and rhs.

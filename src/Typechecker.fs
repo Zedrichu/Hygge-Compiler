@@ -70,7 +70,7 @@ let internal getOkValue (x: Result<'R,'E>): 'R =
     | Error(es) -> failwith $"BUG: unexpected error: %O{es}"
 
 
-/// Transform the given pretype into a full-fledget type, if possible, using the
+/// Transform the given pretype into a full-fledged type, if possible, using the
 /// given environment.  Return the resulting Type, or errors.
 let rec internal resolvePretype (env: TypingEnv) (pt: AST.PretypeNode): Result<Type, TypeErrors> =
     match pt.Pretype with
@@ -149,6 +149,12 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         match (binaryNumericalOpTyper "addition" node.Pos env lhs rhs) with
         | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Add(tlhs, trhs) }
+        | Error(es) -> Error(es)
+        
+    | Sub(lhs, rhs) ->
+        match (binaryNumericalOpTyper "subtraction" node.Pos env lhs rhs) with
+        | Ok(tpe, tlhs, trhs) ->
+            Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Sub(tlhs, trhs) }
         | Error(es) -> Error(es)
 
     | Mult(lhs, rhs) ->

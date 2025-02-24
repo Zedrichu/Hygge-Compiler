@@ -25,6 +25,8 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 
     | Add(lhs, rhs) ->
         {node with Expr = Add((subst lhs var sub), (subst rhs var sub))}
+    | Sub(lhs, rhs) ->
+        {node with Expr = Sub((subst lhs var sub), (subst rhs var sub))}
     | Mult(lhs, rhs) ->
         {node with Expr = Mult((subst lhs var sub), (subst rhs var sub))}
 

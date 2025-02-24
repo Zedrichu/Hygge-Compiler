@@ -373,7 +373,7 @@ type RV =
     | FCLASS_S of rd: Reg * rs: FPReg
     // Insert a label in the generated assembly (not really an instruction)
     | LABEL of label: string
-    // Insert a label in the generated assembly (not really an instruction)
+    // Insert a comment in the generated assembly (not really an instruction)
     | COMMENT of text: string
 
     /// String representation of this RISC-V assembly statement.
