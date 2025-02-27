@@ -13,6 +13,7 @@
     <FsYaccOutputFolder>src/</FsYaccOutputFolder>
     <!-- Build settings -->
     <TargetFramework>net9.0</TargetFramework>
+<!--    <TargetFramework>net8.0</TargetFramework>-->
     <GenerateProgramFile>false</GenerateProgramFile>
     <LangVersion>preview</LangVersion>
     <RootNamespace>HyggeC</RootNamespace> <!-- Needed for reverse indexes in Parser.fsy -->
@@ -132,6 +133,7 @@
     <Content Include="tests\interpreter\pass\006-let-shadow.hyg" />
     <Content Include="tests\interpreter\pass\000-subtraction.hyg" />
     <Content Include="tests\interpreter\pass\008-sub.hyg" />
+    <Content Include="tests\interpreter\pass\009-greater.hyg" />
     <Content Include="tests\interpreter\fail\001-assert-mul.hyg" />
     <Content Include="tests\interpreter\fail\003-if.hyg" />
     <Content Include="tests\interpreter\fail\000-assert-add.hyg" />
