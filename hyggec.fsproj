@@ -67,6 +67,7 @@
     <Content Include="tests\typechecker\pass\012-div.hyg" />
     <Content Include="tests\typechecker\pass\013-mod.hyg" />
     <Content Include="tests\typechecker\pass\014-sqrt.hyg" />
+    <Content Include="tests\typechecker\pass\015-greater-than.hyg" />
     <Content Include="tests\typechecker\fail\011-let.hyg" />
     <Content Include="tests\typechecker\fail\007-ascription.hyg" />
     <Content Include="tests\typechecker\fail\008-ascription.hyg" />
@@ -92,6 +93,7 @@
     <Content Include="tests\codegen\pass\004-assert-if.hyg" />
     <Content Include="tests\codegen\pass\006-let-shadow.hyg" />
     <Content Include="tests\codegen\pass\008-sub.hyg" />
+    <Content Include="tests\codegen\pass\009-greater.hyg" />
     <Content Include="tests\codegen\fail\001-assert-mul.hyg" />
     <Content Include="tests\codegen\fail\000-assert-add.hyg" />
     <Content Include="tests\parser\pass\008-let.hyg" />
@@ -109,6 +111,8 @@
     <Content Include="tests\parser\pass\012-bool-minus.hyg" />
     <Content Include="tests\parser\pass\013-divmod.hyg" />
     <Content Include="tests\parser\pass\014-sqrt.hyg" />
+    <Content Include="tests\parser\pass\015-less.hyg" />
+    <Content Include="tests\parser\pass\016-greater.hyg" />
     <Content Include="tests\parser\fail\000-numerical.hyg" />
     <Content Include="tests\parser\fail\003-ascription.hyg" />
     <Content Include="tests\parser\fail\002-ascription.hyg" />
@@ -118,6 +122,7 @@
     <Content Include="tests\lexer\pass\002-values.hyg" />
     <Content Include="tests\lexer\pass\003-minus.hyg" />
     <Content Include="tests\lexer\pass\004-divmodsqrt.hyg" />
+    <Content Include="tests\lexer\pass\005-ltgtgele.hyg" />
     <Content Include="tests\lexer\fail\001-invalid.hyg" />
     <Content Include="tests\lexer\fail\003-string.hyg" />
     <Content Include="tests\lexer\fail\000-invalid.hyg" />
@@ -133,7 +138,6 @@
     <Content Include="tests\interpreter\pass\006-let-shadow.hyg" />
     <Content Include="tests\interpreter\pass\000-subtraction.hyg" />
     <Content Include="tests\interpreter\pass\008-sub.hyg" />
-    <Content Include="tests\interpreter\pass\009-greater.hyg" />
     <Content Include="tests\interpreter\fail\001-assert-mul.hyg" />
     <Content Include="tests\interpreter\fail\003-if.hyg" />
     <Content Include="tests\interpreter\fail\000-assert-add.hyg" />

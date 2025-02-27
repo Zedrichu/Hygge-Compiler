@@ -134,7 +134,7 @@ and Expr<'E,'T> =
     
     // Comparison: is the lhs less than or equal to the rhs?
     | LessEq of lhs: Node<'E,'T>
-            * rhs: Node<'E,'T>
+              * rhs: Node<'E,'T>
     
     // Comparison: is the lhs greater than or equal to the rhs?
     | GreaterEq of lhs: Node<'E,'T>
