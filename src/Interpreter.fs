@@ -97,7 +97,40 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Sub(lhs', rhs')})
             | None -> None
+    | Div(lhs, rhs) ->
+        match (lhs.Expr, rhs.Expr) with
+        | IntVal(v1), IntVal(v2) when v2 <> 0 ->
+            Some(env, {node with Expr = IntVal(v1 / v2)})
+        | FloatVal(v1), FloatVal(v2) when v2 <> 0f ->
+            Some(env, {node with Expr = FloatVal(v1 / v2)})
+        | IntVal(v1), IntVal(v2) when v2 = 0 ->
+            failwith "Division by zero"
+        | FloatVal(v1), FloatVal(v2) when v2 = 0f ->
+            failwith "Division by zero"
+        | _, _ ->
+            match (reduceLhsRhs env lhs rhs) with
+            | Some(env', lhs', rhs') ->
+                Some(env', {node with Expr = Div(lhs', rhs')})
+            | None -> None
+    
+    | Mod(lhs, rhs) ->
+        match (lhs.Expr, rhs.Expr) with
+        | IntVal(v1), IntVal(v2) ->
+            Some(env, {node with Expr = IntVal(v1 % v2)})
+        | _,_ ->
+            match(reduceLhsRhs env lhs rhs) with
+            | Some(env', lhs', rhs') ->
+                Some(env', {node with Expr = Mod(lhs', rhs')})
+            | None -> None    
+    
 
+    | Sqrt(arg) ->
+        match arg.Expr with
+        | IntVal(value) when value >= 0 ->
+            None
+            // Some(env, {node with Expr = FloatVal(System.Math.Sqrt(single value))}) 
+        
+        
     | And(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | (BoolVal(v1), BoolVal(v2)) ->

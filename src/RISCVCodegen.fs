@@ -108,6 +108,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
     | Add(lhs, rhs)
     | Sub(lhs, rhs)
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs)
     | Mult(lhs, rhs) as expr ->
         // Code generation for addition and multiplication is very
         // similar: we compile the lhs and rhs giving them different target
@@ -135,6 +137,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     | Mult(_,_) ->
                         Asm(RV.MUL(Reg.r(env.Target),
                                    Reg.r(env.Target), Reg.r(rtarget)))
+                    | Div(_,_) ->
+                        Asm(RV.DIV(Reg.r(env.Target),
+                                   Reg.r(env.Target), Reg.r(rtarget)))
+                    | Mod(_,_) ->
+                        Asm(RV.REM(Reg.r(env.Target),
+                                   Reg.r(env.Target), Reg.r(rtarget)))
                     | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
             lAsm ++ rAsm ++ opAsm
@@ -155,11 +163,32 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 | Mult(_,_) ->
                     Asm(RV.FMUL_S(FPReg.r(env.FPTarget),
                                   FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
+                | Div(_,_) ->
+                    Asm(RV.FDIV_S(FPReg.r(env.FPTarget),
+                                  FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
             lAsm ++ rAsm ++ opAsm
         | t ->
             failwith $"BUG: numerical operation codegen invoked on invalid type %O{t}"
+            
+    | Sqrt(arg) ->
+        //Code generation for the Square Root Operator
+        
+        // Generate code for the argument expression
+        let argAsm = doCodegen env arg
+        
+        let opAsm =
+            match arg.Type with
+            | TFloat ->
+                Asm(RV.FSQRT_S(FPReg.r(env.FPTarget), FPReg.r(env.FPTarget)))
+                
+            | TInt ->
+                Asm(RV.FCVT_S_W(FPReg.r(env.FPTarget), Reg.r(env.Target))) ++
+                Asm(RV.FSQRT_S(FPReg.r(env.FPTarget), FPReg.r(env.FPTarget)))
+                
+        argAsm ++ opAsm
+               
 
     | And(lhs, rhs)
     | Or(lhs, rhs) as expr ->

@@ -103,6 +103,12 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
                            ("rhs", formatASTRec rhs)]
     | Sqrt(arg) ->
         mkTree "Sqrt" node [("arg", formatASTRec arg)]
+    | Min(lhs, rhs) ->
+        mkTree "Min" node [("lhs", formatASTRec lhs)
+                           ("rhs", formatASTRec rhs)]
+    | Max(lhs, rhs) ->
+        mkTree "Max" node [("lhs", formatASTRec lhs)
+                           ("rhs", formatASTRec rhs)]
     
     | And(lhs, rhs) ->
         mkTree "And" node [("lhs", formatASTRec lhs)

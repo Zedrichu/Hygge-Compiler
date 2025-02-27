@@ -82,6 +82,7 @@
     <Content Include="tests\typechecker\fail\001-add.hyg" />
     <Content Include="tests\typechecker\fail\009-assert.hyg" />
     <Content Include="tests\typechecker\fail\015-type-alias.hyg" />
+    <Content Include="tests\typechecker\fail\016-mod-float-arg.hyg" />
     <Content Include="tests\codegen\pass\002-assert-mul.hyg" />
     <Content Include="tests\codegen\pass\000-addition.hyg" />
     <Content Include="tests\codegen\pass\003-mul-add.hyg" />
@@ -91,6 +92,9 @@
     <Content Include="tests\codegen\pass\004-assert-if.hyg" />
     <Content Include="tests\codegen\pass\006-let-shadow.hyg" />
     <Content Include="tests\codegen\pass\008-sub.hyg" />
+    <Content Include="tests\codegen\pass\009-div.hyg" />
+    <Content Include="tests\codegen\pass\010-mod.hyg" />
+    <Content Include="tests\codegen\pass\011-sqrt.hyg" />
     <Content Include="tests\codegen\fail\001-assert-mul.hyg" />
     <Content Include="tests\codegen\fail\000-assert-add.hyg" />
     <Content Include="tests\parser\pass\008-let.hyg" />
@@ -108,6 +112,8 @@
     <Content Include="tests\parser\pass\012-bool-minus.hyg" />
     <Content Include="tests\parser\pass\013-divmod.hyg" />
     <Content Include="tests\parser\pass\014-sqrt.hyg" />
+    <Content Include="tests\parser\pass\015-min.hyg" />
+    <Content Include="tests\parser\pass\016-max.hyg" />
     <Content Include="tests\parser\fail\000-numerical.hyg" />
     <Content Include="tests\parser\fail\003-ascription.hyg" />
     <Content Include="tests\parser\fail\002-ascription.hyg" />
@@ -117,6 +123,7 @@
     <Content Include="tests\lexer\pass\002-values.hyg" />
     <Content Include="tests\lexer\pass\003-minus.hyg" />
     <Content Include="tests\lexer\pass\004-divmodsqrt.hyg" />
+    <Content Include="tests\lexer\pass\005-minmax.hyg" />
     <Content Include="tests\lexer\fail\001-invalid.hyg" />
     <Content Include="tests\lexer\fail\003-string.hyg" />
     <Content Include="tests\lexer\fail\000-invalid.hyg" />
