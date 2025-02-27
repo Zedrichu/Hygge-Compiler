@@ -48,13 +48,13 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 %token <unit> LIT_UNIT
 
 // Tokens for arithmetic operators
-%token TIMES PLUS MINUS
+%token TIMES PLUS MINUS DIV MOD SQRT
 
 // Tokens for logical operators
 %token AND OR NOT
 
 // Tokens for relational operators
-%token EQ LT
+%token EQ LT GT LTE
 
 // Tokens for control flow
 %token IF THEN ELSE
@@ -152,6 +152,8 @@ andExpr:
 relExpr:
   | addExpr EQ addExpr  { mkNode(parseState, 2, Expr.Eq($1, $3)) }
   | addExpr LT addExpr  { mkNode(parseState, 2, Expr.Less($1, $3)) }
+  | addExpr GT addExpr  { mkNode(parseState, 2, Expr.Greater($1, $3)) }
+  | addExpr LTE addExpr  { mkNode(parseState, 2, Expr.LessEq($1, $3)) }
   | addExpr             { $1 }
 
 // Additive expression
@@ -163,6 +165,8 @@ addExpr:
 // Multiplicative expression
 multExpr:
   | multExpr TIMES unaryExpr  { mkNode(parseState, 2, Expr.Mult($1, $3)) }
+  | multExpr DIV unaryExpr    { mkNode(parseState, 2, Expr.Div($1, $3)) }
+  | multExpr MOD unaryExpr    { mkNode(parseState, 2, Expr.Mod($1, $3)) }
   | unaryExpr                 { $1 }
 
 // Unary expression
@@ -174,6 +178,7 @@ unaryExpr:
   | READ_FLOAT LPAR RPAR          { mkNode(parseState, 1, Expr.ReadFloat) }
   | PRINT LPAR simpleExpr RPAR    { mkNode(parseState, 1, Expr.Print($3)) }
   | PRINTLN LPAR simpleExpr RPAR  { mkNode(parseState, 1, Expr.PrintLn($3)) }
+  | SQRT LPAR simpleExpr RPAR     { mkNode(parseState, 1, Expr.Sqrt($3)) }
   | ASSERT LPAR simpleExpr RPAR   { mkNode(parseState, 1, Expr.Assertion($3)) }
   | ascriptionExpr                { $1 }
 

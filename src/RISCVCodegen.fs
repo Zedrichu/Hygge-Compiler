@@ -401,9 +401,14 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
     | Assertion(arg) ->
         /// Label to jump to when the assertion is true
         let passLabel = Util.genSymbol "assert_true"
+        
+        let assertionFailString = arg.ToString()
+        // Reconstruct the AST to do a printout and then exit as usual for assertion
+        
         // Check the assertion, and jump to 'passLabel' if it is true;
         // otherwise, fail
         (doCodegen env arg)
+            // .AddData([])
             .AddText([
                 (RV.ADDI(Reg.r(env.Target), Reg.r(env.Target), Imm12(-1)), "")
                 (RV.BEQZ(Reg.r(env.Target), passLabel), "Jump if assertion OK")

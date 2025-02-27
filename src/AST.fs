@@ -90,13 +90,24 @@ and Expr<'E,'T> =
     | Add of lhs: Node<'E,'T>
            * rhs: Node<'E,'T>
     
-    /// Subtraction of lhs with rhs    
+    /// Subtraction of lhs with rhs.
     | Sub of lhs: Node<'E,'T>
            * rhs: Node<'E,'T>
 
     /// Multiplication between lhs and rhs.
     | Mult of lhs: Node<'E,'T>
             * rhs: Node<'E,'T>
+    
+    /// Division between lhs and rhs.    
+    | Div of lhs: Node<'E, 'T>
+           * rhs: Node<'E, 'T>
+    
+    /// Modulo between lhs and rhs.      
+    | Mod of lhs: Node<'E, 'T>
+           * rhs: Node<'E, 'T>
+
+    /// Square root operation on argument.    
+    | Sqrt of arg: Node<'E, 'T>
 
     /// Logical and between lhs and rhs.
     | And of lhs: Node<'E,'T>
@@ -116,7 +127,14 @@ and Expr<'E,'T> =
     /// Comparison: is the lhs less than the rhs?
     | Less of lhs: Node<'E,'T>
             * rhs: Node<'E,'T>
-
+    
+    /// Comparison: is the lhs greater than the rhs?
+    | Greater of lhs: Node<'E,'T>
+               * rhs: Node<'E,'T>
+    
+    // Comparison: is the lhs less that or equal to the rhs?
+    | LessEq of lhs: Node<'E,'T>
+            * rhs: Node<'E,'T>
     /// Read an integer value from the console.
     | ReadInt
 

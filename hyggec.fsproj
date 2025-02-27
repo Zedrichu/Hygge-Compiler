@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <!-- General -->
-    <AssemblyName>Hyggec</AssemblyName>
+    <AssemblyName>HyggeC</AssemblyName>
     <Version>0.0.3</Version>
     <Description>A didactic compiler for the Hygge programming language.</Description>
     <Copyright>Copyright 2025 DTU - Technical University of Denmark</Copyright>
@@ -15,7 +15,8 @@
     <TargetFramework>net9.0</TargetFramework>
     <GenerateProgramFile>false</GenerateProgramFile>
     <LangVersion>preview</LangVersion>
-    <RootNamespace>Hyggec</RootNamespace> <!-- Needed for reverse indexes in Parser.fsy -->
+    <RootNamespace>HyggeC</RootNamespace> <!-- Needed for reverse indexes in Parser.fsy -->
+    <Company>Zedrichu</Company> 
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="src/Log.fs" />
@@ -62,6 +63,9 @@
     <Content Include="tests\typechecker\pass\009-assert.hyg" />
     <Content Include="tests\typechecker\pass\011-type-alias.hyg" />
     <Content Include="tests\typechecker\pass\011-sub.hyg" />
+    <Content Include="tests\typechecker\pass\012-div.hyg" />
+    <Content Include="tests\typechecker\pass\013-mod.hyg" />
+    <Content Include="tests\typechecker\pass\014-sqrt.hyg" />
     <Content Include="tests\typechecker\fail\011-let.hyg" />
     <Content Include="tests\typechecker\fail\007-ascription.hyg" />
     <Content Include="tests\typechecker\fail\008-ascription.hyg" />
@@ -102,6 +106,8 @@
     <Content Include="tests\parser\pass\001-numerical.hyg" />
     <Content Include="tests\parser\pass\011-minus.hyg" />
     <Content Include="tests\parser\pass\012-bool-minus.hyg" />
+    <Content Include="tests\parser\pass\013-divmod.hyg" />
+    <Content Include="tests\parser\pass\014-sqrt.hyg" />
     <Content Include="tests\parser\fail\000-numerical.hyg" />
     <Content Include="tests\parser\fail\003-ascription.hyg" />
     <Content Include="tests\parser\fail\002-ascription.hyg" />
@@ -110,6 +116,7 @@
     <Content Include="tests\lexer\pass\000-reserved.hyg" />
     <Content Include="tests\lexer\pass\002-values.hyg" />
     <Content Include="tests\lexer\pass\003-minus.hyg" />
+    <Content Include="tests\lexer\pass\004-divmodsqrt.hyg" />
     <Content Include="tests\lexer\fail\001-invalid.hyg" />
     <Content Include="tests\lexer\fail\003-string.hyg" />
     <Content Include="tests\lexer\fail\000-invalid.hyg" />

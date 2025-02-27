@@ -162,7 +162,28 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Mult(tlhs, trhs) }
         | Error(es) -> Error(es)
+       
+    | Div(lhs, rhs) ->
+        match (binaryNumericalOpTyper "division" node.Pos env lhs rhs) with
+        | Ok(tpe, tlhs, trhs) ->
+            Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Div(tlhs, trhs) }
+        | Error(es) -> Error(es)
 
+    | Mod(lhs, rhs) ->
+        match (binaryNumericalOpTyper "modulo" node.Pos env lhs rhs) with
+        | Ok(tpe, tlhs, trhs) ->
+            Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Mod(tlhs, trhs) }
+        | Error(es) -> Error(es)
+    
+    | Sqrt(arg) ->
+        match (typer env arg) with
+        | Ok(targ) when ((isSubtypeOf env targ.Type TFloat) || (isSubtypeOf env targ.Type TInt)) ->
+            Ok { Pos = node.Pos; Env = env; Type = TFloat; Expr = Sqrt(targ) }
+        | Ok(targ) ->
+             Error([(node.Pos, $"'sqrt' operator: expected type %O{TFloat} or %O{TInt}, "
+                              + $"found %O{targ.Type}")])
+        | Error(es) -> Error(es)
+    
     | And(lhs, rhs) ->
         match (binaryBooleanOpTyper "and" node.Pos env lhs rhs) with
         | Ok(tlhs, trhs) ->

@@ -29,7 +29,13 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         {node with Expr = Sub((subst lhs var sub), (subst rhs var sub))}
     | Mult(lhs, rhs) ->
         {node with Expr = Mult((subst lhs var sub), (subst rhs var sub))}
-
+    | Div(lhs, rhs) ->
+        {node with Expr = Div((subst lhs var sub), (subst rhs var sub))}
+    | Mod(lhs, rhs) ->
+        {node with Expr = Mod((subst lhs var sub), (subst rhs var sub))}
+    | Sqrt(arg) ->
+        {node with Expr = Sqrt(subst arg var sub)}
+    
     | And(lhs, rhs) ->
         {node with Expr = And((subst lhs var sub), (subst rhs var sub))}
     | Or(lhs, rhs) ->

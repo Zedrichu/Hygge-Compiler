@@ -95,6 +95,14 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | Sub(lhs, rhs) ->
         mkTree "Sub" node [("lhs", formatASTRec lhs)
                            ("rhs", formatASTRec rhs)]
+    | Div(lhs, rhs) ->
+        mkTree "Div" node [("lhs", formatASTRec lhs)
+                           ("rhs", formatASTRec rhs)]
+    | Mod(lhs, rhs) ->
+        mkTree "Mod" node [("lhs", formatASTRec lhs)
+                           ("rhs", formatASTRec rhs)]
+    | Sqrt(arg) ->
+        mkTree "Sqrt" node [("arg", formatASTRec arg)]
     
     | And(lhs, rhs) ->
         mkTree "And" node [("lhs", formatASTRec lhs)
@@ -110,6 +118,12 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | Less(lhs, rhs) ->
         mkTree "Less" node [("lhs", formatASTRec lhs)
                             ("rhs", formatASTRec rhs)]
+    | Greater(lhs, rhs) ->
+        mkTree "Greater" node [("lhs", formatASTRec lhs)
+                               ("rhs", formatASTRec rhs)]
+    | LessEq(lhs, rhs) ->
+        mkTree "LessEq" node [("lhs", formatASTRec lhs)
+                              ("rhs", formatASTRec rhs)]  
     | ReadInt -> mkTree "ReadInt" node []
     | ReadFloat -> mkTree "ReadFloat" node []
     | Print(arg) ->

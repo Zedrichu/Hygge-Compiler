@@ -52,13 +52,18 @@ rule tokenize = parse
 
 // Operators
 | "*"          { Parser.TIMES }
+| "/"          { Parser.DIV }
 | "+"          { Parser.PLUS }
 | "-"          { Parser.MINUS }
+| "%"          { Parser.MOD }
+| "sqrt"       { Parser.SQRT }
 | "and"        { Parser.AND }
 | "or"         { Parser.OR }
 | "not"        { Parser.NOT }
 | "="          { Parser.EQ }
 | "<"          { Parser.LT }
+| ">"          { Parser.GT }
+| "<="         { Parser.LTE }
 
 // Parentheses and brackets
 | "("          { Parser.LPAR }
