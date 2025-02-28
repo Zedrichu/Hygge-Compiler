@@ -166,7 +166,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // Code generation for logical 'and' and 'or' is very similar: we
         // compile the lhs and rhs giving them different target registers, and
         // then apply the relevant assembly operation(s) on their results.
-        
+
         /// Generated code for the lhs expression
         let lAsm = doCodegen env lhs
         /// Target register for the rhs expression
@@ -191,10 +191,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         asm.AddText(RV.SEQZ(Reg.r(env.Target), Reg.r(env.Target)))
 
     | Eq(lhs, rhs)
-    | Greater(lhs, rhs)
-    | GreaterEq(lhs, rhs)
+    | Less(lhs, rhs)
     | LessEq(lhs, rhs)
-    | Less(lhs, rhs) as expr ->
+    | Greater(lhs, rhs)
+    | GreaterEq(lhs, rhs) as expr ->
         // Code generation for equality and less-than relations is very similar:
         // we compile the lhs and rhs giving them different target registers,
         // and then apply the relevant assembly operation(s) on their results.
@@ -218,15 +218,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let rtarget = env.Target + 1u
             /// Generated code for the rhs expression
             let rAsm = doCodegen {env with Target = rtarget} rhs
-            
+
             /// Human-readable prefix for jump labels, describing the kind of
             /// relational operation we are compiling
             let labelName = match expr with
                             | Eq(_,_) -> "eq"
                             | Less(_,_) -> "less"
+                            | LessEq(_,_) -> "lesseq"
                             | Greater(_,_) -> "greater"
                             | GreaterEq(_,_) -> "greatereq"
-                            | LessEq(_,_) -> "lesseq"
                             | x -> failwith $"BUG: unexpected operation %O{x}"
             /// Label to jump to when the comparison is true
             let trueLabel = Util.genSymbol $"%O{labelName}_true"
@@ -240,12 +240,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     Asm(RV.BEQ(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
                 | Less(_,_) ->
                     Asm(RV.BLT(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
-                | Greater(_,_) ->
-                    Asm(RV.BLT(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
-                | GreaterEq(_,_) ->
-                    Asm(RV.BLT(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
                 | LessEq(_,_) ->
-                    Asm(RV.BLT(Reg.r(env.Target), Reg.r(rtarget), trueLabel))   
+                    Asm(RV.BLE(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
+                | Greater(_,_) ->
+                    Asm(RV.BGT(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
+                | GreaterEq(_,_) ->
+                    Asm(RV.BGE(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
 
             // Put everything together
@@ -269,12 +269,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     Asm(RV.FEQ_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
                 | Less(_,_) ->
                     Asm(RV.FLT_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | Greater(_,_) ->
-                    Asm(RV.FLT_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | GreaterEq(_,_) ->
-                    Asm(RV.FLT_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
                 | LessEq(_,_) ->
-                    Asm(RV.FLT_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
+                    Asm(RV.FLE_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
+                | Greater(_,_) ->
+                    Asm(RV.FGT_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
+                | GreaterEq(_,_) ->
+                    Asm(RV.FGE_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
             (lAsm ++ rAsm ++ opAsm)
@@ -419,10 +419,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
     | Assertion(arg) ->
         /// Label to jump to when the assertion is true
         let passLabel = Util.genSymbol "assert_true"
-        
+
         let assertionFailString = arg.ToString()
         // Reconstruct the AST to do a printout and then exit as usual for assertion
-        
+
         // Check the assertion, and jump to 'passLabel' if it is true;
         // otherwise, fail
         (doCodegen env arg)
