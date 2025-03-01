@@ -1,0 +1,5 @@
+assert(5 <= 2);
+assert(10.0f <= 1.1f);
+
+assert(5 >= 20);
+assert(10.0f >= 11.0f)

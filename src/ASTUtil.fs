@@ -51,7 +51,12 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         {node with Expr = Eq((subst lhs var sub), (subst rhs var sub))}
     | Less(lhs, rhs) ->
         {node with Expr = Less((subst lhs var sub), (subst rhs var sub))}
-
+    | Greater(lhs, rhs) ->
+        {node with Expr = Greater((subst lhs var sub), (subst rhs var sub))}
+    | LessEq(lhs, rhs) ->
+        {node with Expr = LessEq((subst lhs var sub), (subst rhs var sub))}
+    | GreaterEq(lhs, rhs) ->
+        {node with Expr = GreaterEq((subst lhs var sub), (subst rhs var sub))}
     | ReadInt
     | ReadFloat -> node // The substitution has no effect
 

@@ -369,6 +369,8 @@ type RV =
     | FEQ_S of rd: Reg * rs1: FPReg * rs2: FPReg
     | FLT_S of rd: Reg * rs1: FPReg * rs2: FPReg
     | FLE_S of rd: Reg * rs1: FPReg * rs2: FPReg
+    | FGT_S of rd: Reg * rs1: FPReg * rs2: FPReg
+    | FGE_S of rd: Reg * rs1: FPReg * rs2: FPReg
     // Single-precision floating-point extension: classification instructions
     | FCLASS_S of rd: Reg * rs: FPReg
     // Insert a label in the generated assembly (not really an instruction)
@@ -476,6 +478,8 @@ type RV =
         | FEQ_S(rd, rs1, rs2) -> $"feq.s %O{rd}, %O{rs1}, %O{rs2}"
         | FLT_S(rd, rs1, rs2) -> $"flt.s %O{rd}, %O{rs1}, %O{rs2}"
         | FLE_S(rd, rs1, rs2) -> $"fle.s %O{rd}, %O{rs1}, %O{rs2}"
+        | FGT_S(rd, rs1, rs2) -> $"fgt.s %O{rd}, %O{rs1}, %O{rs2}"
+        | FGE_S(rd, rs1, rs2) -> $"fge.s %O{rd}, %O{rs1}, %O{rs2}"
         | FCLASS_S(rd, rs) -> $"fclass %O{rd}, %O{rs}"
         | LABEL l -> $"%O{l}:"
         | COMMENT(text) -> $"# %s{text}"

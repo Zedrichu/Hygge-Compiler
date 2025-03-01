@@ -127,6 +127,9 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | Greater(lhs, rhs) ->
         mkTree "Greater" node [("lhs", formatASTRec lhs)
                                ("rhs", formatASTRec rhs)]
+    | GreaterEq(lhs, rhs) ->
+        mkTree "GreaterEq" node [("lhs", formatASTRec lhs)
+                                 ("rhs", formatASTRec rhs)]
     | LessEq(lhs, rhs) ->
         mkTree "LessEq" node [("lhs", formatASTRec lhs)
                               ("rhs", formatASTRec rhs)]  
