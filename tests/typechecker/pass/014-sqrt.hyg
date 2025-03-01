@@ -1,2 +1,2 @@
-sqrt(6):float
-sqrt(2.0f):float
+(sqrt(6)): float;
+(sqrt(2.0f)): float

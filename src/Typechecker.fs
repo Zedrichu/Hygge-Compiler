@@ -171,8 +171,11 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
 
     | Mod(lhs, rhs) ->
         match (binaryNumericalOpTyper "modulo" node.Pos env lhs rhs) with
-        | Ok(tpe, tlhs, trhs) ->
+        | Ok(tpe, tlhs, trhs) when tpe = TInt ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Mod(tlhs, trhs) }
+        | Ok(tpe, _, _) ->
+             Error([(node.Pos, $"'mod' operator: expected type %O{TInt}, "
+                              + $"found %O{tpe}")])
         | Error(es) -> Error(es)
     
     | Sqrt(arg) ->
@@ -183,7 +186,26 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
              Error([(node.Pos, $"'sqrt' operator: expected type %O{TFloat} or %O{TInt}, "
                               + $"found %O{targ.Type}")])
         | Error(es) -> Error(es)
-    
+        
+    | Min(lhs,rhs) ->
+        match (binaryNumericalOpTyper "minimize" node.Pos env lhs rhs) with
+        | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
+            Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Min(tlhs, trhs) }
+        | Ok(tpe, _, _) ->
+             Error([(node.Pos, $"'min' operator: expected type %O{TInt} or %O{TFloat}, "
+                              + $"found %O{tpe}")])
+        | Error(es) -> Error(es)
+        
+     | Max(lhs,rhs) ->
+        match (binaryNumericalOpTyper "maximize" node.Pos env lhs rhs) with
+        | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
+            Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Max(tlhs, trhs) }
+        | Ok(tpe, _, _) ->
+             Error([(node.Pos, $"'max' operator: expected type %O{TInt} or %O{TFloat}, "
+                              + $"found %O{tpe}")])
+        | Error(es) -> Error(es)
+        
+        
     | And(lhs, rhs) ->
         match (binaryBooleanOpTyper "and" node.Pos env lhs rhs) with
         | Ok(tlhs, trhs) ->
