@@ -1,0 +1,2 @@
+assert(min(3, 4) = 3);
+assert(min(2.3f, 1.5f) = 1.5f)

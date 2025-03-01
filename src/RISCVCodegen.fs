@@ -110,6 +110,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
     | Sub(lhs, rhs)
     | Div(lhs, rhs)
     | Mod(lhs, rhs)
+    | Max(lhs, rhs)
+    | Min(lhs, rhs)
     | Mult(lhs, rhs) as expr ->
         // Code generation for addition and multiplication is very
         // similar: we compile the lhs and rhs giving them different target
@@ -125,6 +127,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let rtarget = env.Target + 1u
             /// Generated code for the rhs expression
             let rAsm = doCodegen {env with Target = rtarget} rhs
+            let label = Util.genSymbol "minmax_done"
             /// Generated code for the numerical operation
             let opAsm =
                 match expr with
@@ -143,6 +146,14 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     | Mod(_,_) ->
                         Asm(RV.REM(Reg.r(env.Target),
                                    Reg.r(env.Target), Reg.r(rtarget)))
+                    | Min(_,_) ->
+                        Asm(RV.BLT(Reg.r(env.Target), Reg.r(rtarget), label)) ++
+                        Asm(RV.MV(Reg.r(env.Target), Reg.r(rtarget))) ++
+                        Asm(RV.LABEL(label))
+                    | Max(_,_) ->
+                        Asm(RV.BLT(Reg.r(rtarget), Reg.r(env.Target), label)) ++
+                        Asm(RV.MV(Reg.r(env.Target), Reg.r(rtarget))) ++
+                        Asm(RV.LABEL(label))
                     | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
             lAsm ++ rAsm ++ opAsm
@@ -151,6 +162,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let rfptarget = env.FPTarget + 1u
             /// Generated code for the rhs expression
             let rAsm = doCodegen {env with FPTarget = rfptarget} rhs
+            let label = Util.genSymbol "minmax_done"
             /// Generated code for the numerical operation
             let opAsm =
                 match expr with
@@ -166,6 +178,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 | Div(_,_) ->
                     Asm(RV.FDIV_S(FPReg.r(env.FPTarget),
                                   FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
+                | Min(_,_) ->
+                    Asm(RV.FLT_S(Reg.r(env.Target), FPReg.r(rfptarget), FPReg.r(env.FPTarget))) ++
+                    Asm(RV.BEQ(Reg.r(env.Target), Reg.zero, label)) ++
+                    Asm(RV.FMV_S(FPReg.r(env.FPTarget), FPReg.r(rfptarget))) ++
+                    Asm(RV.LABEL(label))
+                | Max(_,_) ->
+                    Asm(RV.FLT_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget))) ++
+                    Asm(RV.BEQ(Reg.r(env.Target), Reg.zero, label)) ++
+                    Asm(RV.FMV_S(FPReg.r(env.FPTarget), FPReg.r(rfptarget))) ++
+                    Asm(RV.LABEL(label))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
             lAsm ++ rAsm ++ opAsm
@@ -186,6 +208,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | TInt ->
                 Asm(RV.FCVT_S_W(FPReg.r(env.FPTarget), Reg.r(env.Target))) ++
                 Asm(RV.FSQRT_S(FPReg.r(env.FPTarget), FPReg.r(env.FPTarget)))
+            | _ -> failwith $"BUG: sqrt operation codegen invoked on invalid type %O{arg.Type}"
                 
         argAsm ++ opAsm
                
