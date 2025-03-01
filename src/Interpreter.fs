@@ -7,6 +7,7 @@
 module Interpreter
 
 open AST
+open System
 
 
 /// Does the given AST node represent a value?
@@ -97,6 +98,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Sub(lhs', rhs')})
             | None -> None
+            
     | Div(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | IntVal(v1), IntVal(v2) when v2 <> 0 ->
@@ -104,9 +106,9 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | FloatVal(v1), FloatVal(v2) when v2 <> 0f ->
             Some(env, {node with Expr = FloatVal(v1 / v2)})
         | IntVal(v1), IntVal(v2) when v2 = 0 ->
-            failwith "Division by zero"
+            None // Division by zero
         | FloatVal(v1), FloatVal(v2) when v2 = 0f ->
-            failwith "Division by zero"
+            None // Division by zero
         | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
@@ -122,15 +124,49 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Mod(lhs', rhs')})
             | None -> None    
-    
 
     | Sqrt(arg) ->
         match arg.Expr with
         | IntVal(value) when value >= 0 ->
-            None
-            // Some(env, {node with Expr = FloatVal(System.Math.Sqrt(single value))}) 
+            let sqrt = Math.Sqrt(float value)
+            Some(env, {node with Expr = FloatVal(float32 sqrt)})
+        | FloatVal(value) when value >= 0.0f ->
+            let sqrt = Math.Sqrt(float value)
+            Some(env, {node with Expr = FloatVal(float32 sqrt)})
+        | IntVal(value) when value < 0 ->
+            None // Negative square root
+        | FloatVal(value) when value < 0.0f ->
+            None // Negative square root
+        | _ ->
+            match (reduce env arg) with
+            | Some(env', arg2) ->
+                Some(env', {node with Expr = Sqrt(arg2)})
+            | None -> None
         
-        
+    | Min(lhs, rhs) ->
+        match (lhs.Expr, rhs.Expr) with
+        | (IntVal(v1), IntVal(v2)) ->
+            Some(env, {node with Expr = IntVal(min v1 v2)})
+        | (FloatVal(v1), FloatVal(v2)) ->
+            Some(env, {node with Expr = FloatVal(min v1 v2)})
+        | (_, _) ->
+            match (reduceLhsRhs env lhs rhs) with
+            | Some(env', lhs', rhs') ->
+                Some(env', {node with Expr = Min(lhs', rhs')})
+            | None -> None
+    
+    | Max(lhs, rhs) ->
+        match (lhs.Expr, rhs.Expr) with
+        | (IntVal(v1), IntVal(v2)) ->
+            Some(env, {node with Expr = IntVal(max v1 v2)})
+        | (FloatVal(v1), FloatVal(v2)) ->
+            Some(env, {node with Expr = FloatVal(max v1 v2)})
+        | (_, _) ->
+            match (reduceLhsRhs env lhs rhs) with
+            | Some(env', lhs', rhs') ->
+                Some(env', {node with Expr = Max(lhs', rhs')})
+            | None -> None
+            
     | And(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | (BoolVal(v1), BoolVal(v2)) ->
