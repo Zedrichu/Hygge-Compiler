@@ -1,0 +1,4 @@
+true xor true;
+(5 = 1) xor (1 < 3);
+false xor (true xor false);
+true and false xor false
