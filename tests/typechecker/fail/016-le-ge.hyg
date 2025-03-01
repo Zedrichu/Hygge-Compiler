@@ -1,0 +1,34 @@
+// Tests for type checking failures with <= and >= operators
+// File: 016-le-ge.hyg
+
+// Integer and string comparisons (should fail)
+1 <= "aa";
+"aa" <= 1;
+
+// Float and string comparisons (should fail)
+"aa" <= 10.0f;
+10.0f <= "aa";
+
+// Integer and string with >= (should fail)
+1 >= "aa";
+"aa" >= 1;
+
+// Float with missing semicolon (should fail for syntax and type error)
+1.1f >= 10.0f;
+
+// Boolean with other types (should fail)
+true <= 1;
+1 <= true;
+true >= "yes";
+"no" >= false;
+
+// Variables of different types
+let a = 10;
+let b = "ten";
+let c = 10.0f;
+let d = true;
+
+a <= b;  // int <= string
+b <= a;  // string <= int
+c <= b;  // float <= string
+d <= a  // bool <= int

@@ -151,7 +151,43 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Less(lhs', rhs')})
             | None -> None
+            
+    | LessEq(lhs, rhs) ->
+        match (lhs.Expr, rhs.Expr) with
+        | (IntVal(v1), IntVal(v2)) ->
+            Some(env, {node with Expr = BoolVal(v1 <= v2)})
+        | (FloatVal(v1), FloatVal(v2)) ->
+            Some(env, {node with Expr = BoolVal(v1 <= v2)})
+        | (_, _) ->
+            match (reduceLhsRhs env lhs rhs) with
+            | Some(env', lhs', rhs') ->
+                Some(env', {node with Expr = LessEq(lhs', rhs')})
+            | None -> None
+    
+    | Greater(lhs, rhs) ->
+        match (lhs.Expr, rhs.Expr) with
+        | (IntVal(v1), IntVal(v2)) ->
+            Some(env, {node with Expr = BoolVal(v1 > v2)})
+        | (FloatVal(v1), FloatVal(v2)) ->
+            Some(env, {node with Expr = BoolVal(v1 > v2)})
+        | (_, _) ->
+            match (reduceLhsRhs env lhs rhs) with
+            | Some(env', lhs', rhs') ->
+                Some(env', {node with Expr = Greater(lhs', rhs')})
+            | None -> None
 
+    | GreaterEq(lhs, rhs) ->
+        match (lhs.Expr, rhs.Expr) with
+        | (IntVal(v1), IntVal(v2)) ->
+            Some(env, {node with Expr = BoolVal(v1 >= v2)})
+        | (FloatVal(v1), FloatVal(v2)) ->
+            Some(env, {node with Expr = BoolVal(v1 >= v2)})
+        | (_, _) ->
+            match (reduceLhsRhs env lhs rhs) with
+            | Some(env', lhs', rhs') ->
+                Some(env', {node with Expr = GreaterEq(lhs', rhs')})
+            | None -> None
+    
     | ReadInt ->
         match env.Reader with
         | None -> None
