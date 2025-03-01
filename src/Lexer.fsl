@@ -59,6 +59,7 @@ rule tokenize = parse
 | "sqrt"       { Parser.SQRT }
 | "and"        { Parser.AND }
 | "or"         { Parser.OR }
+| "xor"         { Parser.XOR }
 | "not"        { Parser.NOT }
 | "="          { Parser.EQ }
 | "<"          { Parser.LT }

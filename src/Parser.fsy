@@ -51,7 +51,7 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 %token TIMES PLUS MINUS DIV MOD SQRT
 
 // Tokens for logical operators
-%token AND OR NOT
+%token AND OR NOT XOR
 
 // Tokens for relational operators
 %token EQ LT GT LE GE
