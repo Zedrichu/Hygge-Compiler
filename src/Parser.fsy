@@ -201,11 +201,12 @@ variable:
 
 // Literal constants
 value:
-  | LIT_BOOL    { mkNode(parseState, 1, Expr.BoolVal($1)) }
-  | LIT_INT     { mkNode(parseState, 1, Expr.IntVal($1)) }
-  | LIT_FLOAT   { mkNode(parseState, 1, Expr.FloatVal($1)) }
-  | LIT_STRING  { mkNode(parseState, 1, Expr.StringVal($1.[1..^1])) } // Trim quotes around string
-  | LIT_UNIT    { mkNode(parseState, 1, Expr.UnitVal) }
+  | LIT_BOOL        { mkNode(parseState, 1, Expr.BoolVal($1)) }
+  | MINUS LIT_INT   { mkNode(parseState, 1, Expr.IntVal(-$2)) }
+  | LIT_INT         { mkNode(parseState, 1, Expr.IntVal($1)) }
+  | LIT_FLOAT       { mkNode(parseState, 1, Expr.FloatVal($1)) }
+  | LIT_STRING      { mkNode(parseState, 1, Expr.StringVal($1.[1..^1])) } // Trim quotes around string
+  | LIT_UNIT        { mkNode(parseState, 1, Expr.UnitVal) }
 
 // Pretype specification
 pretype:
