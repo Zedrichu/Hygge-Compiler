@@ -1,0 +1,6 @@
+assert(true xor false);
+assert(false xor true);
+assert(false xor true and true);
+assert(true xor false and true);
+assert(true and false xor true);
+assert(true xor false xor false)
