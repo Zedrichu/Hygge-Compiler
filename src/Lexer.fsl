@@ -62,7 +62,9 @@ rule tokenize = parse
 | "max"        { Parser.MAX }
 | "and"        { Parser.AND }
 | "or"         { Parser.OR }
-| "xor"         { Parser.XOR }
+| "xor"        { Parser.XOR }
+| "&&"         { Parser.SAND }
+| "||"         { Parser.SOR }
 | "not"        { Parser.NOT }
 | "="          { Parser.EQ }
 | "<"          { Parser.LT }
