@@ -21,11 +21,14 @@ type TypingEnv = {
     Vars: Map<string, Type>
     /// Mapping from type aliases in the current scope to their definition.
     TypeVars: Map<string, Type>
+    /// Mutable variables in the current scope.
+    Mutables: Set<string>
 } with
     /// Return a compact and readable representation of the typing environment.
     override this.ToString(): string =
                  "{" + $"vars: %s{Util.formatMap this.Vars}; "
                      + $"types: %s{Util.formatMap this.TypeVars}"
+                     + $"mutable vars: %s{Util.formatAsSet this.Mutables}"
                      + "}"
 
 
@@ -375,10 +378,46 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Error(es) -> Error(es)
 
     | Let(name, init, scope) ->
-        letTyper node.Pos env name init scope
+        letTyper node.Pos env name init scope false
 
     | LetT(name, tpe, init, scope) ->
         letTypeAnnotTyper node.Pos env name tpe init scope
+
+    | LetMut(name, init, scope) ->
+        letTyper node.Pos env name init scope true
+
+    | Assign(target, expr) ->
+        match ((typer env target), (typer env expr)) with
+        | (Ok(ttarget), Ok(texpr)) when (isSubtypeOf env texpr.Type ttarget.Type) ->
+            match ttarget.Expr with
+            | Var(name) ->
+                if (env.Mutables.Contains name) then
+                    Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
+                         Expr = Assign(ttarget, texpr) }
+                else
+                    Error([(node.Pos,
+                            $"assignment to non-mutable variable %s{name}")])
+            | _ -> Error([(node.Pos, "invalid assignment target")])
+        | (Ok(ttarget), Ok(texpr)) ->
+            Error([(texpr.Pos,
+                    $"expected an expression of type %O{ttarget.Type}, "
+                    + $" found %O{texpr.Type}")])
+        | (Error(es), Ok(_)) -> Error(es)
+        | (Ok(_), Error(es)) -> Error(es)
+        | (Error(es1), Error(es2)) -> Error(es1 @ es2)
+
+    | While(cond, body) ->
+        match ((typer env cond), (typer env body)) with
+        | (Ok(tcond), Ok(tbody)) when (isSubtypeOf env tcond.Type TBool) ->
+            Ok { Pos = node.Pos; Env = env; Type = TUnit; Expr = While(tcond, tbody)}
+        | (Ok(tcond), Ok(_)) ->
+            Error([(tcond.Pos, $"'while' condition: expected type %O{TBool}, "
+                               + $"found %O{tcond.Type}")])
+        | Ok(tcond), Error(es) ->
+            Error((tcond.Pos, $"'while' condition: expected type %O{TBool}, "
+                              + $"found %O{tcond.Type}") :: es)
+        | Error(es), Ok(_) -> Error(es)
+        | Error(esCond), Error(esBody) -> Error(esCond @ esBody)
 
 /// Compute the typing of a binary numerical operation, by computing and
 /// combining the typings of the 'lhs' and 'rhs'.  The argument 'descr' (used in
@@ -470,19 +509,27 @@ and internal printArgTyper descr pos (env: TypingEnv) (arg: UntypedAST): Result<
 /// 'env'ironment, the 'name' of the declared variable, the 'init'ialisation AST
 /// node, and the 'scope' expression of the 'let...' binder.
 and internal letTyper pos (env: TypingEnv) (name: string) (init: UntypedAST)
-                      (scope: UntypedAST): TypingResult =
+                      (scope: UntypedAST) (isMutable: bool): TypingResult =
     match (typer env init) with
     | Ok(tinit) ->
         /// Variables and types to type-check the 'let...' scope: we add the
         /// newly-declared variable and its type (obtained fron the 'init'
         /// sub-expression) to the typing environment
         let envVars2 = env.Vars.Add(name, tinit.Type)
+        /// Mutable variables in the 'let...' scope: if we are declaring an
+        /// immutable variable, we remove it from the known mutables
+        /// variables (if present); otherwise, if we are declaring a mutable
+        /// variable, we add it to the known mutable variables.
+        let envMutVars2 = if isMutable then env.Mutables.Add(name)
+                                       else env.Mutables.Remove(name)
         /// Environment for type-checking the 'let...' scope
-        let env2 = {env with Vars = envVars2}
+        let env2 = {env with Vars = envVars2
+                             Mutables = envMutVars2}
         match (typer env2 scope) with // Recursively type the scope
         | Ok(tscope) ->
             /// Typed "let" expression to be returned
-            let tLetExpr = Let(name, tinit, tscope)
+            let tLetExpr = if isMutable then LetMut(name, tinit, tscope)
+                                        else Let(name, tinit, tscope)
             Ok { Pos = pos; Env = env; Type = tscope.Type;
                  Expr = tLetExpr }
         | Error(es) -> Error(es)
@@ -509,8 +556,13 @@ and internal letTypeAnnotTyper pos (env: TypingEnv) (name: string)
                     /// fron the resolved type annotation) to the typing
                     /// environment
                     let envVars2 = env.Vars.Add(name, letVariableType)
+                    /// Mutable variables in the 'let...' scope: since we are
+                    /// declaring an immutable variable, we remove it from the
+                    /// known mutables variables (if present).
+                    let envMutVars2 = env.Mutables.Remove(name)
                     /// Environment for type-checking the 'let...' scope
-                    let env2 = { env with Vars = envVars2 }
+                    let env2 = { env with Vars = envVars2
+                                          Mutables = envMutVars2 }
                     match (typer env2 scope) with // Recursively type the scope
                     | Ok(tscope) ->
                         /// Typed "let" expression to be returned
@@ -525,4 +577,4 @@ and internal letTypeAnnotTyper pos (env: TypingEnv) (name: string)
 /// Perform type checking of the given untyped AST.  Return a well-typed AST in
 /// case of success, or a sequence of error messages in case of failure.
 let typecheck (node: UntypedAST): TypingResult =
-    typer { Vars = Map[]; TypeVars = Map[] } node
+    typer { Vars = Map[]; TypeVars = Map[]; Mutables = Set[] } node

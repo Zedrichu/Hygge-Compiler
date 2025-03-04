@@ -489,7 +489,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             ])
 
     | Let(name, init, scope)
-    | LetT(name, _, init, scope) ->
+    | LetT(name, _, init, scope)
+    | LetMut(name, init, scope) ->
         /// 'let...' initialisation code, which leaves its result in the
         /// 'target' register (which we overwrite at the end of the 'scope'
         /// execution)
@@ -527,6 +528,73 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 ++ (doCodegen scopeEnv scope)
                     .AddText(RV.MV(Reg.r(env.Target), Reg.r(scopeTarget)),
                              "Move 'let' scope result to 'let' target register")
+
+    | Assign(lhs, rhs) ->
+        match lhs.Expr with
+        | Var(name) ->
+            /// Code for the 'rhs', leaving its result in the target register
+            let rhsCode = doCodegen env rhs
+            match rhs.Type with
+            | t when (isSubtypeOf rhs.Env t TUnit) ->
+                rhsCode // No assignment to perform
+            | _ ->
+                match (env.VarStorage.TryFind name) with
+                | Some(Storage.Reg(reg)) ->
+                    rhsCode.AddText(RV.MV(reg, Reg.r(env.Target)),
+                                    $"Assignment to variable %s{name}")
+                | Some(Storage.FPReg(reg)) ->
+                    rhsCode.AddText(RV.FMV_S(reg, FPReg.r(env.FPTarget)),
+                                    $"Assignment to variable %s{name}")
+                | Some(Storage.Label(lab)) ->
+                    match rhs.Type with
+                    | t when (isSubtypeOf rhs.Env t TFloat) ->
+                        rhsCode.AddText([ (RV.LA(Reg.r(env.Target), lab),
+                                           $"Load address of variable '%s{name}'")
+                                          (RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0),
+                                                    Reg.r(env.Target)),
+                                           $"Transfer value of '%s{name}' to memory") ])
+                    | _ ->
+                        rhsCode.AddText([ (RV.LA(Reg.r(env.Target + 1u), lab),
+                                           $"Load address of variable '%s{name}'")
+                                          (RV.SW(Reg.r(env.Target), Imm12(0),
+                                                 Reg.r(env.Target + 1u)),
+                                           $"Transfer value of '%s{name}' to memory") ])
+                | None -> failwith $"BUG: variable without storage: %s{name}"
+        | _ ->
+            failwith ($"BUG: assignment to invalid target:%s{Util.nl}"
+                      + $"%s{PrettyPrinter.prettyPrint lhs}")
+
+    | While(cond, body) ->
+        /// Label to mark the beginning of the 'while' loop
+        let whileBeginLabel = Util.genSymbol "while_loop_begin"
+        /// Label to mark the beginning of the 'while' loop body
+        let whileBodyBeginLabel = Util.genSymbol "while_body_begin"
+        /// Label to mark the end of the 'while' loop
+        let whileEndLabel = Util.genSymbol "while_loop_end"
+        // Check the 'while' condition, jump to 'whileEndLabel' if it is false.
+        // Here we use a register to load the address of a label (using the
+        // instruction LA) and then jump to it (using the instruction LR): this
+        // way, the label address can be very far from the jump instruction
+        // address --- and this can be important if the compilation of 'body'
+        // produces a large amount of assembly code
+        Asm(RV.LABEL(whileBeginLabel))
+            ++ (doCodegen env cond)
+                .AddText([
+                    (RV.BNEZ(Reg.r(env.Target), whileBodyBeginLabel),
+                     "Jump to loop body if 'while' condition is true")
+                    (RV.LA(Reg.r(env.Target), whileEndLabel),
+                     "Load address of label at the end of the 'while' loop")
+                    (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
+                    (RV.LABEL(whileBodyBeginLabel),
+                     "Body of the 'while' loop starts here")
+                ])
+            ++ (doCodegen env body)
+            .AddText([
+                (RV.LA(Reg.r(env.Target), whileBeginLabel),
+                 "Load address of label at the beginning of the 'while' loop")
+                (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
+                (RV.LABEL(whileEndLabel), "")
+            ])
 
 /// Generate code to save the given registers on the stack, before a RARS system
 /// call. Register a7 (which holds the system call number) is backed-up by

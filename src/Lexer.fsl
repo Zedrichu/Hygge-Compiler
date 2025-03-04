@@ -69,6 +69,7 @@ rule tokenize = parse
 | ">"          { Parser.GT }
 | "<="         { Parser.LE }
 | ">="         { Parser.GE }
+| "<-"         { Parser.LARROW }
 
 // Parentheses and brackets
 | "("          { Parser.LPAR }
@@ -90,6 +91,9 @@ rule tokenize = parse
 | "println"    { Parser.PRINTLN }
 | "assert"     { Parser.ASSERT }
 | "type"       { Parser.TYPE }
+| "mutable"    { Parser.MUTABLE }
+| "while"      { Parser.WHILE }
+| "do"         { Parser.DO }
 
 // Generic identifier
 | ident        { Parser.IDENT(LexBuffer<_>.LexemeString lexbuf) }

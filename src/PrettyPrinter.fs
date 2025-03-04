@@ -66,7 +66,9 @@ let rec internal formatTypingEnv (env: Typechecker.TypingEnv): List<string * Tre
     let typeVars = formatMap env.TypeVars
     let varsNode = Node((if vars.IsEmpty then "∅" else "Map"), vars)
     let typeVarsNode = Node((if typeVars.IsEmpty then "∅" else "Map"), typeVars)
-    [("Env.Vars", varsNode); ("Env.TypeVars", typeVarsNode)]
+    let mutablesNode = Node((formatSet env.Mutables), [])
+    [("Env.Vars", varsNode); ("Env.TypeVars", typeVarsNode)
+     ("Env.Mutables", mutablesNode)]
 
 
 /// Traverse an Hygge program AST from the given 'node' and return a
@@ -161,6 +163,15 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
         mkTree $"LetT %s{name}" node [("Ascription", formatPretypeNode tpe)
                                       ("init", formatASTRec init)
                                       ("scope", formatASTRec scope)]
+    | LetMut(name, init, scope) ->
+        mkTree $"Let mutable %s{name}" node [("init", formatASTRec init)
+                                             ("scope", formatASTRec scope)]
+    | Assign(target, expr) ->
+        mkTree $"Assign" node [("target", formatASTRec target)
+                               ("expr", formatASTRec expr)]
+    | While(cond, body) ->
+        mkTree $"While" node [("cond", formatASTRec cond)
+                              ("body", formatASTRec body)]
 
 /// Return a description of an AST node, and possibly some subtrees (that are
 /// added to the overall tree structure).
