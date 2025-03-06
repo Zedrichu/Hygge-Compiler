@@ -1,0 +1,2 @@
+let x = false;
+x || 2 < 3
