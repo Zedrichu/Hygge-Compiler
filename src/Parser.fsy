@@ -219,13 +219,16 @@ unaryExpr:
                                                         mkNode(parseState, 1, Expr.Greater($3, $5)),
                                                         $3, $5)) }
   | ASSERT LPAR simpleExpr RPAR                 { 
+    let position = pos(parseState, 3)
+    let errorMsg = sprintf "Assertion failed at line %d, column %d" position.Line position.Col
+    
     mkNode(parseState, 1,
     Expr.If(
       $3,
       mkNode(parseState, 1, Expr.Assertion($3)),
       // mkNode(parseState, 1, Expr.ErrorLog($3)) 
       mkNode(parseState, 1, Expr.Seq([
-        mkNode(parseState, 1, Expr.PrintLn($3));
+        mkNode(parseState, 1, Expr.PrintLn(mkNode(parseState, 1, Expr.StringVal(errorMsg))));
         mkNode(parseState, 1, Expr.Assertion($3))
       ]))
     )
