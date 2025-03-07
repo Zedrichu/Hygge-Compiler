@@ -20,8 +20,17 @@ type SourceRepository() =
             else None
         | None -> None
 
-    member this.GetSnippet(filename: string, lineStart: int, lineEnd: int, colStart: int, colEnd: int, ?includeLineNumbers: bool) =
+    member this.GetSnippet(
+        filename: string, lineStart: int, lineEnd: int, ?colStartArg: int, 
+        ?includeLineNumbers: bool, ?includeMarkerLine: bool) =
+
+        let includeMarkerLine = defaultArg includeMarkerLine false
         let includeLineNumbers = defaultArg includeLineNumbers false
+        let colStart = 
+            match includeMarkerLine, colStartArg with
+            | true, None -> failwith "colStart must be provided when includeMarkerLine is true"
+            | _, Some col -> col
+            | false, None -> 1 // Default value when not including marker line
         
         match files.TryFind(filename) with
         | Some lines ->
@@ -31,29 +40,38 @@ type SourceRepository() =
             // Determine the maximum width needed for line numbers
             let maxLineNumWidth = 
                 if includeLineNumbers then
-                    (endLine + 1).ToString().Length
+                    max ((endLine + 1).ToString().Length) 3 // Ensure width also works for "..."
                 else 0
                 
-            let result = [
+            // Generate normal lines
+            let mutable result = [
                 for i in startLine..endLine -> 
                     let line = lines[i]
-                    let processedLine =
-                        if i = startLine then
-                            if i = endLine then
-                                line.Substring(colStart - 1, colEnd - colStart + 1)
-                            else
-                                line.Substring(colStart - 1)
-                        elif i = endLine then
-                            line.Substring(0, colEnd)
-                        else
-                            line
-                            
+                    
                     if includeLineNumbers then
                         let lineNum = (i + 1).ToString().PadLeft(maxLineNumWidth)
-                        sprintf "%s: %s" lineNum processedLine
+                        sprintf "%s: %s" lineNum line
                     else
-                        processedLine
+                        line
             ]
+            
+            if includeMarkerLine then
+                // Create the marker line with '^' at colStart position
+                let markerLine =
+                    if includeLineNumbers then
+                        let placeholder = "...".PadLeft(maxLineNumWidth)
+                        let padding = String.replicate (colStart - 1) " "
+                        sprintf "%s: %s^" placeholder padding
+                    else
+                        let padding = String.replicate (colStart - 1) " "
+                        sprintf "%s^" padding
+                
+                // Insert marker line after the first line
+                result <- 
+                    if result.Length > 0 then
+                        [result[0]; markerLine] @ result[1..]
+                    else result
+
             Some result
         | None -> None
 

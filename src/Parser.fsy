@@ -33,7 +33,7 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
     let pos = pos(parseState, inputIdx)
     let snippet = SourceRepository.repository.GetSnippet(
-      pos.FileName, pos.LineStart, pos.LineEnd, pos.ColStart, pos.ColEnd, true
+      pos.FileName, pos.LineStart, pos.LineEnd, pos.ColStart, true, true
     )
 
     let msgArr = 
@@ -56,7 +56,7 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
           mkNode(parseState, inputIdx, Expr.PrintLn(
             mkNode(parseState, inputIdx, Expr.StringVal(el)))))
         msgArr)
-      )
+    )
 
     node
 %}
