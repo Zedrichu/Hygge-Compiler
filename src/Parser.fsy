@@ -32,25 +32,33 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 // Error message handler
 let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
     let pos = pos(parseState, inputIdx)
-    // Log.error($"{pos.FileName} {pos.LineStart} {pos.ColStart} {pos.LineEnd} {pos.ColEnd}")
-    let snippet = SourceRepository.repository.GetSnippet(pos.FileName, pos.LineStart, pos.ColStart, pos.LineEnd, pos.ColEnd)
+    let snippet = SourceRepository.repository.GetSnippet(
+      pos.FileName, pos.LineStart, pos.LineEnd, pos.ColStart, pos.ColEnd, true
+    )
 
-    let errorStr = 
+    let msgArr = 
         match snippet with
-        // | Some str -> sprintf "Assertion error\n%s" str
-        | Some str -> $"***********************\n\
-                        Assertion error\n\
-                        @{pos.FileName}:{pos.LineStart}:{pos.ColStart}\n\
-                        {str}\n\
-                        ***********************"
-        | None -> "Assertion failed: <no source available>"
+        | Some strArr -> List.concat [
+            ["***********************"];
+            [$"Assertion error @ {pos.FileName}:{pos.LineStart}:{pos.ColStart}"];
+            ["-----------------------"];
+            strArr;
+            ["***********************"]]
+        | None -> List.concat [
+            ["***********************"];
+            ["Assertion failed: <no source available>"];
+            ["***********************"]]
 
-    // let errorStr = sprintf "Assertion failed: %s" snippet
-    // let errorStr = sprintf "(%s) Parse error at line %d, column %d: %s" pos.FileName (pos.pos_lnum + 1) (pos.pos_cnum - pos.pos_bol + 1) message
-    // let errorStr = $"%s{pos.FileName}:%d{pos.LineStart}: Assertion error\n ---> %s{errMsg}"
-    // Wrap with node to println
-    let node = mkNode(parseState, inputIdx, Expr.StringVal(errorStr))
-    mkNode(parseState, inputIdx, Expr.PrintLn(node))
+    // Apply PrintLn(StringVal) structure to each element (line) of the message
+    let node = mkNode(parseState, inputIdx, 
+      Expr.Seq(List.map 
+        (fun el -> 
+          mkNode(parseState, inputIdx, Expr.PrintLn(
+            mkNode(parseState, inputIdx, Expr.StringVal(el)))))
+        msgArr)
+      )
+
+    node
 %}
 
 // Name of the grammar rule (defined below) to parse first.
@@ -241,17 +249,12 @@ unaryExpr:
                                                         mkNode(parseState, 1, Expr.Greater($3, $5)),
                                                         $3, $5)) }
   | ASSERT LPAR simpleExpr RPAR                 { 
-    // let errorMsg = "Assertion failed"
-    // let valueString = 
-    //   match $3.Expr with
-    //   | _ -> string value
-
     mkNode(parseState, 1,
       Expr.If(
         $3,
         mkNode(parseState, 1, Expr.Assertion($3)),
         mkNode(parseState, 1, Expr.Seq([
-          assertionError(parseState, 1); //$"assert({Expr.Assertion($3)})");
+          assertionError(parseState, 1);
           mkNode(parseState, 1, Expr.Assertion($3))
         ]))
       )

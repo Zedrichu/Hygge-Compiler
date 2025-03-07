@@ -20,25 +20,41 @@ type SourceRepository() =
             else None
         | None -> None
 
-    member this.GetSnippet(filename: string, lineStart: int, colStart: int, lineEnd: int, colEnd: int) =
+    member this.GetSnippet(filename: string, lineStart: int, lineEnd: int, colStart: int, colEnd: int, ?includeLineNumbers: bool) =
+        let includeLineNumbers = defaultArg includeLineNumbers false
+        
         match files.TryFind(filename) with
         | Some lines ->
             let startLine = max 0 (lineStart - 1)
             let endLine = min (lines.Length - 1) (lineEnd - 1)
-            let result: string array = [| 
+            
+            // Determine the maximum width needed for line numbers
+            let maxLineNumWidth = 
+                if includeLineNumbers then
+                    (endLine + 1).ToString().Length
+                else 0
+                
+            let result = [
                 for i in startLine..endLine -> 
                     let line = lines[i]
-                    if i = startLine then
-                        if i = endLine then
-                            line.Substring(colStart - 1, colEnd - colStart + 1)
+                    let processedLine =
+                        if i = startLine then
+                            if i = endLine then
+                                line.Substring(colStart - 1, colEnd - colStart + 1)
+                            else
+                                line.Substring(colStart - 1)
+                        elif i = endLine then
+                            line.Substring(0, colEnd)
                         else
-                            line.Substring(colStart - 1)
-                    elif i = endLine then
-                        line.Substring(0, colEnd)
+                            line
+                            
+                    if includeLineNumbers then
+                        let lineNum = (i + 1).ToString().PadLeft(maxLineNumWidth)
+                        sprintf "%s: %s" lineNum processedLine
                     else
-                        line
-            |]
-            Some (result |> String.concat "\n")
+                        processedLine
+            ]
+            Some result
         | None -> None
 
 /// Global repository instance
