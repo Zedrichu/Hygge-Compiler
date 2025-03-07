@@ -530,8 +530,7 @@ let interpret (node: AST.Node<'E,'T>) (verbose: bool): AST.Node<'E,'T> =
     // Reader function used when interpreting (just a regular ReadLine)
     let reader = fun (_: unit) -> System.Console.ReadLine()
     // Printer function used when interpreting (just a regular printf)
-    // let printer = fun str -> printf $"%s{str}"
-    let printer = fun str -> printf "%s" str
+    let printer = fun str -> printf $"%s{str}"
     if not verbose then
         reduceFully node (Some reader) (Some printer)
     else
