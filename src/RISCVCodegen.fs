@@ -69,8 +69,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let escapedV = v.Replace("\"", "\\\"")
         // Label marking the string constant in the data segment
         let label = Util.genSymbol "string_val"
-        // Asm().AddData(label, Alloc.String(v))
-        Asm().AddData(label, Alloc.String(escapedV))
+        Asm().AddData(label, Alloc.String(escapedV)) // instead of Alloc.String(v)
              .AddText(RV.LA(Reg.r(env.Target), label))
 
     | Var(name) ->
@@ -195,25 +194,25 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             lAsm ++ rAsm ++ opAsm
         | t ->
             failwith $"BUG: numerical operation codegen invoked on invalid type %O{t}"
-            
+
     | Sqrt(arg) ->
         //Code generation for the Square Root Operator
-        
+
         // Generate code for the argument expression
         let argAsm = doCodegen env arg
-        
+
         let opAsm =
             match arg.Type with
             | TFloat ->
                 Asm(RV.FSQRT_S(FPReg.r(env.FPTarget), FPReg.r(env.FPTarget)))
-                
+
             | TInt ->
                 Asm(RV.FCVT_S_W(FPReg.r(env.FPTarget), Reg.r(env.Target))) ++
                 Asm(RV.FSQRT_S(FPReg.r(env.FPTarget), FPReg.r(env.FPTarget)))
             | _ -> failwith $"BUG: sqrt operation codegen invoked on invalid type %O{arg.Type}"
-                
+
         argAsm ++ opAsm
-               
+
 
     | And(lhs, rhs)
     | Or(lhs, rhs) as expr ->
