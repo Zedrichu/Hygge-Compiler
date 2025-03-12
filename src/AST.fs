@@ -56,7 +56,7 @@ and Pretype =
 /// information is associated to each expression in the AST; 'T specifies what
 /// type information is assigned to each expression in the AST.
 [<RequireQualifiedAccess>]
-type Node<'E,'T> = 
+type Node<'E,'T> =
     { /// Hygge expression contained in the AST node.
       Expr: Expr<'E,'T>
       /// Position in the source file of the expression in this AST node.
@@ -92,7 +92,7 @@ and Expr<'E,'T> =
     /// Addition between lhs and rhs.
     | Add of lhs: Node<'E,'T>
            * rhs: Node<'E,'T>
-    
+
     /// Subtraction of lhs with rhs.
     | Sub of lhs: Node<'E,'T>
            * rhs: Node<'E,'T>
@@ -100,26 +100,26 @@ and Expr<'E,'T> =
     /// Multiplication between lhs and rhs.
     | Mult of lhs: Node<'E,'T>
             * rhs: Node<'E,'T>
-    
-    /// Division between lhs and rhs.    
+
+    /// Division between lhs and rhs.
     | Div of lhs: Node<'E, 'T>
            * rhs: Node<'E, 'T>
-    
-    /// Modulo between lhs and rhs.      
+
+    /// Modulo between lhs and rhs.
     | Mod of lhs: Node<'E, 'T>
            * rhs: Node<'E, 'T>
 
-    /// Square root operation on argument.    
+    /// Square root operation on argument.
     | Sqrt of arg: Node<'E, 'T>
-    
+
     /// Min operator on lhs and rhs
     | Min of lhs: Node<'E, 'T>
            * rhs: Node<'E, 'T>
-   
+
     /// Max operator on lhs and rhs
     | Max of lhs: Node<'E, 'T>
            * rhs: Node<'E, 'T>
-     
+
     /// Logical and between lhs and rhs.
     | And of lhs: Node<'E,'T>
            * rhs: Node<'E,'T>
@@ -138,15 +138,15 @@ and Expr<'E,'T> =
     /// Comparison: is the lhs less than the rhs?
     | Less of lhs: Node<'E,'T>
             * rhs: Node<'E,'T>
-    
+
     /// Comparison: is the lhs greater than the rhs?
     | Greater of lhs: Node<'E,'T>
                * rhs: Node<'E,'T>
-    
+
     // Comparison: is the lhs less than or equal to the rhs?
     | LessEq of lhs: Node<'E,'T>
               * rhs: Node<'E,'T>
-    
+
     // Comparison: is the lhs greater than or equal to the rhs?
     | GreaterEq of lhs: Node<'E,'T>
                  * rhs: Node<'E,'T>
