@@ -18,6 +18,7 @@ let rec isValue (node: Node<'E,'T>): bool =
     | IntVal(_)
     | FloatVal(_)
     | StringVal(_) -> true
+    | Lambda(_, _) -> true
     | _ -> false
 
 
@@ -31,6 +32,7 @@ let prettyPrintValue (node: Node<'E,'T>): string =
     | BoolVal(value) -> $"BoolVal %b{value}"
     | FloatVal(value) -> $"FloatVal %f{value}"
     | StringVal(value) -> $"StringVal \"%s{value}\""
+    | Lambda(args, _) -> $"Lambda (taking %d{args.Length} arguments)"
     | _ -> failwith $"BUG: 'prettyPrintValue' called with invalid argument ${node}"
 
 
@@ -66,6 +68,8 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
     | Var(name) when env.Mutables.ContainsKey(name) ->
         Some(env, env.Mutables[name])
     | Var(_) -> None
+
+    | Lambda(_, _) -> None
 
     | Mult(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
@@ -443,6 +447,35 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                            {body with Expr = Seq([body; node])},
                            {body with Expr = UnitVal})
         Some(env, {node with Expr = rewritten})
+
+    | Application(expr, args) ->
+        match expr.Expr with
+        | Lambda(lamArgs, body) ->
+            if args.Length <> lamArgs.Length then None
+            else
+                match (reduceList env args) with
+                | Some(env', args') ->
+                    Some(env', {node with Expr = Application(expr, args')})
+                | None ->
+                    // To reduce, make sure all the arguments are values
+                    if (List.forall isValue args) then
+                        /// Names of lambda term arguments
+                        let (lamArgNames, _) = List.unzip lamArgs
+                        /// Pairs of lambda term argument names with a
+                        /// corresponding value (from 'args') that we are going
+                        /// to substitute
+                        let lamArgNamesValues = List.zip lamArgNames args
+                        /// Folder function to apply a substitution over an
+                        /// 'acc'umulator term.  This is used in 'body2' below
+                        let folder acc (var, sub) = (ASTUtil.subst acc var sub)
+                        /// Lambda term body with all substitutions applied
+                        let body2 = List.fold folder body lamArgNamesValues
+                        Some(env, {node with Expr = body2.Expr})
+                    else None
+        | _ ->
+            match (reduce env expr) with
+            | Some(env', expr') -> Some(env', {node with Expr = Application(expr', args)})
+            | None -> None
 
 /// Attempt to reduce the given lhs, and then (if the lhs is a value) the rhs,
 /// using the given runtime environment.  Return None if either (a) the lhs

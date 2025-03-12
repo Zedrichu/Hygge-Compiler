@@ -46,6 +46,9 @@ type PretypeNode =
 and Pretype =
     /// A type identifier.
     | TId of id: string
+    /// A function pretype, with argument pretypes and return pretype.
+    | TFun of args: List<PretypeNode>
+            * ret: PretypeNode
 
 
 /// Node of the Abstract Syntax Tree of a Hygge expression.  The meaning of the
@@ -212,6 +215,15 @@ and Expr<'E,'T> =
     /// 'While' loop: as long as 'cond' is true, repeat the 'body'.
     | While of cond: Node<'E,'T>
              * body: Node<'E,'T>
+
+    /// Lambda term, i.e. function instance.
+    | Lambda of args: List<string * PretypeNode>
+              * body: Node<'E,'T>
+
+    /// Application of an expression (expected to be a function) to a list of
+    /// arguments.
+    | Application of expr: Node<'E,'T>
+                   * args: List<Node<'E,'T>>
 
 
 /// A type alias for an untyped AST, where there is no typing environment nor

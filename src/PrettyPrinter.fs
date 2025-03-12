@@ -53,7 +53,13 @@ let rec internal formatType (t: Type.Type): Tree =
     | Type.TString -> Node("string", [])
     | Type.TUnit -> Node("unit", [])
     | Type.TVar(name) -> Node(name, [])
-
+    | Type.TFun(args, ret) ->
+        /// Formatted argument types with their respective positions
+        let argChildren =
+            List.map (fun (i, t) -> ($"arg %d{i+1}", formatType t))
+                     (List.indexed args)
+        Node("fun", (argChildren @
+                     [("return", formatType ret)]))
 
 /// Traverse a Hygge typing environment and return its hierarchical
 /// representation.
@@ -172,6 +178,19 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | While(cond, body) ->
         mkTree $"While" node [("cond", formatASTRec cond)
                               ("body", formatASTRec body)]
+    | Lambda(args, body) ->
+        /// Formatted arguments with their pretype
+        let argChildren =
+            List.map (fun (v, t) -> ($"arg %s{v}", formatPretypeNode t)) args
+        mkTree "Lambda" node (argChildren @
+                              [("body", formatASTRec body)])
+    | Application(expr, args) ->
+        /// Formatted arguments with their respective positions
+        let argChildren =
+            List.map (fun (i, n) -> ($"arg %d{i+1}", formatASTRec n))
+                     (List.indexed args)
+        mkTree "Application" node (("expr", formatASTRec expr) ::
+                                   argChildren)
 
 /// Return a description of an AST node, and possibly some subtrees (that are
 /// added to the overall tree structure).
@@ -203,6 +222,15 @@ and internal formatPretypeNode (node: PretypeNode): Tree =
     match node.Pretype with
     | Pretype.TId(id) ->
         Node((formatPretypeDescr node $"Pretype Id \"%s{id}\""), [])
+    | Pretype.TFun(args, ret) ->
+        /// Formatted argument pretypes with their respective position
+        let argChildren =
+            List.map (fun (i, t) -> ((formatPretypeDescr t $"arg %d{i+1}"),
+                                     formatPretypeNode t))
+                     (List.indexed args)
+        Node((formatPretypeDescr node "Function pretype"),
+             argChildren @
+             [("return", formatPretypeNode ret)])
 
 /// Format the description of a pretype AST node (without printing its
 /// children).
