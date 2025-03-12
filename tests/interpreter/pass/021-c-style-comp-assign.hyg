@@ -1,0 +1,96 @@
+// Test compute-assignment operators with assertions
+
+
+// Integer compute-assign basic operations
+let mutable a = 10;
+
+a += 5;
+assert(a = 15);
+
+a -= 3;
+assert(a = 12);
+
+a *= 2;
+assert(a = 24);
+
+a /= 4;
+assert(a = 6);
+
+a %= 4;
+assert(a = 2);
+
+
+// Float compute-assign operations
+let mutable f = 10.0f;
+
+f += 5.5f;
+// We use less precise comparison for floats
+let floatDiff = f - 15.5f;
+assert(floatDiff < 0.001f && floatDiff > 0.0f-0.001f);
+
+f -= 3.5f;
+floatDiff = f - 12.0f;
+assert(floatDiff < 0.001f && floatDiff > 0.0f-0.001f);
+
+f *= 2.0f;
+floatDiff = f - 24.0f;
+assert(floatDiff < 0.001f && floatDiff > 0.0f-0.001f);
+
+f /= 4.0f;
+floatDiff = f - 6.0f;
+assert(floatDiff < 0.001f && floatDiff > 0.0f-0.001f);
+
+
+// With expressions on the right side
+let mutable b = 7;
+
+b += a * 2;    // b = 7 + (2 * 2) = 11
+assert(b = 11);
+
+b -= a / 2;    // b = 11 - (2 / 2) = 10
+assert(b = 10);
+
+b *= a - 1;    // b = 10 * (2 - 1) = 10
+assert(b = 10);
+
+
+// In control structures
+let mutable i = 0;
+let mutable sum = 0;
+while (i < 5) do {
+    i += 1;
+    sum += i
+};
+assert(i = 5);
+assert(sum = 15); // 1 + 2 + 3 + 4 + 5 = 15
+
+
+// Using variables on both sides
+let mutable x = 10;
+let mutable y = 5;
+
+x += y;
+assert(x = 15);
+
+y *= x;
+assert(y = 75); // 5 * 15 = 75
+
+
+// Nested expressions
+let mutable z = 20;
+
+z -= (x + y) * 2;
+assert(z = 20 - (15 + 75) * 2);
+assert(z = 20 - 180);
+assert(z = -160);
+
+
+// Multiple operations in sequence
+let mutable counter = 1;
+counter *= 5;    // 5
+counter += 3;    // 8
+counter -= 1;    // 7
+counter *= 2;    // 14
+counter /= 2;    // 7
+counter %= 5;    // 2
+assert(counter = 2)
