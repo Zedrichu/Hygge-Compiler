@@ -213,6 +213,22 @@ and Expr<'E,'T> =
     | While of cond: Node<'E,'T>
              * body: Node<'E,'T>
 
+    /// Pre-increment expression, which increments the value of the mutable variable by 1. 
+    /// reduces to the value after increment
+    | PrePlusPlus of target: Node<'E,'T>
+
+    /// Post-increment expression, which increments the value of the mutable variable by 1.
+    /// and reduce to the value that the variable had before increment.
+    | PostPlusPlus of target: Node<'E,'T>
+
+    /// Pre-decrement expression, which decrements the value of the mutable variable by 1. 
+    /// reduces to the value after decrement.
+    | PreMinusMinus of target: Node<'E,'T>
+
+    /// Post-decrement expression, which decrements the value of the mutable variable by 1.
+    /// and reduce to the value that the variable had before decrement.
+    | PostMinusMinus of target: Node<'E,'T>
+
 
 /// A type alias for an untyped AST, where there is no typing environment nor
 /// typing information (unit).

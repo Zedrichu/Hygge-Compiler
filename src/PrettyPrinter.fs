@@ -166,12 +166,20 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | LetMut(name, init, scope) ->
         mkTree $"Let mutable %s{name}" node [("init", formatASTRec init)
                                              ("scope", formatASTRec scope)]
-    | Assign(target, expr) ->
+    | Assign(target: Node<'E,'T>, expr) ->
         mkTree $"Assign" node [("target", formatASTRec target)
                                ("expr", formatASTRec expr)]
     | While(cond, body) ->
         mkTree $"While" node [("cond", formatASTRec cond)
                               ("body", formatASTRec body)]
+    | PrePlusPlus(target: Node<'E,'T>) ->
+        mkTree "Pre-increment" node [("target", formatASTRec target)]
+    | PostPlusPlus(target: Node<'E,'T>) ->
+        mkTree "Post-increment" node [("target", formatASTRec target)]
+    | PreMinusMinus(target: Node<'E,'T>) ->
+        mkTree "Pre-decrement" node [("target", formatASTRec target)]
+    | PostMinusMinus(target: Node<'E,'T>) ->
+        mkTree "Post-decrement" node [("target", formatASTRec target)]
 
 /// Return a description of an AST node, and possibly some subtrees (that are
 /// added to the overall tree structure).

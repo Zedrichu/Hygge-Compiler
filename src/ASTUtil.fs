@@ -112,3 +112,12 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substCond = subst cond var sub
         let substBody = subst body var sub
         {node with Expr = While(substCond, substBody)}
+
+    | PrePlusPlus(target) ->
+        {node with Expr = PrePlusPlus(subst target var sub)}
+    | PostPlusPlus(target) ->
+        {node with Expr = PostPlusPlus(subst target var sub)}
+    | PreMinusMinus(target) ->
+        {node with Expr = PreMinusMinus(subst target var sub)}
+    | PostMinusMinus(target) ->
+        {node with Expr = PostMinusMinus(subst target var sub)}
