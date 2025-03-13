@@ -1,0 +1,2 @@
+let mutable x = 3.2f;
+{ ++ x }

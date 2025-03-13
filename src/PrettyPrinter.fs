@@ -172,14 +172,6 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | While(cond, body) ->
         mkTree $"While" node [("cond", formatASTRec cond)
                               ("body", formatASTRec body)]
-    | PreIncrement(target: Node<'E,'T>) ->
-        mkTree "Pre-increment" node [("target", formatASTRec target)]
-    | PostIncrement(target: Node<'E,'T>) ->
-        mkTree "Post-increment" node [("target", formatASTRec target)]
-    | PreDecrement(target: Node<'E,'T>) ->
-        mkTree "Pre-decrement" node [("target", formatASTRec target)]
-    | PostDecrement(target: Node<'E,'T>) ->
-        mkTree "Post-decrement" node [("target", formatASTRec target)]
 
 /// Return a description of an AST node, and possibly some subtrees (that are
 /// added to the overall tree structure).
