@@ -521,7 +521,6 @@ and internal binaryNumericalOpTyper descr pos (env: TypingEnv)
                 | _ -> 0
         Ok(TFloat, ln, {Pos = rn.Pos; Env = env; Type = TFloat; Expr = FloatVal(single n)})
 
-
     | (Ok(t1), Ok(t2)) ->
         Error([(pos, $"%s{descr}: expected arguments of a same type "
                      + $"between %O{TInt} or %O{TFloat}, "
