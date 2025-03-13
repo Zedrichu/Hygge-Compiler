@@ -10,7 +10,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  expecto-test:
 
     runs-on: ubuntu-latest
 
