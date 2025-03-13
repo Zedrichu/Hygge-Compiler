@@ -57,6 +57,11 @@ rule tokenize = parse
 | "+"          { Parser.PLUS }
 | "-"          { Parser.MINUS }
 | "%"          { Parser.MOD }
+| "+="         { Parser.PLUS_EQ }
+| "-="         { Parser.MINUS_EQ }
+| "*="         { Parser.TIMES_EQ }
+| "/="         { Parser.DIV_EQ }
+| "%="         { Parser.MOD_EQ }
 | "sqrt"       { Parser.SQRT }
 | "min"        { Parser.MIN }
 | "max"        { Parser.MAX }
