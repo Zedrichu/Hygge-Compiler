@@ -99,7 +99,7 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | Add(lhs, rhs) ->
         mkTree "Add" node [("lhs", formatASTRec lhs)
                            ("rhs", formatASTRec rhs)]
-    
+
     | Sub(lhs, rhs) ->
         mkTree "Sub" node [("lhs", formatASTRec lhs)
                            ("rhs", formatASTRec rhs)]
@@ -117,7 +117,7 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | Max(lhs, rhs) ->
         mkTree "Max" node [("lhs", formatASTRec lhs)
                            ("rhs", formatASTRec rhs)]
-    
+
     | And(lhs, rhs) ->
         mkTree "And" node [("lhs", formatASTRec lhs)
                            ("rhs", formatASTRec rhs)]
@@ -140,7 +140,7 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
                                  ("rhs", formatASTRec rhs)]
     | LessEq(lhs, rhs) ->
         mkTree "LessEq" node [("lhs", formatASTRec lhs)
-                              ("rhs", formatASTRec rhs)]  
+                              ("rhs", formatASTRec rhs)]
     | ReadInt -> mkTree "ReadInt" node []
     | ReadFloat -> mkTree "ReadFloat" node []
     | Print(arg) ->
@@ -178,6 +178,11 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | While(cond, body) ->
         mkTree $"While" node [("cond", formatASTRec cond)
                               ("body", formatASTRec body)]
+    | For(definition, condition, update, body) ->
+        mkTree $"For" node [("init", formatASTRec definition)
+                            ("condition", formatASTRec condition)
+                            ("update", formatASTRec update)
+                            ("body", formatASTRec body)]
     | Lambda(args, body) ->
         /// Formatted arguments with their pretype
         let argChildren =
