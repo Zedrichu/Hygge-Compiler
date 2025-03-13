@@ -72,7 +72,10 @@ rule tokenize = parse
 | "<="         { Parser.LE }
 | ">="         { Parser.GE }
 | "<-"         { Parser.LARROW }
+| "++"         { Parser.INCREMENT }
+| "--"         { Parser.DECREMENT }
 | "->"         { Parser.RARROW }
+
 
 // Parentheses and brackets
 | "("          { Parser.LPAR }

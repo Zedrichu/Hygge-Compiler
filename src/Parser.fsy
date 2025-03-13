@@ -80,6 +80,8 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 
 // Tokens for arithmetic operators
 %token TIMES PLUS MINUS DIV MOD SQRT MIN MAX
+// Tokens for C-style increment/decrement operators
+%token INCREMENT DECREMENT
 
 // Tokens for logical operators
 %token AND OR NOT XOR SAND SOR
@@ -273,6 +275,37 @@ unaryExpr:
                                                         mkNode(parseState, 1, Expr.Assertion($3));
                                                     ])) }
   | ascriptionExpr                              { $1 }
+  // Avoid ambiguity by higher precedence for the postfix operators
+
+  // Prefix Increment:
+  // Increments the value of the mutable variable by 1. Reduces to the value after increment
+  | INCREMENT unaryExpr                         { mkNode(parseState, 1, Expr.Assign($2,
+                                                    mkNode(parseState, 1, Expr.Add($2,
+                                                        mkNode(parseState, 1, Expr.IntVal(1)))))) }
+  // Prefix Decrement:
+  // Decrements the value of the mutable variable by 1. Reduces to the value after decrement.
+  | DECREMENT unaryExpr                         { mkNode(parseState, 1, Expr.Assign($2,
+                                                    mkNode(parseState, 1, Expr.Sub($2,
+                                                        mkNode(parseState, 1, Expr.IntVal(1)))))) }
+
+  // Postfix Increment:
+  // Increments the value of the mutable variable by 1. Reduces to the value that the variable had before operation.
+  | ascriptionExpr INCREMENT                    { mkNode(parseState, 2, Expr.Seq([
+                                                    mkNode(parseState, 2, Expr.Assign($1,
+                                                        mkNode(parseState, 2, Expr.Add($1,
+                                                            mkNode(parseState, 2, Expr.IntVal(1))))));
+                                                    mkNode(parseState, 2, Expr.Sub($1,
+                                                        mkNode(parseState, 2, Expr.IntVal(1))))
+                                                    ])) }
+  // Postfix Decrement:
+  // Decrements the value of the mutable variable by 1. Reduces to the value that the variable had before operation.
+  | ascriptionExpr DECREMENT                      { mkNode(parseState, 2, Expr.Seq([
+                                                    mkNode(parseState, 2, Expr.Assign($1,
+                                                        mkNode(parseState, 2, Expr.Sub($1,
+                                                            mkNode(parseState, 2, Expr.IntVal(1))))));
+                                                    mkNode(parseState, 2, Expr.Add($1,
+                                                        mkNode(parseState, 2, Expr.IntVal(1))))
+                                                    ])) }
   | primary parenExprCommaSeq                   { mkNode(parseState, 1, Expr.Application($1, $2))}
 
 // Ascription, i.e. primary expression with (optional) type annotation
