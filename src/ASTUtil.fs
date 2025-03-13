@@ -39,7 +39,7 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         {node with Expr = Min((subst lhs var sub), (subst rhs var sub))}
     | Max(lhs, rhs) ->
         {node with Expr = Max((subst lhs var sub), (subst rhs var sub))}
-    
+
     | And(lhs, rhs) ->
         {node with Expr = And((subst lhs var sub), (subst rhs var sub))}
     | Or(lhs, rhs) ->

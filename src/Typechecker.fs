@@ -165,7 +165,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Add(tlhs, trhs) }
         | Error(es) -> Error(es)
-        
+
     | Sub(lhs, rhs) ->
         match (binaryNumericalOpTyper "subtraction" node.Pos env lhs rhs) with
         | Ok(tpe, tlhs, trhs) ->
@@ -177,7 +177,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Mult(tlhs, trhs) }
         | Error(es) -> Error(es)
-       
+
     | Div(lhs, rhs) ->
         match (binaryNumericalOpTyper "division" node.Pos env lhs rhs) with
         | Ok(tpe, tlhs, trhs) ->
@@ -192,7 +192,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
              Error([(node.Pos, $"'mod' operator: expected type %O{TInt}, "
                               + $"found %O{tpe}")])
         | Error(es) -> Error(es)
-    
+
     | Sqrt(arg) ->
         match (typer env arg) with
         | Ok(targ) when ((isSubtypeOf env targ.Type TFloat) || (isSubtypeOf env targ.Type TInt)) ->
@@ -201,7 +201,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
              Error([(node.Pos, $"'sqrt' operator: expected type %O{TFloat} or %O{TInt}, "
                               + $"found %O{targ.Type}")])
         | Error(es) -> Error(es)
-        
+
     | Min(lhs,rhs) ->
         match (binaryNumericalOpTyper "minimize" node.Pos env lhs rhs) with
         | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
@@ -210,7 +210,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
              Error([(node.Pos, $"'min' operator: expected type %O{TInt} or %O{TFloat}, "
                               + $"found %O{tpe}")])
         | Error(es) -> Error(es)
-        
+
      | Max(lhs,rhs) ->
         match (binaryNumericalOpTyper "maximize" node.Pos env lhs rhs) with
         | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
@@ -219,8 +219,8 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
              Error([(node.Pos, $"'max' operator: expected type %O{TInt} or %O{TFloat}, "
                               + $"found %O{tpe}")])
         | Error(es) -> Error(es)
-        
-        
+
+
     | And(lhs, rhs) ->
         match (binaryBooleanOpTyper "and" node.Pos env lhs rhs) with
         | Ok(tlhs, trhs) ->
@@ -253,13 +253,13 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Ok(tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = TBool; Expr = Less(tlhs, trhs) }
         | Error(es) -> Error(es)
-        
+
     | Greater(lhs, rhs) ->
         match (numericalRelationTyper "greater than" node.Pos env lhs rhs) with
         | Ok(tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = TBool; Expr = Greater(tlhs, trhs) }
         | Error(es) -> Error(es)
-    
+
     | LessEq(lhs, rhs) ->
         match (numericalRelationTyper "less than or equal" node.Pos env lhs rhs) with
         | Ok(tlhs, trhs) ->
@@ -271,7 +271,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Ok(tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = TBool; Expr = GreaterEq(tlhs, trhs) }
         | Error(es) -> Error(es)
-    
+
     | ReadInt ->
         Ok {Pos = node.Pos; Env = env; Type = TInt; Expr = ReadInt}
 
@@ -513,6 +513,14 @@ and internal binaryNumericalOpTyper descr pos (env: TypingEnv)
     | (Ok(ln), Ok(rn)) when (isSubtypeOf env ln.Type TFloat)
                             && (isSubtypeOf env rn.Type TFloat) ->
         Ok(TFloat, ln, rn)
+    | Ok(ln), Ok(rn) when (isSubtypeOf env ln.Type TFloat)
+                          && (isSubtypeOf env rn.Type TInt)
+                          && (match rn.Expr with | IntVal(_) -> true | _ -> false) ->
+        let n = match rn.Expr with
+                | IntVal x -> x
+                | _ -> 0
+        Ok(TFloat, ln, {Pos = rn.Pos; Env = env; Type = TFloat; Expr = FloatVal(single n)})
+
     | (Ok(t1), Ok(t2)) ->
         Error([(pos, $"%s{descr}: expected arguments of a same type "
                      + $"between %O{TInt} or %O{TFloat}, "

@@ -225,7 +225,6 @@ and Expr<'E,'T> =
     | Application of expr: Node<'E,'T>
                    * args: List<Node<'E,'T>>
 
-
 /// A type alias for an untyped AST, where there is no typing environment nor
 /// typing information (unit).
 type UntypedAST = Node<unit, unit>
