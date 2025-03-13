@@ -81,6 +81,18 @@ let rec internal resolvePretype (env: TypingEnv) (pt: AST.PretypeNode): Result<T
         match (lookupTypeVar env name) with
         | Some(t) -> Ok(t)
         | None -> Error([(pt.Pos, $"reference to undefined type: %s{name}")])
+    | Pretype.TFun(argPretypes, retPretype) ->
+        /// Lambda argument types (possibly with errors)
+        let argTypes = List.map (fun a -> resolvePretype env a) argPretypes
+        /// Lambda return type, or error
+        let returnType = resolvePretype env retPretype
+        /// Errors occurred while resolving 'argPretypes' or 'retPretypes'
+        let errors = collectErrors (argTypes @ [returnType])
+        if not errors.IsEmpty then Error(errors)
+        else
+            let argTypes = List.map getOkValue argTypes
+            let returnType = getOkValue returnType
+            Ok(TFun(argTypes, returnType))
 
 /// Resolve a type variable using the given typing environment: optionally
 /// return the Type corresponding to variable 'name', or None if 'name' is not
@@ -418,6 +430,69 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                               + $"found %O{tcond.Type}") :: es)
         | Error(es), Ok(_) -> Error(es)
         | Error(esCond), Error(esBody) -> Error(esCond @ esBody)
+
+    | Lambda(args, body) ->
+        let (argNames, argPretypes) = List.unzip args
+        /// Duplicate names in 'lambda' arguments
+        let dups = Util.duplicates argNames
+        if not (dups.IsEmpty) then
+            Error([(node.Pos, $"duplicate argument names: %s{Util.formatSeq dups}")])
+        else
+            /// Tentatively-resolved types of all 'lambda' arguments
+            let tryResArgTypes = List.map (fun t -> resolvePretype env t) argPretypes
+            /// Errors (if any) which occurred during argument type resolution
+            let argTypeErrors = collectErrors tryResArgTypes
+            if not (argTypeErrors.IsEmpty) then Error(argTypeErrors)
+            else
+                /// List of resolved argument types
+                let resArgTypes = List.map getOkValue tryResArgTypes
+                /// Mapping from 'lambda' argument names to their resolved types
+                let funArgsTypes = Map(List.zip argNames resArgTypes)
+                /// Environment to type-check the function body, including the
+                /// argument names and types
+                let bodyEnv = {env with Vars = Util.addMaps env.Vars funArgsTypes}
+                match (typer bodyEnv body) with
+                | Ok(tbody) ->
+                    Ok { Pos = node.Pos; Env = env;
+                         Type = TFun(resArgTypes, tbody.Type);
+                         Expr = Lambda(args, tbody) }
+                | Error(es) -> Error(es)
+
+    | Application(expr, args) ->
+        match (typer env expr) with
+        | Ok(texpr) ->
+            match (expandType env texpr.Type) with
+            | TFun(funArgTypes, funRetType) ->
+                if funArgTypes.Length <> args.Length then
+                    Error([(node.Pos, $"applying function to %d{args.Length} arguments, "
+                                      + $"while it expects %d{funArgTypes.Length}")])
+                else
+                    /// Tentatively type-checked function call arguments
+                    let argTypings = List.map (fun n -> typer env n) args
+                    /// List of errors (if any) in argument typings
+                    let errs = collectErrors argTypings
+                    if not errs.IsEmpty then Error(errs)
+                    else
+                        /// List of well-typed function call arguments
+                        let targs = List.map getOkValue argTypings
+                        /// Does the given 'arg'ument have the given 't'ype?
+                        let isArgBadlyTyped (arg: TypedAST, t: Type) =
+                            not (isSubtypeOf arg.Env arg.Type t)
+                        /// Application arguments whose types doesn't match the
+                        /// corresponding type in 'funArgTypes'
+                        let badArgs = List.filter isArgBadlyTyped
+                                                   (List.zip targs funArgTypes)
+                        if not badArgs.IsEmpty then
+                            let errFormat (node: TypedAST, t: Type) =
+                                (node.Pos, $"expected argument of type %O{t}, found %O{node.Type}")
+                            let errors = List.map errFormat badArgs
+                            Error(errors)
+                        else
+                            Ok { Pos = node.Pos; Env = env; Type = funRetType;
+                                 Expr = Application(texpr, targs) }
+            | t ->
+                Error([(expr.Pos, $"cannot apply an expression of type %O{t} as a function")])
+        | Error(es) -> Error(es)
 
 /// Compute the typing of a binary numerical operation, by computing and
 /// combining the typings of the 'lhs' and 'rhs'.  The argument 'descr' (used in

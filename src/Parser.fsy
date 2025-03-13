@@ -29,6 +29,37 @@ let mkPretypeNode (parseState: IParseState, inputIdx: int, t: Pretype): PretypeN
 let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST =
   { Pos = pos(parseState, inputIdx); Env = (); Type = (); Expr = e }
 
+// Assertion failure message handler
+let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
+    let pos = pos(parseState, inputIdx)
+    let snippet = SourceRepository.repository.GetSnippet(
+      pos.FileName, pos.LineStart, pos.LineEnd, pos.ColStart, true, true
+    )
+
+    let msgArr =
+        match snippet with
+        | Some strArr -> List.concat [
+            ["***********************"];
+            [$"Assertion error @ {pos.FileName}:{pos.LineStart}:{pos.ColStart}"];
+            ["-----------------------"];
+            strArr;
+            ["***********************"]]
+        | None -> List.concat [
+            ["***********************"];
+            ["Assertion failed: <no source available>"];
+            ["***********************"]]
+
+    // Apply PrintLn(StringVal) structure to each element (line) of the message
+    let node = mkNode(parseState, inputIdx,
+        Expr.Seq(
+            List.map
+                (fun el ->
+                    mkNode(parseState, inputIdx, Expr.PrintLn(
+                        mkNode(parseState, inputIdx, Expr.StringVal(el)))))
+                msgArr)
+        )
+
+    node
 %}
 
 // Name of the grammar rule (defined below) to parse first.
@@ -68,7 +99,7 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 %token LET TYPE MUTABLE
 
 // Misc tokens
-%token SEMI EOF COLON COMMA LARROW
+%token SEMI EOF COLON LARROW RARROW COMMA
 
 // Built-in statements
 %token READ_INT
@@ -78,6 +109,7 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 %token ASSERT
 %token WHILE
 %token DO
+%token FUN
 
 // Generic identifier (might result in a variable, pretype, etc.)
 %token <string> IDENT
@@ -107,6 +139,12 @@ expr:
     }
   | LET MUTABLE variable EQ simpleExpr SEMI expr  {
         mkNode(parseState, 1, Expr.LetMut($3, $5, $7))
+    }
+  | FUN variable parenArgTypesSeq COLON pretype EQ simpleExpr SEMI expr  {
+      let (_, argTypes) = List.unzip $3 // Extract argument pretypes
+      mkNode(parseState, 1, Expr.LetT($2, mkPretypeNode(parseState, 5,
+                                                        Pretype.TFun(argTypes, $5)),
+                                      mkNode(parseState, 7, Lambda($3, $7)), $9))
     }
   | curlyExpr expr  { mkNode(parseState, 1, Expr.Seq([$1; $2])) }
   | sequenceExpr  {
@@ -141,6 +179,7 @@ simpleExpr:
   | curlyExpr             { $1 }
   | primary LARROW simpleExpr  { mkNode(parseState, 2, Expr.Assign($1, $3)) }
   | WHILE simpleExpr DO simpleExpr  { mkNode(parseState, 1, Expr.While($2, $4)) }
+  | FUN parenArgTypesSeq RARROW simpleExpr  { mkNode(parseState, 1, Expr.Lambda($2, $4)) }
 
 // An 'if-then-else' expression
 ifExpr:
@@ -220,8 +259,16 @@ unaryExpr:
                                                     Expr.If(
                                                         mkNode(parseState, 1, Expr.Greater($3, $5)),
                                                         $3, $5)) }
-  | ASSERT LPAR simpleExpr RPAR                 { mkNode(parseState, 1, Expr.Assertion($3)) }
+  | ASSERT LPAR simpleExpr RPAR                 { mkNode(parseState, 1,
+                                                    Expr.Seq([
+                                                        mkNode(parseState, 1, Expr.If(
+                                                            $3,
+                                                            mkNode(parseState, 1, Expr.UnitVal),
+                                                            assertionError(parseState, 1)));
+                                                        mkNode(parseState, 1, Expr.Assertion($3));
+                                                    ])) }
   | ascriptionExpr                              { $1 }
+  
   // Avoid ambiguity by higher precedence for the postfix operators
 
   // Prefix Increment:
@@ -253,6 +300,8 @@ unaryExpr:
                                                     mkNode(parseState, 2, Expr.Add($1,
                                                         mkNode(parseState, 2, Expr.IntVal(1))))
                                                     ])) }
+  | primary parenExprCommaSeq                   { mkNode(parseState, 1, Expr.Application($1, $2))}
+
 
 // Ascription, i.e. primary expression with (optional) type annotation
 ascriptionExpr:
@@ -280,8 +329,45 @@ value:
 
 // Pretype specification
 pretype:
-  | ident                                    { mkPretypeNode(parseState, 1, Pretype.TId($1)) }
+  | ident                                    { mkPretypeNode(parseState, 1,
+                                                             Pretype.TId($1)) }
+  | parenTypesSeq RARROW pretype             { mkPretypeNode(parseState, 1,
+                                                             Pretype.TFun($1, $3)) }
 
 // Generic identifier
 ident:
   | IDENT  { $1 } // We just return the string captured by the token 'IDENT'
+
+// Possibly empty equence of comma-separated identifiers with type ascriptions,
+// in parentheses
+parenArgTypesSeq:
+  | LPAR RPAR              { [] }
+  | LIT_UNIT               { [] } // Needed because token LIT_UNIT matches "()"
+  | LPAR argTypesSeq RPAR  { $2 }
+
+// Non-empty sequence of comma-separated identifiers with type ascriptions
+argTypesSeq:
+  | variable COLON pretype COMMA argTypesSeq  { ($1, $3) :: $5 }
+  | variable COLON pretype                    { [($1, $3)] }
+
+// Possibly empty equence of comma-separated pretypes
+parenTypesSeq:
+  | LPAR RPAR           { [] }
+  | LIT_UNIT            { [] } // Needed because token LIT_UNIT matches "()"
+  | LPAR typesSeq RPAR  { $2 }
+
+// Non-empty sequence of types
+typesSeq:
+  | pretype COMMA typesSeq  { $1 :: $3 }
+  | pretype                 { [$1] }
+
+// Possibly empty equence of comma-separated expressions, between parentheses
+parenExprCommaSeq:
+  | LPAR RPAR               { [] }
+  | LIT_UNIT                { [] } // Needed because token LIT_UNIT matches "()"
+  | LPAR exprCommaSeq RPAR  { $2 }
+
+// Non-empty sequence of comma-separated expressions
+exprCommaSeq:
+  | simpleExpr COMMA exprCommaSeq  { $1 :: $3 }
+  | simpleExpr                     { [$1] }

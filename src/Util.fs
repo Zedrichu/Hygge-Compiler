@@ -45,6 +45,10 @@ let lexFile (fileName: string): Result<list<Parser.token>, string> =
 /// Parse the given file.
 let parseFile (fileName: string): Result<AST.UntypedAST, string> =
     try
+
+        let sourceCode = System.IO.File.ReadAllText(fileName)
+        SourceRepository.repository.AddFile(fileName, sourceCode)
+
         use textReader = new System.IO.StreamReader(fileName)
         let lexbuf = (Lexer.LexBuffer<char>.FromTextReader textReader)
         lexbuf.EndPos <- { pos_fname = fileName

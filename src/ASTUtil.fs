@@ -112,3 +112,14 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substCond = subst cond var sub
         let substBody = subst body var sub
         {node with Expr = While(substCond, substBody)}
+
+    | Lambda(args, body) ->
+        /// Arguments of this lambda term, without their pretypes
+        let (argVars, _) = List.unzip args
+        if (List.contains var argVars) then node // No substitution
+        else {node with Expr = Lambda(args, (subst body var sub))}
+
+    | Application(expr, args) ->
+        let substExpr = subst expr var sub
+        let substArgs = List.map (fun n -> (subst n var sub)) args
+        {node with Expr = Application(substExpr, substArgs)}
