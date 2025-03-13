@@ -216,11 +216,6 @@ and Expr<'E,'T> =
     | While of cond: Node<'E,'T>
              * body: Node<'E,'T>
 
-    | For of init: Node<'E,'T>
-           * condition: Node<'E,'T>
-           * update: Node<'E,'T>
-           * body: Node<'E,'T>
-
     /// Lambda term, i.e. function instance.
     | Lambda of args: List<string * PretypeNode>
               * body: Node<'E,'T>

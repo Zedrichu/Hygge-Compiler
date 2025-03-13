@@ -113,13 +113,6 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substBody = subst body var sub
         {node with Expr = While(substCond, substBody)}
 
-    | For(init, condition, update, body) ->
-        let substInit = subst init var sub
-        let substCond = subst condition var sub
-        let substUpd = subst update var sub
-        let substBody = subst body var sub
-        {node with Expr = For(substInit, substCond, substUpd, substBody)}
-
     | Lambda(args, body) ->
         /// Arguments of this lambda term, without their pretypes
         let (argVars, _) = List.unzip args
