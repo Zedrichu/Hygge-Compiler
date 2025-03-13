@@ -16,6 +16,8 @@ bin
 .ionide/
 TestResults
 
+examples/exercise*
+
 .idea
 .fake
 .vscode

@@ -39,7 +39,7 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         {node with Expr = Min((subst lhs var sub), (subst rhs var sub))}
     | Max(lhs, rhs) ->
         {node with Expr = Max((subst lhs var sub), (subst rhs var sub))}
-    
+
     | And(lhs, rhs) ->
         {node with Expr = And((subst lhs var sub), (subst rhs var sub))}
     | Or(lhs, rhs) ->
@@ -113,11 +113,11 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substBody = subst body var sub
         {node with Expr = While(substCond, substBody)}
 
-    | PrePlusPlus(target) ->
-        {node with Expr = PrePlusPlus(subst target var sub)}
-    | PostPlusPlus(target) ->
-        {node with Expr = PostPlusPlus(subst target var sub)}
-    | PreMinusMinus(target) ->
-        {node with Expr = PreMinusMinus(subst target var sub)}
-    | PostMinusMinus(target) ->
-        {node with Expr = PostMinusMinus(subst target var sub)}
+    | PreIncrement(target) ->
+        {node with Expr = PreIncrement(subst target var sub)}
+    | PostIncrement(target) ->
+        {node with Expr = PostIncrement(subst target var sub)}
+    | PreDecrement(target) ->
+        {node with Expr = PreDecrement(subst target var sub)}
+    | PostDecrement(target) ->
+        {node with Expr = PostDecrement(subst target var sub)}

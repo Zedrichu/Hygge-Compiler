@@ -48,7 +48,9 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 %token <unit> LIT_UNIT
 
 // Tokens for arithmetic operators
-%token TIMES PLUS MINUS DIV MOD SQRT MIN MAX PLUSPLUS MINUSMINUS
+%token TIMES PLUS MINUS DIV MOD SQRT MIN MAX
+// Tokens for C-style increment/decrement operators
+%token INCREMENT DECREMENT
 
 // Tokens for logical operators
 %token AND OR NOT XOR SAND SOR
@@ -148,10 +150,10 @@ ifExpr:
 // Logical 'or' expression
 orExpr:
   | orExpr OR andExpr  { mkNode(parseState, 2, Expr.Or($1, $3)) }
-  | orExpr SOR andExpr { mkNode(parseState, 2, 
+  | orExpr SOR andExpr { mkNode(parseState, 2,
                          Expr.If(
-                            $1, 
-                            mkNode(parseState, 2, Expr.BoolVal(true)), 
+                            $1,
+                            mkNode(parseState, 2, Expr.BoolVal(true)),
                             $3)
                         )}
   | orExpr XOR andExpr {
@@ -167,12 +169,12 @@ orExpr:
 // Logical 'and' expression
 andExpr:
   | andExpr AND relExpr  { mkNode(parseState, 2, Expr.And($1, $3)) }
-  | andExpr SAND relExpr { mkNode(parseState, 2, 
+  | andExpr SAND relExpr { mkNode(parseState, 2,
                             Expr.If(
                                 mkNode(parseState, 2, Expr.Not($1)),
                                 mkNode(parseState, 2, Expr.BoolVal(false)),
                                 $3
-                            )  
+                            )
                          )}
   | relExpr              { $1 }
 
@@ -209,22 +211,44 @@ unaryExpr:
   | PRINTLN LPAR simpleExpr RPAR                { mkNode(parseState, 1, Expr.PrintLn($3)) }
   | SQRT LPAR simpleExpr RPAR                   { mkNode(parseState, 1, Expr.Sqrt($3)) }
   // | MIN LPAR simpleExpr COMMA simpleExpr RPAR   { mkNode(parseState, 1, Expr.Min($3, $5)) }
-  | MIN LPAR simpleExpr COMMA simpleExpr RPAR   { mkNode(parseState, 1, 
+  | MIN LPAR simpleExpr COMMA simpleExpr RPAR   { mkNode(parseState, 1,
                                                     Expr.If(
                                                         mkNode(parseState, 1, Expr.Less($3, $5)),
                                                         $3, $5)) }
   // | MAX LPAR simpleExpr COMMA simpleExpr RPAR   { mkNode(parseState, 1, Expr.Max($3, $5)) }
-  | MAX LPAR simpleExpr COMMA simpleExpr RPAR   { mkNode(parseState, 1, 
+  | MAX LPAR simpleExpr COMMA simpleExpr RPAR   { mkNode(parseState, 1,
                                                     Expr.If(
                                                         mkNode(parseState, 1, Expr.Greater($3, $5)),
                                                         $3, $5)) }
   | ASSERT LPAR simpleExpr RPAR                 { mkNode(parseState, 1, Expr.Assertion($3)) }
   | ascriptionExpr                              { $1 }
-  | PLUSPLUS unaryExpr                          { mkNode(parseState, 1, Expr.PrePlusPlus($2)) }
-  | MINUSMINUS unaryExpr                        { mkNode(parseState, 1, Expr.PreMinusMinus($2)) }
-  | ascriptionExpr PLUSPLUS                     { mkNode(parseState, 1, Expr.PostPlusPlus($1)) }
-  | ascriptionExpr MINUSMINUS                   { mkNode(parseState, 1, Expr.PostMinusMinus($1)) }
-  
+  // Avoid ambiguity by higher precedence for the postfix operators
+  // | INCREMENT unaryExpr                         { mkNode(parseState, 1, Expr.PreIncrement($2)) }
+  | INCREMENT unaryExpr                         { mkNode(parseState, 1, Expr.Assign($2,
+                                                    mkNode(parseState, 1, Expr.Add($2,
+                                                        mkNode(parseState, 1, Expr.IntVal(1)))))) }
+  // | DECREMENT unaryExpr                         { mkNode(parseState, 1, Expr.PreDecrement($2)) }
+  | DECREMENT unaryExpr                         { mkNode(parseState, 1, Expr.Assign($2,
+                                                    mkNode(parseState, 1, Expr.Sub($2,
+                                                        mkNode(parseState, 1, Expr.IntVal(1)))))) }
+
+  // | ascriptionExpr INCREMENT                    { mkNode(parseState, 1, Expr.PostIncrement($1)) }
+  | ascriptionExpr INCREMENT                    { mkNode(parseState, 2, Expr.Seq([
+                                                    mkNode(parseState, 2, Expr.Assign($1,
+                                                        mkNode(parseState, 2, Expr.Add($1,
+                                                            mkNode(parseState, 2, Expr.IntVal(1))))));
+                                                    mkNode(parseState, 2, Expr.Sub($1,
+                                                        mkNode(parseState, 2, Expr.IntVal(1))))
+                                                    ])) }
+  // | ascriptionExpr DECREMENT                    { mkNode(parseState, 1, Expr.PostDecrement($1)) }
+| ascriptionExpr DECREMENT                      { mkNode(parseState, 2, Expr.Seq([
+                                                    mkNode(parseState, 2, Expr.Assign($1,
+                                                        mkNode(parseState, 2, Expr.Sub($1,
+                                                            mkNode(parseState, 2, Expr.IntVal(1))))));
+                                                    mkNode(parseState, 2, Expr.Add($1,
+                                                        mkNode(parseState, 2, Expr.IntVal(1))))
+                                                    ])) }
+
 // Ascription, i.e. primary expression with (optional) type annotation
 ascriptionExpr:
   | primary COLON pretype  { mkNode(parseState, 2, Expr.Ascription($3, $1)) }

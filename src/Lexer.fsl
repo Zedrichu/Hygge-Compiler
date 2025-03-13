@@ -50,7 +50,7 @@ rule tokenize = parse
 // Separators
 | ";"          { Parser.SEMI }
 | ","          { Parser.COMMA }
-    
+
 // Operators
 | "*"          { Parser.TIMES }
 | "/"          { Parser.DIV }
@@ -72,8 +72,8 @@ rule tokenize = parse
 | "<="         { Parser.LE }
 | ">="         { Parser.GE }
 | "<-"         { Parser.LARROW }
-| "++"         { Parser.PLUSPLUS}
-| "--"         { Parser.MINUSMINUS}
+| "++"         { Parser.INCREMENT }
+| "--"         { Parser.DECREMENT }
 
 // Parentheses and brackets
 | "("          { Parser.LPAR }

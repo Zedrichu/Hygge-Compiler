@@ -93,7 +93,7 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | Add(lhs, rhs) ->
         mkTree "Add" node [("lhs", formatASTRec lhs)
                            ("rhs", formatASTRec rhs)]
-    
+
     | Sub(lhs, rhs) ->
         mkTree "Sub" node [("lhs", formatASTRec lhs)
                            ("rhs", formatASTRec rhs)]
@@ -111,7 +111,7 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | Max(lhs, rhs) ->
         mkTree "Max" node [("lhs", formatASTRec lhs)
                            ("rhs", formatASTRec rhs)]
-    
+
     | And(lhs, rhs) ->
         mkTree "And" node [("lhs", formatASTRec lhs)
                            ("rhs", formatASTRec rhs)]
@@ -134,7 +134,7 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
                                  ("rhs", formatASTRec rhs)]
     | LessEq(lhs, rhs) ->
         mkTree "LessEq" node [("lhs", formatASTRec lhs)
-                              ("rhs", formatASTRec rhs)]  
+                              ("rhs", formatASTRec rhs)]
     | ReadInt -> mkTree "ReadInt" node []
     | ReadFloat -> mkTree "ReadFloat" node []
     | Print(arg) ->
@@ -172,13 +172,13 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | While(cond, body) ->
         mkTree $"While" node [("cond", formatASTRec cond)
                               ("body", formatASTRec body)]
-    | PrePlusPlus(target: Node<'E,'T>) ->
+    | PreIncrement(target: Node<'E,'T>) ->
         mkTree "Pre-increment" node [("target", formatASTRec target)]
-    | PostPlusPlus(target: Node<'E,'T>) ->
+    | PostIncrement(target: Node<'E,'T>) ->
         mkTree "Post-increment" node [("target", formatASTRec target)]
-    | PreMinusMinus(target: Node<'E,'T>) ->
+    | PreDecrement(target: Node<'E,'T>) ->
         mkTree "Pre-decrement" node [("target", formatASTRec target)]
-    | PostMinusMinus(target: Node<'E,'T>) ->
+    | PostDecrement(target: Node<'E,'T>) ->
         mkTree "Post-decrement" node [("target", formatASTRec target)]
 
 /// Return a description of an AST node, and possibly some subtrees (that are
