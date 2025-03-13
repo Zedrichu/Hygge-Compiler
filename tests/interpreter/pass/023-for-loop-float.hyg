@@ -1,0 +1,7 @@
+let mutable x = 0.0f;
+let mutable y = 0.0f;
+
+for (x <- 0.1f; x < 2.0f; x <- x + 0.3f) {
+    y <- x - 0.1f
+};
+assert (y - 6.3f < 0.0001f)
