@@ -134,6 +134,12 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
     | (t1, TVar(name)) ->
         // Expand the type variable; crash immediately if 'name' is not in 'env'
         isSubtypeOf env t1 (env.TypeVars.[name])
+    | (TFun(args1, ret1), TFun(arg2, ret2)) ->
+        // Check that the return type is a subtype of the other return type
+        let retSubtype = isSubtypeOf env ret1 ret2
+        // Check that the argument types are subtypes of the other argument types
+        let argsSubtype = List.forall2 (isSubtypeOf env) args1 arg2
+        retSubtype && argsSubtype
     | (_, _) -> false
 
 
