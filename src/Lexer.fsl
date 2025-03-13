@@ -77,7 +77,10 @@ rule tokenize = parse
 | "<="         { Parser.LE }
 | ">="         { Parser.GE }
 | "<-"         { Parser.LARROW }
+| "++"         { Parser.INCREMENT }
+| "--"         { Parser.DECREMENT }
 | "->"         { Parser.RARROW }
+
 
 // Parentheses and brackets
 | "("          { Parser.LPAR }
@@ -102,6 +105,7 @@ rule tokenize = parse
 | "mutable"    { Parser.MUTABLE }
 | "while"      { Parser.WHILE }
 | "do"         { Parser.DO }
+| "for"        { Parser.FOR }
 | "fun"        { Parser.FUN }
 
 // Generic identifier
