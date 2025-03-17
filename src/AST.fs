@@ -200,6 +200,14 @@ and Expr<'E,'T> =
             * init: Node<'E,'T>
             * scope: Node<'E,'T>
 
+    /// Let-binder with explicit recursive function definition, used to introduce
+    /// a recursive function with the given 'name' and pretype ('tpe') in a 'scope'.
+    /// The function is initialised with the result of the lambda expression in 'init'.
+    | LetRec of name: string
+                 * tpe: PretypeNode
+                 * init: Node<'E,'T>
+                 * scope: Node<'E,'T>
+
     /// Let-binder for mutable variables, used to introduce a mutable variable
     /// with the given 'name' in a 'scope'.  The variable is initialised with
     /// the result of the expression in 'init'.
