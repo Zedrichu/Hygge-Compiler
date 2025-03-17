@@ -17,6 +17,7 @@ bin
 TestResults
 
 examples/exercise*
+examples/test.hyg
 
 .idea
 .fake
