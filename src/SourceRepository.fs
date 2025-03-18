@@ -2,6 +2,8 @@
 /// Module for storing and retrieving source code content for error reporting.
 module SourceRepository
 
+open System.Text.RegularExpressions
+
 /// Repository for storing source code of compiled files
 type SourceRepository() =
     let mutable files = Map.empty<string, string[]>
@@ -17,7 +19,7 @@ type SourceRepository() =
         |> Map.tryFind filename
         |> Option.bind (fun lines ->
             if lineNum > 0 && lineNum <= lines.Length then
-                Some (String.filter (fun c -> c <> '\n' && c <> '\r') lines.[lineNum - 1])
+                Some (Regex.Replace(lines.[lineNum - 1], "\r\n?", " "))
             else None)
 
     member this.GetSnippet(
