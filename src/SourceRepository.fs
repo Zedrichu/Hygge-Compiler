@@ -17,7 +17,7 @@ type SourceRepository() =
         |> Map.tryFind filename
         |> Option.bind (fun lines ->
             if lineNum > 0 && lineNum <= lines.Length then
-                Some lines.[lineNum - 1]
+                Some (String.filter (fun c -> c <> '\n' && c <> '\r') lines.[lineNum - 1])
             else None)
 
     member this.GetSnippet(
