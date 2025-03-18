@@ -535,6 +535,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         (doCodegen {env with VarStorage = varStorage2} scope)
             ++ funCode
 
+    // Typechecking should ensure that a LetRec expression is always initialised with a lambda expression (see notes Module 6).
+    | LetRec _ ->
+        failwith $"BUG: unexpected LetRec node without lambda initialisation in codegen: %s{PrettyPrinter.prettyPrint node}"
+
     | Let(name, init, scope)
     | LetT(name, _, init, scope)
     | LetMut(name, init, scope) ->
