@@ -509,7 +509,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let argNamesTypes = List.zip argNames targs
         /// Compiled function body
         let bodyCode = compileFunction argNamesTypes body env
-        
+
         /// Compiled function code where the function label is located just
         /// before the 'bodyCode', and everything is placed at the end of the
         /// Text segment (i.e. in the "PostText")
@@ -523,7 +523,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         // Finally, compile the 'let...'' scope with the newly-defined function
         // label in the variables storage, and append the 'funCode' above. The
-        // 'scope' code leaves its result in the the 'let...' target register
+        // 'scope' code leaves its result in the 'let...' target register
         (doCodegen {env with VarStorage = varStorage2} scope)
             ++ funCode
 
@@ -649,7 +649,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         /// Compiled function body
         let bodyCode = compileFunction argNamesTypes body env
-        
+
         /// Compiled function code where the function label is located just
         /// before the 'bodyCode', and everything is placed at the end of the
         /// text segment (i.e. in the "PostText")
@@ -677,7 +677,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             Asm().AddText(RV.COMMENT("Load expression to be applied as a function"))
             ++ (doCodegen env expr)
 
-        /// Indexed list of argument expressions.  We will use the as an offset
+        /// Indexed list of argument expressions.  We will use the index as an offset
         /// (above the current target register) to determine the target register
         /// for compiling each expression.
         let indexedArgs = List.indexed args
@@ -821,7 +821,7 @@ and internal compileFunction (args: List<string * Type>)
     let saveRegs = [for i in 0u..11u do yield Reg.s(i)]
 
     // Finally, we put together the full code for the function
-    Asm(RV.COMMENT("Funtion prologue begins here"))
+    Asm(RV.COMMENT("Function prologue begins here"))
             .AddText(RV.COMMENT("Save callee-saved registers"))
         ++ (saveRegisters saveRegs [])
             .AddText(RV.ADDI(Reg.fp, Reg.sp, Imm12(saveRegs.Length * 4)),

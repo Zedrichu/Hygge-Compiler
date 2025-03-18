@@ -57,6 +57,11 @@ rule tokenize = parse
 | "+"          { Parser.PLUS }
 | "-"          { Parser.MINUS }
 | "%"          { Parser.MOD }
+| "+="         { Parser.PLUS_EQ }
+| "-="         { Parser.MINUS_EQ }
+| "*="         { Parser.TIMES_EQ }
+| "/="         { Parser.DIV_EQ }
+| "%="         { Parser.MOD_EQ }
 | "sqrt"       { Parser.SQRT }
 | "min"        { Parser.MIN }
 | "max"        { Parser.MAX }
@@ -72,7 +77,10 @@ rule tokenize = parse
 | "<="         { Parser.LE }
 | ">="         { Parser.GE }
 | "<-"         { Parser.LARROW }
+| "++"         { Parser.INCREMENT }
+| "--"         { Parser.DECREMENT }
 | "->"         { Parser.RARROW }
+
 
 // Parentheses and brackets
 | "("          { Parser.LPAR }
@@ -97,6 +105,7 @@ rule tokenize = parse
 | "mutable"    { Parser.MUTABLE }
 | "while"      { Parser.WHILE }
 | "do"         { Parser.DO }
+| "for"        { Parser.FOR }
 | "fun"        { Parser.FUN }
 
 // Generic identifier

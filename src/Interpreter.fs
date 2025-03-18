@@ -87,6 +87,8 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         match (lhs.Expr, rhs.Expr) with
         | (IntVal(v1), IntVal(v2)) ->
             Some(env, {node with Expr = IntVal(v1 + v2)})
+        | (FloatVal(v1), IntVal(v2)) ->
+            Some(env, {node with Expr = FloatVal(v1 + single v2)})
         | (FloatVal(v1), FloatVal(v2)) ->
             Some(env, {node with Expr = FloatVal(v1 + v2)})
         | (_, _) ->
@@ -94,11 +96,13 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Add(lhs', rhs')})
             | None -> None
-            
+
     | Sub(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | (IntVal(v1), IntVal(v2)) ->
             Some(env, {node with Expr = IntVal(v1 - v2)})
+        | (FloatVal(v1), IntVal(v2)) ->
+            Some(env, {node with Expr = FloatVal(v1 - single v2)})
         | (FloatVal(v1), FloatVal(v2)) ->
             Some(env, {node with Expr = FloatVal(v1 - v2)})
         | (_, _) ->
@@ -106,7 +110,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Sub(lhs', rhs')})
             | None -> None
-            
+
     | Div(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | IntVal(v1), IntVal(v2) when v2 <> 0 ->
@@ -122,7 +126,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Div(lhs', rhs')})
             | None -> None
-    
+
     | Mod(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | IntVal(v1), IntVal(v2) ->
@@ -131,7 +135,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             match(reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Mod(lhs', rhs')})
-            | None -> None    
+            | None -> None
 
     | Sqrt(arg) ->
         match arg.Expr with
@@ -150,7 +154,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', arg2) ->
                 Some(env', {node with Expr = Sqrt(arg2)})
             | None -> None
-        
+
     | Min(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | (IntVal(v1), IntVal(v2)) ->
@@ -162,7 +166,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Min(lhs', rhs')})
             | None -> None
-    
+
     | Max(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | (IntVal(v1), IntVal(v2)) ->
@@ -174,7 +178,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Max(lhs', rhs')})
             | None -> None
-            
+
     | And(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | (BoolVal(v1), BoolVal(v2)) ->
@@ -228,7 +232,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Less(lhs', rhs')})
             | None -> None
-            
+
     | LessEq(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | (IntVal(v1), IntVal(v2)) ->
@@ -240,7 +244,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = LessEq(lhs', rhs')})
             | None -> None
-    
+
     | Greater(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
         | (IntVal(v1), IntVal(v2)) ->
@@ -264,7 +268,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = GreaterEq(lhs', rhs')})
             | None -> None
-    
+
     | ReadInt ->
         match env.Reader with
         | None -> None

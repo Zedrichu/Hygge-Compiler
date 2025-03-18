@@ -1,5 +1,0 @@
-
-println("dupa"); assert(
-    false
-); println("EEEE")
-

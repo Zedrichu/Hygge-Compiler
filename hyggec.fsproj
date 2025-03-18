@@ -16,7 +16,6 @@
     <GenerateProgramFile>false</GenerateProgramFile>
     <LangVersion>preview</LangVersion>
     <RootNamespace>HyggeC</RootNamespace> <!-- Needed for reverse indexes in Parser.fsy -->
-    <Company>Zedrichu</Company> 
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="src/Log.fs" />
