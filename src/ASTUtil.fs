@@ -112,6 +112,11 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substCond = subst cond var sub
         let substBody = subst body var sub
         {node with Expr = While(substCond, substBody)}
+        
+    | DoWhile(body, cond) ->
+        let substBody = subst body var sub
+        let substCond = subst cond var sub
+        {node with Expr = DoWhile(substBody, substCond)}
 
     | Lambda(args, body) ->
         /// Arguments of this lambda term, without their pretypes

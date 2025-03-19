@@ -634,6 +634,20 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
                 (RV.LABEL(whileEndLabel), "")
             ])
+            
+            
+    | DoWhile(body, cond) ->
+        /// Label to mark the beginning of the 'do-while' loop body
+        let doWhileBodyBeginLabel = Util.genSymbol "do_while_body_begin"
+        
+        Asm(RV.LABEL(doWhileBodyBeginLabel))
+            ++ (doCodegen env body)
+            ++ (doCodegen env cond)
+                .AddText([
+                    (RV.BNEZ(Reg.r(env.Target), doWhileBodyBeginLabel),
+                     "Jump to loop body if 'while' condition is true")
+                ])
+            
 
     | Lambda(args, body) ->
         /// Label to mark the position of the lambda term body

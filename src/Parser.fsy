@@ -193,6 +193,7 @@ simpleExpr:
   | primary MOD_EQ simpleExpr                                        { mkNode(parseState, 2, Expr.Assign($1,
                                                                             mkNode(parseState, 2, Expr.Mod($1, $3)))) }
   | WHILE simpleExpr DO simpleExpr                                   { mkNode(parseState, 1, Expr.While($2, $4)) }
+  | DO simpleExpr WHILE simpleExpr                                   { mkNode(parseState, 1, Expr.DoWhile($2, $4)) }
   // For -loop formulation: for (init; condition; update) { body }
   | FOR LPAR simpleExpr SEMI orExpr SEMI simpleExpr RPAR simpleExpr  { mkNode(parseState, 1, Expr.Seq([
                                                                        $3;
