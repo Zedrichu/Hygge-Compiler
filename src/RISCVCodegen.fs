@@ -639,8 +639,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
     | DoWhile(body, cond) ->
         /// Label to mark the beginning of the 'do-while' loop body
         let doWhileBodyBeginLabel = Util.genSymbol "do_while_body_begin"
-        /// Label to mark the end of the 'do-while' loop
-        let doWhileEndLabel = Util.genSymbol "do_while_loop_end"
         
         Asm(RV.LABEL(doWhileBodyBeginLabel))
             ++ (doCodegen env body)
@@ -648,7 +646,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 .AddText([
                     (RV.BNEZ(Reg.r(env.Target), doWhileBodyBeginLabel),
                      "Jump to loop body if 'while' condition is true")
-                    (RV.LABEL(doWhileEndLabel), "")
                 ])
             
 
