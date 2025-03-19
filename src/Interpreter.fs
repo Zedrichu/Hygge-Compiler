@@ -550,7 +550,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         let rewritten = Seq([body;
                             {node with Expr = If(cond,
                                                 {node with Expr = DoWhile(body, cond)},
-                                                {body with Expr = UnitVal})}])
+                                                body)}])
         Some(env, {node with Expr = rewritten})
 
     | Application(expr, args) ->
