@@ -1,0 +1,13 @@
+﻿do println("Hello!") while 42;
+
+do {
+    println("Hello!")
+} while "test";
+
+do "test" while {2};
+
+do "test" while {true} 
+
+
+
+

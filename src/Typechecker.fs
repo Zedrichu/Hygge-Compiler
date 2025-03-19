@@ -430,6 +430,19 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                               + $"found %O{tcond.Type}") :: es)
         | Error(es), Ok(_) -> Error(es)
         | Error(esCond), Error(esBody) -> Error(esCond @ esBody)
+        
+    | DoWhile(body, cond) ->
+        match ((typer env body), (typer env cond)) with
+        | (Ok(tbody), Ok(tcond)) when (isSubtypeOf env tcond.Type TBool) ->
+            Ok { Pos = node.Pos; Env = env; Type = TUnit; Expr = DoWhile(tbody, tcond)}
+        | (Ok(_), Ok(tcond)) ->
+            Error([(tcond.Pos, $"'DoWhile' condition: expected type %O{TBool}, "
+                               + $"found %O{tcond.Type}")])
+        | Error(es), Ok(tcond)  ->
+            Error((tcond.Pos, $"'DoWhile' condition: expected type %O{TBool}, "
+                              + $"found %O{tcond.Type}") :: es)
+        | Ok(_), Error(es) -> Error(es)
+        | Error(esBody), Error(esCond) -> Error(esBody @ esCond)
 
     | Lambda(args, body) ->
         let (argNames, argPretypes) = List.unzip args

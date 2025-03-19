@@ -215,6 +215,10 @@ and Expr<'E,'T> =
     /// 'While' loop: as long as 'cond' is true, repeat the 'body'.
     | While of cond: Node<'E,'T>
              * body: Node<'E,'T>
+             
+    // 'Do-While' loop: execute 'body' once, then repeat while 'cond' is true.
+    | DoWhile of body: Node<'E,'T>
+             * cond: Node<'E,'T>
 
     /// Lambda term, i.e. function instance.
     | Lambda of args: List<string * PretypeNode>
