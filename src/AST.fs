@@ -49,6 +49,8 @@ and Pretype =
     /// A function pretype, with argument pretypes and return pretype.
     | TFun of args: List<PretypeNode>
             * ret: PretypeNode
+    /// A structure pretype, with pretypes for each field.
+    | TStruct of fields: List<string * PretypeNode>
 
 
 /// Node of the Abstract Syntax Tree of a Hygge expression.  The meaning of the
@@ -223,7 +225,7 @@ and Expr<'E,'T> =
     /// 'While' loop: as long as 'cond' is true, repeat the 'body'.
     | While of cond: Node<'E,'T>
              * body: Node<'E,'T>
-             
+
     // 'Do-While' loop: execute 'body' once, then repeat while 'cond' is true.
     | DoWhile of body: Node<'E,'T>
              * cond: Node<'E,'T>
@@ -236,6 +238,21 @@ and Expr<'E,'T> =
     /// arguments.
     | Application of expr: Node<'E,'T>
                    * args: List<Node<'E,'T>>
+
+    /// Constructor of a structure instance: each field has a name and a
+    /// corresponding AST child.
+    | StructCons of fields: List<string * Node<'E,'T>>
+
+    /// Access a field of a target expression (e.g. a structure).
+    | FieldSelect of target: Node<'E,'T>
+                   * field: string
+
+    /// Pointer to a location in the heap, with its address.  This is a runtime
+    /// value that is only used by the Hygge interpreter as an intermediate
+    /// result; it has no syntax in the parser, so it cannot be written in Hygge
+    /// programs.
+    | Pointer of addr: uint
+
 
 /// A type alias for an untyped AST, where there is no typing environment nor
 /// typing information (unit).

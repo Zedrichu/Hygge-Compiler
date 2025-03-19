@@ -19,6 +19,7 @@ let rec isValue (node: Node<'E,'T>): bool =
     | FloatVal(_)
     | StringVal(_) -> true
     | Lambda(_, _) -> true
+    | Pointer(_) -> true
     | _ -> false
 
 
@@ -33,7 +34,15 @@ let prettyPrintValue (node: Node<'E,'T>): string =
     | FloatVal(value) -> $"FloatVal %f{value}"
     | StringVal(value) -> $"StringVal \"%s{value}\""
     | Lambda(args, _) -> $"Lambda (taking %d{args.Length} arguments)"
+    | Pointer(addr) -> $"Pointer 0x%x{addr}"
     | _ -> failwith $"BUG: 'prettyPrintValue' called with invalid argument ${node}"
+
+
+/// Type for the runtime heap: a map from memory addresses to values.  The type
+/// parameters have the same meaning of the corresponding ones in
+/// AST.Node<'E,'T>: they allow the heap to hold generic instances of
+/// AST.Node<'E,'T>.
+type internal Heap<'E,'T> = Map<uint, Node<'E,'T>>
 
 
 /// Runtime environment for the interpreter.  The type parameters have the same
@@ -48,10 +57,25 @@ type internal RuntimeEnv<'E,'T> = {
     Printer: Option<string -> unit>
     /// Mutable local variables: mapping from their name to their current value.
     Mutables: Map<string, Node<'E,'T>>
+    /// Runtime heap, mapping memory addresses to values.
+    Heap: Heap<'E,'T>
+    /// Pointer information, mapping memory addresses to lists of structure
+    /// fields.
+    PtrInfo: Map<uint, List<string>>
 } with override this.ToString(): string =
+        let folder str addr v = str + $"      0x%x{addr}: %s{prettyPrintValue v}%s{Util.nl}"
+        let heapStr = if this.Heap.IsEmpty then "{}"
+                      else "{" + Util.nl + (Map.fold folder "" this.Heap) + "    }"
+        let printFields fields = List.reduce (fun x y -> x + ", " + y) fields
+        let folder str addr fields = str + $"      0x%x{addr}: [%s{printFields fields}]%s{Util.nl}"
+        let ptrInfoStr = if this.PtrInfo.IsEmpty then "{}"
+                         else "{" + Util.nl + (Map.fold folder "" this.PtrInfo) + "    }"
         $"  - Reader: %O{this.Reader}"
           + $"%s{Util.nl}  - Printer: %O{this.Printer}"
           + $"%s{Util.nl}  - Mutables: %s{Util.formatMap this.Mutables}"
+          + $"%s{Util.nl}  - Heap: %s{heapStr}"
+          + $"%s{Util.nl}  - PtrInfo: %s{ptrInfoStr}"
+
 
 /// Attempt to reduce the given AST node by one step, using the given runtime
 /// environment.  If a reduction is possible, return the reduced node and an
@@ -70,6 +94,8 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
     | Var(_) -> None
 
     | Lambda(_, _) -> None
+
+    | Pointer(_) -> None
 
     | Mult(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
@@ -438,6 +464,28 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | None -> None
         | None -> None
 
+    | Assign({Expr = FieldSelect(selTarget, field)} as target,
+             expr) when not (isValue selTarget)->
+        match (reduce env selTarget) with
+        | Some(env', selTarget') ->
+            let target' = {target with Expr = FieldSelect(selTarget', field)}
+            Some(env', {node with Expr = Assign(target', expr)})
+        | None -> None
+    | Assign({Expr = FieldSelect(_, _)} as target, expr) when not (isValue expr) ->
+        match (reduce env expr) with
+        | Some(env', expr') ->
+            Some(env', {node with Expr = Assign(target, expr')})
+        | None -> None
+    | Assign({Expr = FieldSelect({Expr = Pointer(addr)}, field)}, value) ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(fields) ->
+            match (List.tryFindIndex (fun f -> f = field) fields) with
+            | Some(offset) ->
+                /// Updated env with selected struct field overwritten by 'value'
+                let env' = {env with Heap = env.Heap.Add(addr+(uint offset), value)}
+                Some(env', value)
+            | None -> None
+        | None -> None
     | Assign(target, expr) when not (isValue expr) ->
         match (reduce env expr) with
         | Some(env', expr') ->
@@ -502,6 +550,41 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', expr') -> Some(env', {node with Expr = Application(expr', args)})
             | None -> None
 
+    | StructCons(fields) ->
+        let (fieldNames, fieldNodes) = List.unzip fields
+        match (reduceList env fieldNodes) with
+            | Some(env', fieldNodes') ->
+                let fields' = List.zip fieldNames fieldNodes'
+                Some(env', {node with Expr = StructCons(fields')})
+            | None ->
+                // If all struct entries are values, place them on the heap in
+                // consecutive addresses
+                if (List.forall isValue fieldNodes) then
+                    /// Updated heap with newly-allocated struct, placed at
+                    /// 'baseAddr'
+                    let (heap', baseAddr) = heapAlloc env.Heap fieldNodes
+                    /// Updated pointer info, mapping 'baseAddr' to the list of
+                    /// struct field names
+                    let ptrInfo' = env.PtrInfo.Add(baseAddr, fieldNames)
+                    Some({env with Heap = heap'; PtrInfo = ptrInfo'},
+                         {node with Expr = Pointer(baseAddr)})
+                else None
+
+    | FieldSelect({Expr = Pointer(addr)}, field) ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(fields) ->
+            match (List.tryFindIndex (fun f -> f = field) fields) with
+            | Some(offset) ->
+                Some(env, env.Heap[addr + (uint offset)])
+            | None -> None
+        | None -> None
+    | FieldSelect(target, field) when not (isValue target)->
+        match (reduce env target) with
+        | Some(env', target') ->
+            Some(env', {node with Expr = FieldSelect(target', field)})
+        | None -> None
+    | FieldSelect(_, _) -> None
+
 /// Attempt to reduce the given lhs, and then (if the lhs is a value) the rhs,
 /// using the given runtime environment.  Return None if either (a) the lhs
 /// cannot reduce although it is not a value, or (b) the lhs is a value but the
@@ -536,6 +619,24 @@ and internal reduceList (env: RuntimeEnv<'E,'T>)
             | Some(env', rest') -> Some(env', node :: rest')
             | None -> None
 
+/// Allocate the given list of AST nodes (which are expected to be values) on
+/// the given heap, returning the updated heap and the address where the first
+/// given value is allocated.
+and internal heapAlloc (heap: Heap<'E,'T>)
+                       (values: List<Node<'E,'T>>): Heap<'E,'T> * uint =
+    assert(values.Length <> 0) // Sanity check
+    assert(List.forall isValue values) // Sanity check
+    /// Compute the base address where the given values will be allocated
+    let addrs = Set(heap.Keys)
+    /// Maximum address already allocated on the heap
+    let maxAddr: uint = if addrs.IsEmpty then 0u else addrs.MaximumElement
+    /// Base address for the newly-allocated list of values
+    let baseAddr = maxAddr + 1u
+    /// Fold over the struct field values, adding them to the heap
+    let folder (h: Heap<'E,'T>) (offset, n): Heap<'E,'T> =
+        h.Add(baseAddr + uint(offset), n)
+    let heap2 = List.fold folder heap (List.indexed values)
+    (heap2, baseAddr)
 
 /// Reduce the given AST until it cannot reduce further, using the given
 /// (optional) 'reader' and 'writer' functions.  Return the final unreducible
@@ -545,7 +646,9 @@ let rec reduceFully (node: Node<'E,'T>)
                     (printer: Option<string -> unit>): Node<'E,'T> =
     let env = { Reader = reader;
                 Printer = printer;
-                Mutables = Map[] }
+                Mutables = Map[];
+                Heap = Map[];
+                PtrInfo = Map[] }
     reduceFullyWithEnv env node
 and internal reduceFullyWithEnv (env: RuntimeEnv<'E,'T>) (node: Node<'E,'T>): Node<'E,'T> =
     match (reduce env node) with
@@ -561,7 +664,9 @@ let rec reduceSteps (node: Node<'E,'T>)
                     (steps: int): Node<'E,'T> * int =
     let env = { Reader = reader;
                 Printer = printer;
-                Mutables = Map[] }
+                Mutables = Map[];
+                Heap = Map[];
+                PtrInfo = Map[] }
     reduceStepsWithEnv env node steps
 and internal reduceStepsWithEnv (env: RuntimeEnv<'E,'T>) (node: Node<'E,'T>)
                                 (steps: int): Node<'E,'T> * int =
@@ -576,7 +681,9 @@ let isStuck (node: Node<'E,'T>): bool =
     else
         let env = { Reader = Some(fun _ -> "");
                     Printer = Some(fun _ -> ());
-                    Mutables = Map[]}
+                    Mutables = Map[];
+                    Heap = Map[];
+                    PtrInfo = Map[] }
         match (reduce env node) with
          | Some(_,_) -> false
          | None -> true
@@ -603,6 +710,8 @@ let interpret (node: AST.Node<'E,'T>) (verbose: bool): AST.Node<'E,'T> =
 
         let env = { Reader = Some(reader);
                     Printer = Some(printer);
-                    Mutables = Map[] }
+                    Mutables = Map[];
+                    Heap = Map[];
+                    PtrInfo = Map[] }
         let (env', node') = reduceVerbosely env node
         node'

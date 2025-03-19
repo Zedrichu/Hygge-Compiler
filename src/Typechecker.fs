@@ -93,6 +93,23 @@ let rec internal resolvePretype (env: TypingEnv) (pt: AST.PretypeNode): Result<T
             let argTypes = List.map getOkValue argTypes
             let returnType = getOkValue returnType
             Ok(TFun(argTypes, returnType))
+    | Pretype.TStruct(fields) ->
+        /// Struct field names and pretypes
+        let (fieldNames, fieldPretypes) = List.unzip fields
+        /// List of duplicate field names
+        let dups = Util.duplicates fieldNames
+        if not dups.IsEmpty then
+            Error([(pt.Pos, $"duplicate field names in struct type: %s{Util.formatSeq dups}")])
+        else
+            /// List of field types (possibly with errors)
+            let fieldTypes = List.map (fun a -> resolvePretype env a) fieldPretypes
+            /// Errors occurred while resolving 'fieldPretypes'
+            let errors = collectErrors fieldTypes
+            if not errors.IsEmpty then Error(errors)
+            else
+                /// Type of each struct field
+                let fieldTypes = List.map getOkValue fieldTypes
+                Ok(TStruct(List.zip fieldNames fieldTypes))
 
 /// Resolve a type variable using the given typing environment: optionally
 /// return the Type corresponding to variable 'name', or None if 'name' is not
@@ -134,6 +151,20 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
     | (t1, TVar(name)) ->
         // Expand the type variable; crash immediately if 'name' is not in 'env'
         isSubtypeOf env t1 (env.TypeVars.[name])
+    | (TStruct(fields1), TStruct(fields2)) ->
+        // A subtype struct must have at least the same fields of the supertype
+        if fields1.Length < fields2.Length then false
+        else
+            /// First n fields of the subtype struct, where n is the number of
+            /// fields of the supertype struct: we only check whether these
+            /// fields are compatible (the subtype can have more fields)
+            let fields1' = fields1[0..(fields2.Length-1)]
+            let (fieldNames1, fieldTypes1) = List.unzip fields1'
+            let (fieldNames2, fieldTypes2) = List.unzip fields2
+            if (fieldNames1 <> fieldNames2) then false
+            else
+                List.forall2 (fun t1 t2 -> isSubtypeOf env t1 t2)
+                             fieldTypes1 fieldTypes2
     | (_, _) -> false
 
 
@@ -412,6 +443,9 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                 else
                     Error([(node.Pos,
                             $"assignment to non-mutable variable %s{name}")])
+            | FieldSelect(_, _) ->
+                Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
+                     Expr = Assign(ttarget, texpr) }
             | _ -> Error([(node.Pos, "invalid assignment target")])
         | (Ok(ttarget), Ok(texpr)) ->
             Error([(texpr.Pos,
@@ -509,6 +543,47 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
             | t ->
                 Error([(expr.Pos, $"cannot apply an expression of type %O{t} as a function")])
         | Error(es) -> Error(es)
+
+    | StructCons(fields) ->
+        let (fieldNames, fieldNodes) = List.unzip fields
+        let dups = Util.duplicates fieldNames
+        if not (dups.IsEmpty) then
+            Error([(node.Pos, $"duplicate structure field names: %s{Util.formatSeq dups}")])
+        else
+            /// Typings (possibly with errors) of init expressions of all fields
+            let initTypings = List.map (fun n -> typer env n) fieldNodes
+            let errs = collectErrors initTypings
+            if not errs.IsEmpty then Error(errs)
+            else
+                /// Typed AST nodes of init expressions, for all struct fields
+                let typedInits = List.map getOkValue initTypings
+                /// Types of each struct field (derived from their init expr)
+                let fieldTypes = List.map (fun (t: TypedAST) -> t.Type) typedInits
+                /// Pairs of field names and their respective type
+                let fieldNamesTypes = List.zip fieldNames fieldTypes
+                /// Pairs of field names and typed AST node of init expression
+                let fieldsTypedInits = List.zip fieldNames typedInits
+                Ok { Pos = node.Pos; Env = env; Type = TStruct(fieldNamesTypes);
+                     Expr = Expr.StructCons(fieldsTypedInits)}
+
+    | FieldSelect(target, field) ->
+        match (typer env target) with
+        | Ok(texpr) ->
+            match (expandType env texpr.Type) with
+            | TStruct(fields) ->
+                let (fieldNames, fieldTypes) = List.unzip fields
+                if not (List.contains field fieldNames) then
+                    Error([(node.Pos, $"struct has no field called '%s{field}'")])
+                else
+                    let idx = List.findIndex (fun f -> f = field) fieldNames
+                    Ok { Pos = node.Pos; Env = env; Type = fieldTypes.[idx];
+                         Expr = FieldSelect(texpr, field)}
+            | _ -> Error([(node.Pos, $"cannot access field '%s{field}' "
+                                     + $"on expression of type %O{texpr.Type}")])
+        | Error(es) -> Error(es)
+
+    | Pointer(_) ->
+        Error([(node.Pos, "pointers cannot be type-checked (by design!)")])
 
 /// Compute the typing of a binary numerical operation, by computing and
 /// combining the typings of the 'lhs' and 'rhs'.  The argument 'descr' (used in

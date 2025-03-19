@@ -611,6 +611,39 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                                  Reg.r(env.Target + 1u)),
                                            $"Transfer value of '%s{name}' to memory") ])
                 | None -> failwith $"BUG: variable without storage: %s{name}"
+        | FieldSelect(target, field) ->
+            /// Assembly code for computing the 'target' object of which we are
+            /// selecting the 'field'.  We write the computation result (which
+            /// should be a struct memory address) in the target register.
+            let selTargetCode = doCodegen env target
+            /// Code for the 'rhs', leaving its result in the target+1 register
+            let rhsCode = doCodegen {env with Target = env.Target + 1u} rhs
+            match (expandType target.Env target.Type) with
+            | TStruct(fields) ->
+                /// Names of the struct fields
+                let (fieldNames, _) = List.unzip fields
+                /// Offset of the selected struct field from the beginning of
+                /// the struct
+                let offset = List.findIndex (fun f -> f = field) fieldNames
+                /// Assembly code that performs the field value assignment
+                let assignCode =
+                    match rhs.Type with
+                    | t when (isSubtypeOf rhs.Env t TUnit) ->
+                        Asm() // Nothing to do
+                    | t when (isSubtypeOf rhs.Env t TFloat) ->
+                        Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(offset * 4),
+                                     Reg.r(env.Target)),
+                            $"Assigning value to struct field '%s{field}'")
+                    | _ ->
+                        Asm([(RV.SW(Reg.r(env.Target + 1u), Imm12(offset * 4),
+                                    Reg.r(env.Target)),
+                              $"Assigning value to struct field '%s{field}'")
+                             (RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                              "Copying assigned value to target register")])
+                // Put everything together
+                selTargetCode ++ rhsCode ++ assignCode
+            | t ->
+                failwith $"BUG: field selection on invalid object type: %O{t}"
         | _ ->
             failwith ($"BUG: assignment to invalid target:%s{Util.nl}"
                       + $"%s{PrettyPrinter.prettyPrint lhs}")
@@ -749,6 +782,99 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             ++ retCode
             .AddText(RV.COMMENT("Restore caller-saved registers"))
                   ++ (restoreRegisters saveRegs [])
+
+    | StructCons(fields) ->
+        // To compile a structure constructor, we allocate heap space for the
+        // whole struct instance, and then compile its field initialisations
+        // one-by-one, storing each result in the corresponding heap location.
+        // The struct heap address will end up in the 'target' register - i.e.
+        // the register will contain a pointer to the first element of the
+        // allocated structure
+        let (fieldNames, fieldInitNodes) = List.unzip fields
+        /// Generate the code that initialises a struct field, and accumulates
+        /// the result.  This function is folded over all indexed struct fields,
+        /// to produce the assembly code that initialises all fields.
+        let folder = fun (acc: Asm) (fieldOffset: int, fieldInit: TypedAST) ->
+            /// Code that initialises a single struct field.  Each field init
+            /// result is compiled by targeting the register (target+1u),
+            /// because the 'target' register holds the base memory address of
+            /// the struct.  After the init result for a field is computed, we
+            /// copy it into its heap location, by adding the field offset
+            /// (multiplied by 4, i.e. the word size) to the base struct address
+            let fieldInitCode: Asm =
+                match fieldInit.Type with
+                | t when (isSubtypeOf fieldInit.Env t TUnit) ->
+                    Asm() // Nothing to do
+                | t when (isSubtypeOf fieldInit.Env t TFloat) ->
+                    Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(fieldOffset * 4),
+                                 Reg.r(env.Target)),
+                        $"Initialize struct field '%s{fieldNames.[fieldOffset]}'")
+                | _ ->
+                    Asm(RV.SW(Reg.r(env.Target + 1u), Imm12(fieldOffset * 4),
+                              Reg.r(env.Target)),
+                        $"Initialize struct field '%s{fieldNames.[fieldOffset]}'")
+            acc ++ (doCodegen {env with Target = env.Target + 1u} fieldInit)
+                ++ fieldInitCode
+        /// Assembly code for initialising each field of the struct, by folding
+        /// the 'folder' function above over all indexed struct fields (we use
+        /// the index to know the offset of a field from the beginning of the
+        /// struct)
+        let fieldsInitCode =
+            List.fold folder (Asm()) (List.indexed fieldInitNodes)
+
+        /// Assembly code that allocates space on the heap for the new
+        /// structure, through an 'Sbrk' system call.  The size of the structure
+        /// is computed by multiplying the number of fields by the word size (4)
+        let structAllocCode =
+            (beforeSysCall [Reg.a0] [])
+                .AddText([
+                    (RV.LI(Reg.a0, fields.Length * 4),
+                     "Amount of memory to allocate for a struct (in bytes)")
+                    (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                    (RV.ECALL, "")
+                    (RV.MV(Reg.r(env.Target), Reg.a0),
+                     "Move syscall result (struct mem address) to target")
+                ])
+                ++ (afterSysCall [Reg.a0] [])
+
+        // Put everything together: allocate heap space, init all struct fields
+        structAllocCode ++ fieldsInitCode
+
+    | FieldSelect(target, field) ->
+        // To compile a field selection, we first execute the 'target' object of
+        // the field selection, whose code is expected to leave a struct memory
+        // address in the environment's 'target' register; then use the 'target'
+        // type to determine the memory offset where the selected field is
+        // located, and retrieve its value.
+
+        /// Generated code for the target object whose field is being selected
+        let selTargetCode = doCodegen env target
+        /// Assembly code to access the struct field in memory (depending on the
+        /// 'target' type) and leave its value in the target register
+        let fieldAccessCode =
+            match (expandType node.Env target.Type) with
+            | TStruct(fields) ->
+                let (fieldNames, fieldTypes) = List.unzip fields
+                let offset = List.findIndex (fun f -> f = field) fieldNames
+                match fieldTypes.[offset] with
+                | t when (isSubtypeOf node.Env t TUnit) ->
+                    Asm() // Nothing to do
+                | t when (isSubtypeOf node.Env t TFloat) ->
+                    Asm(RV.FLW_S(FPReg.r(env.FPTarget), Imm12(offset * 4),
+                                 Reg.r(env.Target)),
+                        $"Retrieve value of struct field '%s{field}'")
+                | _ ->
+                    Asm(RV.LW(Reg.r(env.Target), Imm12(offset * 4),
+                              Reg.r(env.Target)),
+                        $"Retrieve value of struct field '%s{field}'")
+            | t ->
+                failwith $"BUG: FieldSelect codegen on invalid target type: %O{t}"
+
+        // Put everything together: compile the target, access the field
+        selTargetCode ++ fieldAccessCode
+
+    | Pointer(_) ->
+        failwith "BUG: pointers cannot be compiled (by design!)"
 
 /// Generate code to save the given registers on the stack, before a RARS system
 /// call. Register a7 (which holds the system call number) is backed-up by

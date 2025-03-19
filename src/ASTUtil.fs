@@ -20,6 +20,8 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
     | FloatVal(_)
     | StringVal(_) -> node // The substitution has no effect
 
+    | Pointer(_) -> node // The substitution has no effect
+
     | Var(vname) when vname = var -> sub // Substitution applied
     | Var(_) -> node // The substitution has no effect
 
@@ -136,3 +138,11 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substExpr = subst expr var sub
         let substArgs = List.map (fun n -> (subst n var sub)) args
         {node with Expr = Application(substExpr, substArgs)}
+
+    | StructCons(fields) ->
+        let (fieldNames, initNodes) = List.unzip fields
+        let substInitNodes = List.map (fun e -> (subst e var sub)) initNodes
+        {node with Expr = StructCons(List.zip fieldNames substInitNodes)}
+
+    | FieldSelect(target, field) ->
+        {node with Expr = FieldSelect((subst target var sub), field)}

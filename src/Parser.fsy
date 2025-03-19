@@ -101,7 +101,7 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 %token LET TYPE MUTABLE
 
 // Misc tokens
-%token SEMI EOF COLON LARROW RARROW COMMA
+%token SEMI EOF COLON LARROW RARROW COMMA DOT
 
 // Built-in statements
 %token READ_INT
@@ -113,6 +113,7 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 %token DO
 %token FOR
 %token FUN REC
+%token STRUCT
 
 // Generic identifier (might result in a variable, pretype, etc.)
 %token <string> IDENT
@@ -342,6 +343,8 @@ primary:
   | LPAR simpleExpr RPAR                     { $2 }
   | value                                    { $1 }
   | variable                                 { mkNode(parseState, 1, Expr.Var($1)) }
+  | STRUCT LCURLY structFieldInitSeq RCURLY  { mkNode(parseState, 1, Expr.StructCons($3)) }
+  | primary DOT field                        { mkNode(parseState, 2, Expr.FieldSelect($1, $3)) }
 
 // Variable name
 variable:
@@ -362,6 +365,8 @@ pretype:
                                                              Pretype.TId($1)) }
   | parenTypesSeq RARROW pretype             { mkPretypeNode(parseState, 1,
                                                              Pretype.TFun($1, $3)) }
+  | STRUCT LCURLY structFieldTypeSeq RCURLY  { mkPretypeNode(parseState, 1,
+                                                             Pretype.TStruct($3)) }
 
 // Generic identifier
 ident:
@@ -400,3 +405,19 @@ parenExprCommaSeq:
 exprCommaSeq:
   | simpleExpr COMMA exprCommaSeq  { $1 :: $3 }
   | simpleExpr                     { [$1] }
+
+// Non-empty sequence of structure field initializations, separated by
+// semicolons
+structFieldInitSeq:
+  | field EQ simpleExpr SEMI structFieldInitSeq  { ($1, $3) :: $5 }
+  | field EQ simpleExpr                          { [($1, $3)] }
+
+// Field of a structure
+field:
+  | ident       { $1 }
+
+// Non-empty sequence of names and types, separated by semicolons (used for
+// defining structs)
+structFieldTypeSeq:
+  | field COLON pretype SEMI structFieldTypeSeq  { ($1, $3) :: $5 }
+  | field COLON pretype                          { [($1, $3)] }
