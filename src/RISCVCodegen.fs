@@ -497,6 +497,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
     // 'Let...' declares 'name' as a Lambda expression with a TFun type
     | Let(name, {Node.Expr = Lambda(args, body);
                  Node.Type = TFun(targs, _)}, scope)
+    | LetRec(name, _, {Node.Expr = Lambda(args, body);
+                       Node.Type = TFun(targs, _)}, scope)
     | LetT(name, _, {Node.Expr = Lambda(args, body);
                      Node.Type = TFun(targs, _)}, scope) ->
         /// Assembly label to mark the position of the compiled function body.
@@ -507,8 +509,14 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let (argNames, _) = List.unzip args
         /// List of pairs associating each function argument to its type
         let argNamesTypes = List.zip argNames targs
+
         /// Compiled function body
-        let bodyCode = compileFunction argNamesTypes body env
+        let bodyCode =
+            match node.Expr with
+            | LetRec _ ->
+                let recEnv = { env with VarStorage = env.VarStorage.Add(name, Storage.Label(funLabel)) }
+                compileFunction argNamesTypes body recEnv
+            | _ -> compileFunction argNamesTypes body env
 
         /// Compiled function code where the function label is located just
         /// before the 'bodyCode', and everything is placed at the end of the
@@ -526,6 +534,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // 'scope' code leaves its result in the 'let...' target register
         (doCodegen {env with VarStorage = varStorage2} scope)
             ++ funCode
+
+    // Typechecking should ensure that a LetRec expression is always initialised with a lambda expression (see notes Module 6).
+    | LetRec _ ->
+        failwith $"BUG: unexpected LetRec node without lambda initialisation in codegen: %s{PrettyPrinter.prettyPrint node}"
 
     | Let(name, init, scope)
     | LetT(name, _, init, scope)

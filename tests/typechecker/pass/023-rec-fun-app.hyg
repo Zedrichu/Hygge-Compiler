@@ -1,0 +1,4 @@
+rec fun x(n: int): int = {if n = 0 then 0 else 1 + x(n - 1)};
+let result: int = (x: (int) -> int)(3);
+0;
+x: (int) -> int

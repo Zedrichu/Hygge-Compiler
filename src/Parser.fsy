@@ -112,7 +112,7 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 %token WHILE
 %token DO
 %token FOR
-%token FUN
+%token FUN REC
 
 // Generic identifier (might result in a variable, pretype, etc.)
 %token <string> IDENT
@@ -140,6 +140,9 @@ expr:
   | LET variable COLON pretype EQ simpleExpr SEMI expr  {
         mkNode(parseState, 1, Expr.LetT($2, $4, $6, $8))
     }
+  | LET REC variable COLON pretype EQ simpleExpr SEMI expr  {
+        mkNode(parseState, 1, Expr.LetRec($3, $5, $7, $9))
+    }
   | LET MUTABLE variable EQ simpleExpr SEMI expr  {
         mkNode(parseState, 1, Expr.LetMut($3, $5, $7))
     }
@@ -149,6 +152,13 @@ expr:
       mkNode(parseState, 1, Expr.LetT($2, mkPretypeNode(parseState, 5,
                                                         Pretype.TFun(argTypes, $5)),
                                       mkNode(parseState, 7, Lambda($3, $7)), $9))
+    }
+  // Syntactic sugaring for recursive function definition
+  | REC FUN variable parenArgTypesSeq COLON pretype EQ simpleExpr SEMI expr  {
+      let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+      mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 5,
+                                                        Pretype.TFun(argTypes, $6)),
+                                      mkNode(parseState, 7, Lambda($4, $8)), $10))
     }
   | curlyExpr expr  { mkNode(parseState, 1, Expr.Seq([$1; $2])) }
   | sequenceExpr  {

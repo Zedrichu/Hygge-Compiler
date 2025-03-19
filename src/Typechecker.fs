@@ -395,6 +395,9 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
     | LetT(name, tpe, init, scope) ->
         letTypeAnnotTyper node.Pos env name tpe init scope
 
+    | LetRec(name, tpe, init, scope) ->
+        letRecTyper node.Pos env name tpe init scope
+
     | LetMut(name, init, scope) ->
         letTyper node.Pos env name init scope true
 
@@ -668,7 +671,29 @@ and internal letTypeAnnotTyper pos (env: TypingEnv) (name: string)
                     | Error(es) -> Error(es)
         | Error(es) -> Error(es)
     | Error(es) -> Error(es)
-
+and internal letRecTyper pos (env: TypingEnv)
+    (name: string) (tannot: PretypeNode)
+    (init: UntypedAST) (scope: UntypedAST): TypingResult =
+    match init.Expr with
+    | Lambda(args, body) ->
+        match (resolvePretype env tannot) with
+        | Ok(letFunType) ->
+            let env' = { env with Vars = env.Vars.Add(name, letFunType)
+                                  Mutables = env.Mutables.Remove(name) }
+            match (typer env' init) with
+            | Ok(initType) ->
+                if not (isSubtypeOf env' initType.Type letFunType)
+                    then Error [(pos, $"function '%s{name}' of type %O{letFunType} "
+                                    + $"initialized with expression of incompatible type %O{initType.Type}")]
+                    else
+                        match (typer env' scope) with
+                        | Ok(scopeType) ->
+                            Ok { Pos = pos; Env = env; Type = scopeType.Type;
+                                 Expr = LetRec(name, tannot, initType, scopeType) }
+                        | Error(es) -> Error(es)
+            | Error(es) -> Error(es)
+        | Error(es) -> Error(es)
+    | _ -> Error([(pos, $"function '%s{name}' initialized with non-lambda expression")])
 
 /// Perform type checking of the given untyped AST.  Return a well-typed AST in
 /// case of success, or a sequence of error messages in case of failure.
