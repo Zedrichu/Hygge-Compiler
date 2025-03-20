@@ -93,23 +93,26 @@ rule tokenize = parse
 | ':'          { Parser.COLON }
 
 // Keywords
-| "if"         { Parser.IF }
-| "then"       { Parser.THEN }
-| "else"       { Parser.ELSE }
-| "let"        { Parser.LET }
-| "readInt"    { Parser.READ_INT }
-| "readFloat"  { Parser.READ_FLOAT }
-| "print"      { Parser.PRINT }
-| "println"    { Parser.PRINTLN }
-| "assert"     { Parser.ASSERT }
-| "type"       { Parser.TYPE }
-| "mutable"    { Parser.MUTABLE }
-| "while"      { Parser.WHILE }
-| "do"         { Parser.DO }
-| "for"        { Parser.FOR }
-| "fun"        { Parser.FUN }
-| "rec"        { Parser.REC }
-| "struct"     { Parser.STRUCT }
+| "if"          { Parser.IF }
+| "then"        { Parser.THEN }
+| "else"        { Parser.ELSE }
+| "let"         { Parser.LET }
+| "readInt"     { Parser.READ_INT }
+| "readFloat"   { Parser.READ_FLOAT }
+| "print"       { Parser.PRINT }
+| "println"     { Parser.PRINTLN }
+| "assert"      { Parser.ASSERT }
+| "type"        { Parser.TYPE }
+| "mutable"     { Parser.MUTABLE }
+| "while"       { Parser.WHILE }
+| "do"          { Parser.DO }
+| "for"         { Parser.FOR }
+| "fun"         { Parser.FUN }
+| "rec"         { Parser.REC }
+| "struct"      { Parser.STRUCT }
+| "array"       { Parser.ARRAY }
+| "arrayLength" { Parser.ARRAY_LENGTH }
+| "arrayElem"   { Parser.ARRAY_ELEM }
 
 // Generic identifier
 | ident        { Parser.IDENT(LexBuffer<_>.LexemeString lexbuf) }
