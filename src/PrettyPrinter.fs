@@ -60,6 +60,12 @@ let rec internal formatType (t: Type.Type): Tree =
                      (List.indexed args)
         Node("fun", (argChildren @
                      [("return", formatType ret)]))
+    | Type.TStruct(fields) ->
+        /// Formatted fields with their respective type
+        let fieldsChildren =
+            List.map (fun (f, t) -> ($"field %s{f}", formatType t)) fields
+        Node("struct", fieldsChildren)
+
 
 /// Traverse a Hygge typing environment and return its hierarchical
 /// representation.
@@ -169,6 +175,10 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
         mkTree $"LetT %s{name}" node [("Ascription", formatPretypeNode tpe)
                                       ("init", formatASTRec init)
                                       ("scope", formatASTRec scope)]
+    | LetRec(name, tpe, init, scope) ->
+        mkTree $"LetRec %s{name}" node [("Ascription", formatPretypeNode tpe)
+                                        ("init", formatASTRec init)
+                                        ("scope", formatASTRec scope)]
     | LetMut(name, init, scope) ->
         mkTree $"Let mutable %s{name}" node [("init", formatASTRec init)
                                              ("scope", formatASTRec scope)]
@@ -178,6 +188,9 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | While(cond, body) ->
         mkTree $"While" node [("cond", formatASTRec cond)
                               ("body", formatASTRec body)]
+    | DoWhile(body, cond) ->
+        mkTree $"DoWhile" node [("body", formatASTRec body)
+                                ("cond", formatASTRec cond)]
     | Lambda(args, body) ->
         /// Formatted arguments with their pretype
         let argChildren =
@@ -191,6 +204,15 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
                      (List.indexed args)
         mkTree "Application" node (("expr", formatASTRec expr) ::
                                    argChildren)
+    | StructCons(fields) ->
+        /// Formatted fields of the structure
+        let fieldsChildren =
+            List.map (fun (f, n) -> ($"field %s{f}", formatASTRec n)) fields
+        mkTree "StructCons" node fieldsChildren
+    | FieldSelect(target, field) ->
+        mkTree $"FieldSelect %s{field}" node [("expr", formatASTRec target)]
+    | Pointer(addr) ->
+        mkTree $"Pointer 0x%x{addr}" node []
 
 /// Return a description of an AST node, and possibly some subtrees (that are
 /// added to the overall tree structure).
@@ -231,6 +253,12 @@ and internal formatPretypeNode (node: PretypeNode): Tree =
         Node((formatPretypeDescr node "Function pretype"),
              argChildren @
              [("return", formatPretypeNode ret)])
+    | Pretype.TStruct(fields) ->
+        /// Formatted pretypes of each field with their respective field name
+        let fieldsChildren =
+            List.map (fun (name, t) -> ((formatPretypeDescr t $"field %s{name}"),
+                                        formatPretypeNode t)) fields
+        Node((formatPretypeDescr node "Struct pretype"), fieldsChildren)
 
 /// Format the description of a pretype AST node (without printing its
 /// children).

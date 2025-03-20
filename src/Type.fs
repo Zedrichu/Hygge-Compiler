@@ -26,6 +26,8 @@ type Type =
     | TVar of name: string
     /// A function type, with argument types and return type.
     | TFun of args: List<Type> * ret: Type
+    /// A struct type with ordered fields, each having a unique name and a type.
+    | TStruct of fields: List<string * Type>
 
     /// Returns a human-readable string describing the type.
     override this.ToString(): string =
@@ -40,6 +42,10 @@ type Type =
             let fmtArg (t: Type) = $"%O{t}"
             let argsStr = List.map fmtArg args
             "(" + System.String.Join(", ", argsStr) + $") -> %O{ret}"
+        | TStruct(fields) ->
+            let fmtEntry (f: string, t: Type) = $"%s{f}: %O{t}"
+            let entriesStr = Seq.map fmtEntry fields
+            "struct {" + System.String.Join("; ", entriesStr) + "}"
 
 /// List of basic types known by the compiler.  NOTE: this list must be kept in
 /// sync with the definition of 'Type'.
@@ -57,6 +63,9 @@ let rec freeTypeVars (t: Type): Set<string> =
     | TVar(name) -> Set[name]
     | TFun(args, ret) ->
         Set.union (collectFreeTypeVars args) (freeTypeVars ret)
+    | TStruct(fields) ->
+        let (_, fieldTypes) = List.unzip fields
+        collectFreeTypeVars fieldTypes
 
 /// Collect all free type variables in the given list of types.
 and collectFreeTypeVars (ts: List<Type>): Set<string> =

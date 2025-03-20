@@ -1,0 +1,4 @@
+let rec f: (int, int) -> int = fun(x: int, y: int) -> {
+    x + y + (f(1, 1))
+};
+42
