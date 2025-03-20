@@ -711,16 +711,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Function that compiles an argument (using its index to determine its
         /// target register) and accumulates the generated assembly code
         let compileArg (acc: Asm) (i, arg) =
-            if i < 8 then
-                // Less than 8 args then we continue as normal
-                acc ++ (doCodegen {env with Target = env.Target + (uint i) + 1u} arg)
-            else
-                // let stackOffset = (i - 8) * 4 
-                // acc
-                // ++ (doCodegen {env with Target = env.Target + (uint i) + 1u} arg)
-                //     .AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12(stackOffset), Reg.sp),
-                //         $"Store function argument %d{i+1} to stack")
-                acc // Do nothing, only load the first 8 into the registers
+            acc ++ (doCodegen {env with Target = env.Target + (uint i) + 1u} arg)
 
         /// Assembly code of all application arguments, obtained by folding over
         /// 'indexedArgs'
@@ -736,30 +727,18 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                             $"Load function call argument %d{i+1}")
             else 
                 let stackOffset = (i - 8) * 4
-                // Changed to load into t0 for now
-                acc.AddText(RV.LW(Reg.t0, Imm12(stackOffset + 32), Reg.sp), // +32 is adjusting for 8 args * 4 already in registers
-                    $"Load function call argument %d{i+1} from stack")
-            
+                // Use offset that accounts for saved registers
+                let totalOffset = stackOffset + (saveRegs.Length * 4)
+                acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
+                    $"Store function call argument %d{i+1} to stack at offset {totalOffset}")
+                    // .AddText(RV.ADDI(Reg.fp, Reg.sp, Imm12(totalOffset)),
+                    //  "Update frame pointer for stack saved arguments")
 
-        /// Code that loads each application argument into a register 'a', by
+        /// Code that loads each application arguSment into a register 'a', by
         /// copying the contents of the target registers used by 'compileArgs'
         /// and 'argsCode' above.  To this end, this code folds over the indexes
         /// of all arguments (from 0 to args.Length), using 'copyArg' above.
         let argsLoadCode = List.fold copyArg (Asm()) [0..(args.Length-1)]
-
-        // /// Here we allocate space for the arguements found in the stack.
-        // let stackArgCount = max(args.Length - 8) 0
-        // let stackAdjustArgs =
-        //     if stackArgCount > 0 then
-        //         Asm().AddText(RV.ADDI(Reg.sp, Reg.sp, Imm12(-stackArgCount * 4)),
-        //               "Adjust stack pointer for arguements")
-        //     else Asm() // Smart to do this idk?
-        
-        // let stackRestorePointer =
-        //     if stackArgCount > 0 then
-        //         Asm().AddText(RV.ADDI(Reg.sp, Reg.sp, Imm12(stackArgCount * 4)),
-        //               "Restore stack pointer after function call")
-        //     else Asm()
 
         /// Code that performs the function call
         let callCode =
@@ -769,15 +748,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                ++ (saveRegisters saveRegs [])
                ++ argsLoadCode // Code to load arg values into arg registers
                   .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
-        // let callCode =
-        //     stackAdjustArgs
-        //     ++ appTermCode
-        //     ++ argsCode // Code to compute each argument of the function call
-        //        .AddText(RV.COMMENT("Before function call: save caller-saved registers"))
-        //        ++ (saveRegisters saveRegs [])
-        //        ++ argsLoadCode // Code to load arg values into arg registers
-        //           .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
-        //        ++ stackRestorePointer
 
         /// Code that handles the function return value (if any)
         let retCode =
@@ -861,6 +831,7 @@ and internal compileFunction (args: List<string * Type>)
     /// List of indexed arguments: we use the index as the number of the 'a'
     /// register that holds the argument
     let indexedArgs = List.indexed args
+
     /// Folder function that assigns storage information to function arguments:
     /// it assigns an 'a' register to each function argument, and accumulates
     /// the result in a mapping (that will be used as env.VarStorage)
@@ -869,8 +840,14 @@ and internal compileFunction (args: List<string * Type>)
             acc.Add(var, Storage.Reg(Reg.a((uint)i)))
         else
             // We map the args in the stack
-            let stackOffset = (i - 8) * 4             
-            acc.Add(var, Storage.Stack(stackOffset))
+            let stackOffset = (i - 8) * 4
+            // There might be a smarter way of doing this?
+            let callerSaveRegs =
+                List.except [Reg.r(0u)]  // Using 0u as placeholder for env.Target
+                        (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
+                         @ [for i in 0u..6u do yield Reg.t(i)])
+            let totalOffset = stackOffset + (callerSaveRegs.Length * 4)             
+            acc.Add(var, Storage.Stack totalOffset)
     /// Updated storage information including function arguments
     let varStorage2 = List.fold folder env.VarStorage indexedArgs
 
