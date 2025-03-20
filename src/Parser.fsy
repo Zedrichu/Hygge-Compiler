@@ -29,6 +29,11 @@ let mkPretypeNode (parseState: IParseState, inputIdx: int, t: Pretype): PretypeN
 let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST =
   { Pos = pos(parseState, inputIdx); Env = (); Type = (); Expr = e }
 
+let applySelectors (lst: 'a list): (string * 'a) list =
+  let indexedList = List.indexed lst
+  List.map (fun (i, p) -> ($"_{i + 1}", p)) indexedList
+
+
 // Assertion failure message handler
 let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
     let pos = pos(parseState, inputIdx)
@@ -114,6 +119,7 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 %token FOR
 %token FUN REC
 %token STRUCT
+%token TUPLE
 
 // Generic identifier (might result in a variable, pretype, etc.)
 %token <string> IDENT
@@ -344,6 +350,8 @@ primary:
   | value                                    { $1 }
   | variable                                 { mkNode(parseState, 1, Expr.Var($1)) }
   | STRUCT LCURLY structFieldInitSeq RCURLY  { mkNode(parseState, 1, Expr.StructCons($3)) }
+  | TUPLE LCURLY exprCommaSeq RCURLY         { let selectInits = applySelectors $3
+                                               mkNode(parseState, 1, Expr.StructCons(selectInits)) }
   | primary DOT field                        { mkNode(parseState, 2, Expr.FieldSelect($1, $3)) }
 
 // Variable name
@@ -367,6 +375,9 @@ pretype:
                                                              Pretype.TFun($1, $3)) }
   | STRUCT LCURLY structFieldTypeSeq RCURLY  { mkPretypeNode(parseState, 1,
                                                              Pretype.TStruct($3)) }
+  | TUPLE LCURLY typesSeq RCURLY             { let selectPretypes = applySelectors $3
+                                               mkPretypeNode(parseState, 1,
+                                                             Pretype.TStruct(selectPretypes)) }
 
 // Generic identifier
 ident:
