@@ -6,12 +6,12 @@ open System.Text.RegularExpressions
 
 /// Repository for storing source code of compiled files
 type SourceRepository() =
-    let files = Map.empty<string, string[]>
+    let mutable files = Map.empty<string, string[]>
 
     /// Add a file's content to the repository
     member _.AddFile(path: string) =
         let lines = System.IO.File.ReadAllLines(path)
-        files.Add(path, lines) |> ignore
+        files <- files.Add(path, lines)
 
     /// Get a specific line from a file (1-indexed)
     member _.GetLine(filename: string, lineNum: int) =
