@@ -6,23 +6,23 @@ open System.Text.RegularExpressions
 
 /// Repository for storing source code of compiled files
 type SourceRepository() =
-    let mutable files = Map.empty<string, string[]>
+    let files = Map.empty<string, string[]>
 
     /// Add a file's content to the repository
-    member this.AddFile(path: string, content: string) =
-        let lines = content.Split('\n')
-        files <- Map.add path lines files
+    member _.AddFile(path: string) =
+        let lines = System.IO.File.ReadAllLines(path)
+        files.Add(path, lines) |> ignore
 
     /// Get a specific line from a file (1-indexed)
-    member this.GetLine(filename: string, lineNum: int) =
+    member _.GetLine(filename: string, lineNum: int) =
         files
         |> Map.tryFind filename
         |> Option.bind (fun lines ->
             if lineNum > 0 && lineNum <= lines.Length then
-                Some (Regex.Replace (lines.[lineNum - 1], "\r\n?", ""))
+                Some lines.[lineNum - 1]
             else None)
 
-    member this.GetSnippet(
+    member _.GetSnippet(
         filename: string, lineStart: int, lineEnd: int, ?colStartArg: int,
         ?includeLineNumbers: bool, ?includeMarkerLine: bool) =
 
