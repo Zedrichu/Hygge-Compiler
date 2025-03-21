@@ -587,7 +587,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                     let idx = List.findIndex (fun f -> f = field) fieldNames
                     Ok { Pos = node.Pos; Env = env; Type = fieldTypes.[idx];
                          Expr = FieldSelect(texpr, field)}
-            | _ -> Error([(node.Pos, $"cannot access field '%s{field}' "
+            | _ -> Error([(node.Pos, $"cannot access struct field '%s{field}' "
                                      + $"on expression of type %O{texpr.Type}")])
         | Error(es) -> Error(es)
 
