@@ -76,6 +76,7 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
     Log.setLogLevel opt.LogLevel
     if opt.Verbose then Log.setLogLevel Log.LogLevel.debug
     Log.debug $"Parsed command line options:%s{Util.nl}%O{opt}"
+    SourceRepository.repository.AddFileIntepreter(opt.File)
     match (Util.parseFile opt.File) with
     | Error(msg) ->
         Log.error $"%s{msg}"; 1 // Non-zero exit code
@@ -93,12 +94,16 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
                 1 // Non-zero exit code
             | Ok(tast) ->
                 Log.info "Type checking succeeded."
+                // SourceRepository.repository.AddFileIntepreter(opt.File)
                 doInterpret tast (opt.LogLevel = Log.LogLevel.debug || opt.Verbose)
 
 
 /// Auxiliary function that attempts to compile the assembly code in the fiven
 /// filename, and returns Ok (with the compiled assembly code) or Error.
 let internal generateAsm (filename: string): Result<RISCV.Asm, unit> =
+    
+    SourceRepository.repository.AddFileAsm(filename)
+
     match (Util.parseFile filename) with
     | Error(msg) ->
         Log.error $"%s{msg}"

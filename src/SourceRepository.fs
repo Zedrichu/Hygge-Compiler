@@ -2,15 +2,26 @@
 /// Module for storing and retrieving source code content for error reporting.
 module SourceRepository
 
-open System.Text.RegularExpressions
 
 /// Repository for storing source code of compiled files
 type SourceRepository() =
     let mutable files = Map.empty<string, string[]>
 
+    member this.AddFileIntepreter(path: string) =
+        this.AddFile(path, false)
+
+    member this.AddFileAsm(path: string) =
+        this.AddFile(path, true)
+
     /// Add a file's content to the repository
-    member _.AddFile(path: string) =
-        let lines = System.IO.File.ReadAllLines(path)
+    member _.AddFile(path: string, escapeBackslash: bool) =
+        let mutable lines = 
+            System.IO.File.ReadAllLines(path)
+
+        if escapeBackslash then
+            lines <- Array.map (fun (line: string) -> 
+            line.Replace(@"\", @"\\").Replace("\"", "\\\"")) lines
+
         files <- files.Add(path, lines)
 
     /// Get a specific line from a file (1-indexed)

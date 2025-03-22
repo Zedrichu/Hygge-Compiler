@@ -39,12 +39,14 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
     let msgArr =
         match snippet with
         | Some strArr -> List.concat [
+            [""];
             ["***********************"];
             [$"Assertion error @ {pos.FileName}:{pos.LineStart}:{pos.ColStart}"];
             ["-----------------------"];
             strArr;
             ["***********************"]]
         | None -> List.concat [
+            [""];
             ["***********************"];
             ["Assertion failed: <no source available>"];
             ["***********************"]]

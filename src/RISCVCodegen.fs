@@ -66,10 +66,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
               (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)), "") ])
 
     | StringVal(v) ->
-        let escapedV = v.Replace("\"", "\\\"")
         // Label marking the string constant in the data segment
         let label = Util.genSymbol "string_val"
-        Asm().AddData(label, Alloc.String(escapedV)) // instead of Alloc.String(v)
+        Asm().AddData(label, Alloc.String(v)) // instead of Alloc.String(v)
              .AddText(RV.LA(Reg.r(env.Target), label))
 
     | Var(name) ->
