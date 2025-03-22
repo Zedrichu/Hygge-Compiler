@@ -7,6 +7,7 @@
 module RISCVCodegen
 
 open AST
+open Parser
 open RISCV
 open Type
 open Typechecker
@@ -644,6 +645,55 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 selTargetCode ++ rhsCode ++ assignCode
             | t ->
                 failwith $"BUG: field selection on invalid object type: %O{t}"
+        | ArrayElem(target, index) ->
+            /// Assembly code for computing the 'target' array object of which we are
+            /// retrieving the 'length'.  We write the computation result (which
+            /// should be an array memory address) in the target register.
+            let arrTargetCode = doCodegen env target
+            /// Code for computing the 'index' of the array element to be selected
+            let indexCode = doCodegen {env with Target = env.Target + 1u} index
+            /// Code for the 'rhs', leaving its result in the target+2 register
+            let rhsCode = doCodegen {env with Target = env.Target + 2u} rhs
+
+            let indexOutBoundsCode = checkIndexOutOfBounds env target index lhs
+
+            match (expandType target.Env target.Type) with
+            | TArray elemType ->
+                /// Offset of the selected index from the beginning of the array
+                let offsetCode = Asm([
+                                     (RV.ADDI(Reg.r(env.Target + 2u), Reg.zero, Imm12(4)),
+                                      "Load word size for array element offset computation")
+                                     (RV.ADDI(Reg.r(env.Target + 1u),
+                                                      Reg.r(env.Target + 1u),
+                                                      Imm12(1)),
+                                     "Increment word index by 1 (to skip the array length)")
+                                     (RV.MUL(Reg.r(env.Target + 1u),
+                                                      Reg.r(env.Target + 1u),
+                                                      Reg.r(env.Target + 2u)),
+                                     "Compute offset of the selected array element 4 x (index + 1)")
+                                     (RV.ADD(Reg.r(env.Target),
+                                                     Reg.r(env.Target),
+                                                     Reg.r(env.Target + 1u)),
+                                     "Add offset to the array base address")])
+                /// Assembly code that performs the field value assignment
+                let assignCode =
+                    match rhs.Type with
+                    | t when (isSubtypeOf rhs.Env t TUnit) ->
+                        Asm() // Nothing to do
+                    | t when (isSubtypeOf rhs.Env t TFloat) ->
+                        Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0),
+                                     Reg.r(env.Target)),
+                            $"Assigning value to array element at index")
+                    | _ ->
+                        Asm([(RV.SW(Reg.r(env.Target + 2u), Imm12(0),
+                                    Reg.r(env.Target)),
+                              $"Assigning value to array element at index")
+                             (RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                              "Copying assigned value to target register")])
+                // Put everything together
+                indexOutBoundsCode ++ arrTargetCode ++ indexCode ++ offsetCode ++ rhsCode ++ assignCode
+            | t ->
+                failwith $"BUG: array length retrieved on invalid object type: %O{t}"
         | _ ->
             failwith ($"BUG: assignment to invalid target:%s{Util.nl}"
                       + $"%s{PrettyPrinter.prettyPrint lhs}")
@@ -679,12 +729,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
                 (RV.LABEL(whileEndLabel), "")
             ])
-            
-            
+
+
     | DoWhile(body, cond) ->
         /// Label to mark the beginning of the 'do-while' loop body
         let doWhileBodyBeginLabel = Util.genSymbol "do_while_body_begin"
-        
+
         Asm(RV.LABEL(doWhileBodyBeginLabel))
             ++ (doCodegen env body)
             ++ (doCodegen env cond)
@@ -692,7 +742,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     (RV.BNEZ(Reg.r(env.Target), doWhileBodyBeginLabel),
                      "Jump to loop body if 'while' condition is true")
                 ])
-            
+
 
     | Lambda(args, body) ->
         /// Label to mark the position of the lambda term body
@@ -873,6 +923,158 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // Put everything together: compile the target, access the field
         selTargetCode ++ fieldAccessCode
 
+    | ArrayCons(length, init) ->
+        // To compile an array constructor, we allocate heap space for the
+        // whole array instance, and then compile its initialisation once and
+        // for all elements, storing each result in the corresponding heap location.
+        // The struct heap address will end up in the 'target' register - i.e.
+        // the register will contain a pointer to the first element of the
+        // allocated structure
+        let lengthCode = doCodegen {env with Target = env.Target + 1u} length
+        let initCode = doCodegen {env with Target = env.Target + 2u} init
+
+        let lengthSetCode =
+            match length.Type with
+            | TInt -> Asm().AddText([
+                            (RV.ADDI(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Imm12(-1)),
+                             "Decrement internal array length by 1 for storage on heap")
+                            (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
+                            "Store array length at the beginning of the array memory")
+                        ])
+            | _ -> failwith $"BUG: array length initialised with invalid type: %O{length.Type}"
+
+        /// Code that initialises a single array element. The init result is
+        /// compiled by targeting the register (`target+2`),
+        /// because the 'target' register holds the base memory address of
+        /// the array.  We copy the pre-computed init value into its heap
+        /// location, with 0 offset from the element memory address (stored
+        /// and computed in the `target+3` register)
+        let elemInitCode: Asm =
+            match init.Type with
+            | t when (isSubtypeOf init.Env t TUnit) ->
+                Asm() // Nothing to do
+            | t when (isSubtypeOf init.Env t TFloat) ->
+                Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0),
+                             Reg.r(env.Target + 3u)),
+                    $"Initialize next array element")
+            | _ ->
+                Asm(RV.SW(Reg.r(env.Target + 2u), Imm12(0),
+                          Reg.r(env.Target + 3u)),
+                    $"Initialize next array element")
+
+        /// Assembly code for initialising each field of the struct, by looping
+        /// through the array length and initialising each element and set it to
+        /// the initial value. The element offset is computed in the register
+        /// `target+3` and the element value is computed in the register `target+2`
+
+        /// Label for array loop start
+        let loopStartLabel = Util.genSymbol "array_init_loop_start"
+        /// Label for array loop end
+        let loopEndLabel = Util.genSymbol "array_init_loop_end"
+
+        /// Register allocations:
+        /// env.Target: array base address (computed)
+        /// env.Target + 1u: length of array (computed)
+        /// env.Target + 2u: initialisation value (computed)
+        /// env.Target + 3u: address of next array element
+
+        /// Use the precomputed length as a downward loop counter
+        let initArrayLoopCode =
+            Asm().AddText([
+                (RV.MV(Reg.r(env.Target + 3u), Reg.r(env.Target)), "Initialise next element address with base pointer")
+                (RV.LABEL(loopStartLabel), "Start of array initialisation loop")
+                (RV.BEQZ(Reg.r(env.Target + 1u), loopEndLabel), "Exit loop if remaining length is 0")
+                (RV.ADDI(Reg.r(env.Target + 3u), Reg.r(env.Target + 3u), Imm12(4)), "Increment element address by word size")
+            ])
+            ++ elemInitCode ++
+            Asm().AddText([
+                (RV.ADDI(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Imm12(-1)), "Decrement remaining length")
+                (RV.BNEZ(Reg.r(env.Target + 1u), loopStartLabel), "Loop back if remaining length is not 0")
+                (RV.LABEL(loopEndLabel), "End of array initialisation loop")
+            ])
+
+        /// Assembly code that allocates space on the heap for the new
+        /// array, through a 'Sbrk' system call.  The size of the structure
+        /// is computed by multiplying the (number of elements + 1) by the word size (4)
+        let arrayAllocCode =
+            (beforeSysCall [Reg.a0] [])
+                .AddText([
+                    (RV.ADDI(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Imm12(1)),
+                     "Increment array length by 1 (to store the length)")
+                    (RV.LI(Reg.r(env.Target), 4), "Store word size")
+                    (RV.MUL(Reg.a0, Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                     "Amount of memory to allocate for a struct (in bytes)")
+                    (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                    (RV.ECALL, "")
+                    (RV.MV(Reg.r(env.Target), Reg.a0),
+                     "Move syscall result (struct mem address) to target")
+                ])
+                ++ (afterSysCall [Reg.a0] [])
+
+        // Put everything together: allocate heap space, init all struct fields
+        lengthCode ++ arrayAllocCode ++ lengthSetCode ++ initCode ++ initArrayLoopCode
+
+    | ArrayElem(target, index) ->
+        /// To compile an array element access operation, we first compile the array `target`
+        /// pointer referencing the array into the `target` register. Then, we compile the
+        /// `index` expression to compute the offset of the element to access. Finally, we
+        /// iterate memory from base pointer until the offset to retrieve the element value.
+
+        let targetCode = doCodegen env target
+        let indexCode = doCodegen {env with Target = env.Target + 1u} index
+
+        let indexOutBoundsCode = checkIndexOutOfBounds env target index node
+
+        /// Code that accesses a single array element. The `target` register holds
+        /// the base memory address of the array. The `target+1` register holds the
+        /// current element address in memory. We load the element value from the
+        /// heap location, with 0 offset from the computed element address.
+        let elemAccessCode: Asm =
+            match target.Type, index.Type with
+            | TArray elemType, TInt ->
+                match elemType with
+                | t when (isSubtypeOf target.Env t TUnit) ->
+                    Asm() // Nothing to do
+                | t when (isSubtypeOf target.Env t TFloat) ->
+                    Asm(RV.FLW_S(FPReg.r(env.FPTarget), Imm12(0),
+                                 Reg.r(env.Target + 1u)),
+                        $"Access array element")
+                | _ ->
+                    Asm(RV.LW(Reg.r(env.Target), Imm12(0),
+                              Reg.r(env.Target + 1u)),
+                        $"Access array element")
+            | TArray _, _ -> failwith $"BUG: array element access with invalid index type: %O{index.Type}"
+            | _, TInt
+            | _ -> failwith $"BUG: element access on invalid target: %O{target.Type}"
+
+        /// Code to compute the element offset within array memory
+        let memorySetCode = Asm().AddText([
+            (RV.ADDI(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Imm12(1)),
+             "Increment word index by 1 (to skip the array length pointer)")
+            (RV.LI(Reg.r(env.Target + 2u), 4),
+             "Load word size for array element offset computation")
+            (RV.MUL(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Reg.r(env.Target + 2u)),
+             "Compute offset of the selected array element as 4 x (index + 1)")
+            (RV.ADD(Reg.r(env.Target + 1u), Reg.r(env.Target), Reg.r(env.Target + 1u)),
+             "Memory address of the selected array element (base pointer + offset)")
+        ])
+        indexOutBoundsCode ++ targetCode ++ indexCode ++ memorySetCode ++ elemAccessCode
+
+    | ArrayLength(target) ->
+        /// To compile an array length operation, we first compile the array `target` pointer
+        /// referencing the array into the `target` register. Then, we access the
+        /// heap memory at `target` (the beginning of the array) to retrieve the length value.
+        let targetCode = doCodegen env target
+        let lengthAccessCode =
+            match target.Type with
+            | TArray _ ->
+                Asm().AddText(
+                    RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+                    "Load array length from base pointer in memory"
+                )
+            | _ -> failwith $"BUG: array length access on invalid target: %O{target.Type}"
+        targetCode ++ lengthAccessCode
+
     | Pointer(_) ->
         failwith "BUG: pointers cannot be compiled (by design!)"
 
@@ -985,7 +1187,34 @@ and internal compileFunction (args: List<string * Type>)
             .AddText(RV.COMMENT("Restore callee-saved registers"))
             ++ (restoreRegisters saveRegs [])
                 .AddText(RV.JR(Reg.ra), "End of function, return to caller")
+and internal checkIndexOutOfBounds env target index node: Asm =
+    let errorNode =
+            {node with
+                Expr = Seq([
+                    {node with Expr = PrintLn({node with
+                                                Expr = StringVal("SEGFAULT: Array index out of bounds")
+                                                Type = TString
+                                             })
+                               Type = TUnit}
+                    {node with Expr = Assertion({node with Expr = BoolVal(true)
+                                                           Type = TBool})
+                               Type = TUnit}
+                ])
+                Type = TUnit
+            }
+    let indexOutOfBoundsCheck =
+            { node with
+                Expr = If({node with Expr = Less(index, {node with Expr = ArrayLength(target)})
+                                     Type = TBool},
+                          {node with Expr = Assertion({node with Expr = BoolVal(true)
+                                                                 Type = TBool})
+                                     Type = TUnit},
+                          errorNode)
+                Type = TUnit
+            }
 
+    Asm().AddText((RV.COMMENT "Check: Array index out of bounds?")) ++
+                                doCodegen env indexOutOfBoundsCheck
 
 /// Generate RISC-V assembly for the given AST.
 let codegen (node: TypedAST): RISCV.Asm =
