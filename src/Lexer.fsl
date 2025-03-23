@@ -111,6 +111,7 @@ rule tokenize = parse
 | "rec"        { Parser.REC }
 | "struct"     { Parser.STRUCT }
 | "ref"        { Parser.REF }
+| "tuple"      { Parser.TUPLE }
 
 // Generic identifier
 | ident        { Parser.IDENT(LexBuffer<_>.LexemeString lexbuf) }
