@@ -165,12 +165,14 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             else
                 List.forall2 (fun t1 t2 -> isSubtypeOf env t1 t2)
                              fieldTypes1 fieldTypes2
-    | (TFun(args1, ret1), TFun(arg2, ret2)) ->
-        // Check that the return type is a subtype of the other return type
-        let retSubtype = isSubtypeOf env ret1 ret2
-        // Check that the argument types are subtypes of the other argument types
-        let argsSubtype = List.forall2 (isSubtypeOf env) args1 arg2
-        retSubtype && argsSubtype
+    | (TFun(args1, ret1), TFun(args2, ret2)) ->
+        if args1.Length <> args2.Length then false
+        else
+            // Check that the return type is a subtype of the other return type
+            let retSubtype = isSubtypeOf env ret1 ret2
+            // Check that the argument types are subtypes of the other argument types
+            let argsSubtype = List.forall2 (isSubtypeOf env) args1 args2
+            retSubtype && argsSubtype
     | (_, _) -> false
 
 
