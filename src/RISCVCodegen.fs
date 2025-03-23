@@ -7,7 +7,6 @@
 module RISCVCodegen
 
 open AST
-open Parser
 open RISCV
 open Type
 open Typechecker
