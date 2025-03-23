@@ -10,14 +10,61 @@ assert(fAlias(42) = f(42));
 
 // ====================
 
+type Shape = struct { name: string;
+                      area: float };
+type Circle = struct { name: string;
+                       area: float;
+                       radius: float };
+type Square = struct { name: string;
+                       area: float;
+                       side: float };
 
-// fun f(x: MyInt): MyInt = x + 1;
-// 
-// fun f_chain(f1: (int) -> int, f2: (int) -> int): (int) -> int =
-//     fun (x: int) -> f2(f1(x));
-// 
-// assert((f_chain(f, f))(40) = 42);
-// 
-// 
-// let x = 3;
-// println("A")
+let sq: Square = struct { name = "Square";
+                         area = 2.0f * 2.0f;
+                         side = 2.0f };
+let ci: Circle = struct { name = "Circle";
+                         area = 10.0f * 10.0f * 3.14f;
+                         radius = 10.0f };
+
+fun displayShape(shape: Shape): unit = {
+    print("Name: ");   print(shape.name);
+    print("; area: "); println(shape.area)
+};
+
+displayShape(sq);
+displayShape(ci);
+
+// --------------------
+fun displayCircleName(circle: Circle): unit = {
+    print("Name: "); println(circle.name)
+};
+fun displayShapeNameWrapper(outFn: (Shape) -> unit, shape: Shape): unit = {
+    outFn(shape)
+};
+
+displayShapeNameWrapper(displayCircleName, ci);
+
+
+// --------------------
+
+type ExtraCircle = struct { name: string;
+                            area: float;
+                            radius: float;
+                            extra: float };
+
+fun squareCircle(circle: Circle): Square = {
+    struct { name = circle.name;
+             area = circle.radius * circle.radius;
+             side = circle.radius }
+};
+
+fun morphCircleWrapper(fn: (Circle) -> Shape, circle: Circle): Shape = {
+    fn(circle)
+};
+
+let ec: ExtraCircle = struct { name = "Extra Circle";
+                               area = 10.0f * 10.0f * 3.14f;
+                               radius = 10.0f;
+                               extra = 42.0f };
+
+let res: Shape = morphCircleWrapper(squareCircle, ec); ()
