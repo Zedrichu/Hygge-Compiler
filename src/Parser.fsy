@@ -118,6 +118,7 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 %token FOR
 %token FUN REC
 %token STRUCT
+%token REF
 %token TUPLE
 
 // Generic identifier (might result in a variable, pretype, etc.)
@@ -349,6 +350,7 @@ primary:
   | value                                    { $1 }
   | variable                                 { mkNode(parseState, 1, Expr.Var($1)) }
   | STRUCT LCURLY structFieldInitSeq RCURLY  { mkNode(parseState, 1, Expr.StructCons($3)) }
+  | REF LCURLY simpleExpr RCURLY             { mkNode(parseState, 1, Expr.StructCons([("value", $3)])) }
   | TUPLE LCURLY exprCommaSeq RCURLY         { mkNode(parseState, 1, Expr.StructCons(applySelectors $3)) }
   | primary DOT field                        { mkNode(parseState, 2, Expr.FieldSelect($1, $3)) }
 
@@ -373,6 +375,8 @@ pretype:
                                                              Pretype.TFun($1, $3)) }
   | STRUCT LCURLY structFieldTypeSeq RCURLY  { mkPretypeNode(parseState, 1,
                                                              Pretype.TStruct($3)) }
+  | REF LCURLY pretype RCURLY                { mkPretypeNode(parseState, 1,
+                                                             Pretype.TStruct([("value", $3)])) }
   | TUPLE LCURLY typesSeq RCURLY             { mkPretypeNode(parseState, 1,
                                                              Pretype.TStruct(applySelectors $3)) }
 
