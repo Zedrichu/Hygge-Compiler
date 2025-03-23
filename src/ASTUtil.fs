@@ -20,6 +20,8 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
     | FloatVal(_)
     | StringVal(_) -> node // The substitution has no effect
 
+    | Pointer(_) -> node // The substitution has no effect
+
     | Var(vname) when vname = var -> sub // Substitution applied
     | Var(_) -> node // The substitution has no effect
 
@@ -98,6 +100,14 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         {node with Expr = LetT(vname, tpe, (subst init var sub),
                                (subst scope var sub))}
 
+    | LetRec(vname, tpe, init, scope) when vname = var ->
+        // The variable is shadowed, do not substitute it in the "let rec" scope
+        {node with Expr = LetRec(vname, tpe, (subst init var sub), scope)}
+    | LetRec(vname, tpe, init, scope) ->
+        // Propagate the substitution in the "let rec" scope and init
+        {node with Expr = LetRec(vname, tpe, (subst init var sub),
+                                 (subst scope var sub))}
+
     | LetMut(vname, init, scope) when vname = var ->
         // Do not substitute the variable in the "let mutable" scope
         {node with Expr = LetMut(vname, (subst init var sub), scope)}
@@ -128,3 +138,11 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substExpr = subst expr var sub
         let substArgs = List.map (fun n -> (subst n var sub)) args
         {node with Expr = Application(substExpr, substArgs)}
+
+    | StructCons(fields) ->
+        let (fieldNames, initNodes) = List.unzip fields
+        let substInitNodes = List.map (fun e -> (subst e var sub)) initNodes
+        {node with Expr = StructCons(List.zip fieldNames substInitNodes)}
+
+    | FieldSelect(target, field) ->
+        {node with Expr = FieldSelect((subst target var sub), field)}

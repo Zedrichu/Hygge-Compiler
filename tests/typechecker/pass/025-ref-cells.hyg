@@ -1,0 +1,5 @@
+type refInt = ref {int};
+
+let x: refInt = ref {100 / 2};
+let y: ref {int} = ref {12 * 2};
+x.value <- x.value + y.value

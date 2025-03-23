@@ -1,0 +1,1 @@
+let t: tuple {string, int, bool} = tuple {"Hello", true, 40 + 2}; ()

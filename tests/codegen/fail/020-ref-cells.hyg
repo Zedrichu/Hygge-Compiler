@@ -1,0 +1,5 @@
+let a: ref{int} = ref{1};
+let b: ref{int} = a;
+a.value <- 2;
+// should fail
+assert(b.value = 1)

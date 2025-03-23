@@ -1,0 +1,3 @@
+let x: ref {int} = ref {40 + 2};
+x.value <- x.value + 10;
+assert(x.value = 52)

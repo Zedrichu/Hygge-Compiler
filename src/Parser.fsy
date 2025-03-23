@@ -29,6 +29,10 @@ let mkPretypeNode (parseState: IParseState, inputIdx: int, t: Pretype): PretypeN
 let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST =
   { Pos = pos(parseState, inputIdx); Env = (); Type = (); Expr = e }
 
+let applySelectors (lst: 'a list): (string * 'a) list =
+  let indexedList = List.indexed lst
+  List.map (fun (i, p) -> ($"_{i + 1}", p)) indexedList
+
 // Assertion failure message handler
 let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
     let pos = pos(parseState, inputIdx)
@@ -101,7 +105,7 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 %token LET TYPE MUTABLE
 
 // Misc tokens
-%token SEMI EOF COLON LARROW RARROW COMMA
+%token SEMI EOF COLON LARROW RARROW COMMA DOT
 
 // Built-in statements
 %token READ_INT
@@ -112,7 +116,10 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 %token WHILE
 %token DO
 %token FOR
-%token FUN
+%token FUN REC
+%token STRUCT
+%token REF
+%token TUPLE
 
 // Generic identifier (might result in a variable, pretype, etc.)
 %token <string> IDENT
@@ -140,6 +147,9 @@ expr:
   | LET variable COLON pretype EQ simpleExpr SEMI expr  {
         mkNode(parseState, 1, Expr.LetT($2, $4, $6, $8))
     }
+  | LET REC variable COLON pretype EQ simpleExpr SEMI expr  {
+        mkNode(parseState, 1, Expr.LetRec($3, $5, $7, $9))
+    }
   | LET MUTABLE variable EQ simpleExpr SEMI expr  {
         mkNode(parseState, 1, Expr.LetMut($3, $5, $7))
     }
@@ -149,6 +159,13 @@ expr:
       mkNode(parseState, 1, Expr.LetT($2, mkPretypeNode(parseState, 5,
                                                         Pretype.TFun(argTypes, $5)),
                                       mkNode(parseState, 7, Lambda($3, $7)), $9))
+    }
+  // Syntactic sugaring for recursive function definition
+  | REC FUN variable parenArgTypesSeq COLON pretype EQ simpleExpr SEMI expr  {
+      let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+      mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 5,
+                                                        Pretype.TFun(argTypes, $6)),
+                                      mkNode(parseState, 7, Lambda($4, $8)), $10))
     }
   | curlyExpr expr  { mkNode(parseState, 1, Expr.Seq([$1; $2])) }
   | sequenceExpr  {
@@ -332,6 +349,10 @@ primary:
   | LPAR simpleExpr RPAR                     { $2 }
   | value                                    { $1 }
   | variable                                 { mkNode(parseState, 1, Expr.Var($1)) }
+  | STRUCT LCURLY structFieldInitSeq RCURLY  { mkNode(parseState, 1, Expr.StructCons($3)) }
+  | REF LCURLY simpleExpr RCURLY             { mkNode(parseState, 1, Expr.StructCons([("value", $3)])) }
+  | TUPLE LCURLY exprCommaSeq RCURLY         { mkNode(parseState, 1, Expr.StructCons(applySelectors $3)) }
+  | primary DOT field                        { mkNode(parseState, 2, Expr.FieldSelect($1, $3)) }
 
 // Variable name
 variable:
@@ -352,6 +373,12 @@ pretype:
                                                              Pretype.TId($1)) }
   | parenTypesSeq RARROW pretype             { mkPretypeNode(parseState, 1,
                                                              Pretype.TFun($1, $3)) }
+  | STRUCT LCURLY structFieldTypeSeq RCURLY  { mkPretypeNode(parseState, 1,
+                                                             Pretype.TStruct($3)) }
+  | REF LCURLY pretype RCURLY                { mkPretypeNode(parseState, 1,
+                                                             Pretype.TStruct([("value", $3)])) }
+  | TUPLE LCURLY typesSeq RCURLY             { mkPretypeNode(parseState, 1,
+                                                             Pretype.TStruct(applySelectors $3)) }
 
 // Generic identifier
 ident:
@@ -390,3 +417,19 @@ parenExprCommaSeq:
 exprCommaSeq:
   | simpleExpr COMMA exprCommaSeq  { $1 :: $3 }
   | simpleExpr                     { [$1] }
+
+// Non-empty sequence of structure field initializations, separated by
+// semicolons
+structFieldInitSeq:
+  | field EQ simpleExpr SEMI structFieldInitSeq  { ($1, $3) :: $5 }
+  | field EQ simpleExpr                          { [($1, $3)] }
+
+// Field of a structure
+field:
+  | ident       { $1 }
+
+// Non-empty sequence of names and types, separated by semicolons (used for
+// defining structs)
+structFieldTypeSeq:
+  | field COLON pretype SEMI structFieldTypeSeq  { ($1, $3) :: $5 }
+  | field COLON pretype                          { [($1, $3)] }

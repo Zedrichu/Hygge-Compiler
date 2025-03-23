@@ -19,7 +19,7 @@ type SourceRepository() =
         |> Map.tryFind filename
         |> Option.bind (fun lines ->
             if lineNum > 0 && lineNum <= lines.Length then
-                Some lines.[lineNum - 1]
+                Some (Regex.Replace (lines.[lineNum - 1], "\r\n?", ""))
             else None)
 
     member this.GetSnippet(

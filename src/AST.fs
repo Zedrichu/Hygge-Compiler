@@ -49,6 +49,8 @@ and Pretype =
     /// A function pretype, with argument pretypes and return pretype.
     | TFun of args: List<PretypeNode>
             * ret: PretypeNode
+    /// A structure pretype, with pretypes for each field.
+    | TStruct of fields: List<string * PretypeNode>
 
 
 /// Node of the Abstract Syntax Tree of a Hygge expression.  The meaning of the
@@ -200,6 +202,14 @@ and Expr<'E,'T> =
             * init: Node<'E,'T>
             * scope: Node<'E,'T>
 
+    /// Let-binder with explicit recursive function definition, used to introduce
+    /// a recursive function with the given 'name' and pretype ('tpe') in a 'scope'.
+    /// The function is initialised with the result of the lambda expression in 'init'.
+    | LetRec of name: string
+                 * tpe: PretypeNode
+                 * init: Node<'E,'T>
+                 * scope: Node<'E,'T>
+
     /// Let-binder for mutable variables, used to introduce a mutable variable
     /// with the given 'name' in a 'scope'.  The variable is initialised with
     /// the result of the expression in 'init'.
@@ -215,7 +225,7 @@ and Expr<'E,'T> =
     /// 'While' loop: as long as 'cond' is true, repeat the 'body'.
     | While of cond: Node<'E,'T>
              * body: Node<'E,'T>
-             
+
     // 'Do-While' loop: execute 'body' once, then repeat while 'cond' is true.
     | DoWhile of body: Node<'E,'T>
              * cond: Node<'E,'T>
@@ -228,6 +238,21 @@ and Expr<'E,'T> =
     /// arguments.
     | Application of expr: Node<'E,'T>
                    * args: List<Node<'E,'T>>
+
+    /// Constructor of a structure instance: each field has a name and a
+    /// corresponding AST child.
+    | StructCons of fields: List<string * Node<'E,'T>>
+
+    /// Access a field of a target expression (e.g. a structure).
+    | FieldSelect of target: Node<'E,'T>
+                   * field: string
+
+    /// Pointer to a location in the heap, with its address.  This is a runtime
+    /// value that is only used by the Hygge interpreter as an intermediate
+    /// result; it has no syntax in the parser, so it cannot be written in Hygge
+    /// programs.
+    | Pointer of addr: uint
+
 
 /// A type alias for an untyped AST, where there is no typing environment nor
 /// typing information (unit).
