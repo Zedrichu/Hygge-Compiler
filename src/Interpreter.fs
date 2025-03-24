@@ -486,9 +486,13 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(data) ->
                 match index.Expr with
                 | IntVal(i) when i >= 0 ->
-                    /// Updated heap with selected array element overwritten by 'value'
-                    let env' = {env with Heap = env.Heap.Add(addr + (uint data) + (uint i), value)}
-                    Some(env', value)
+                    match env.Heap[addr].Expr with
+                    | IntVal(length) when i >= length -> None
+                    | IntVal(_) ->
+                        /// Updated heap with selected array element overwritten by 'value'
+                        let env' = {env with Heap = env.Heap.Add(addr + (uint data) + (uint i), value)}
+                        Some(env', value)
+                    | _ -> None
                 | _ -> None
             | None -> None
         | None -> None

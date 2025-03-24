@@ -1195,11 +1195,13 @@ and internal checkIndexOutOfBounds env target index node: Asm =
                                                 Type = TString
                                              })
                                Type = TUnit}
-                    {node with Expr = Assertion({node with Expr = BoolVal(true)
+                    {node with Expr = Assertion({node with Expr = BoolVal(false)
                                                            Type = TBool})
-                               Type = TUnit}
+                               Type = TUnit
+                               Pos = node.Pos }
                 ])
                 Type = TUnit
+                Pos = node.Pos
             }
     let indexOutOfBoundsCheck =
             { node with
@@ -1210,6 +1212,7 @@ and internal checkIndexOutOfBounds env target index node: Asm =
                                      Type = TUnit},
                           errorNode)
                 Type = TUnit
+                Pos = node.Pos
             }
 
     Asm().AddText((RV.COMMENT "Check: Array index out of bounds?")) ++
