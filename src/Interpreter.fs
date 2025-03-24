@@ -551,7 +551,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         let rewritten = Let (varName, body,
                              {node with Expr = If(cond,
                                                 {node with Expr = DoWhile(body, cond)},
-                                                { body with Expr = Var(varName) })})
+                                                {body with Expr = Var(varName) })})
         Some(env, {node with Expr = rewritten})
 
     | Application(expr, args) ->
