@@ -65,7 +65,8 @@ let rec internal formatType (t: Type.Type): Tree =
         let fieldsChildren =
             List.map (fun (f, t) -> ($"field %s{f}", formatType t)) fields
         Node("struct", fieldsChildren)
-
+    | Type.TArray elemType ->
+        Node("array", [("elemType", formatType elemType)])
 
 /// Traverse a Hygge typing environment and return its hierarchical
 /// representation.
@@ -214,6 +215,15 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | Pointer(addr) ->
         mkTree $"Pointer 0x%x{addr}" node []
 
+    | ArrayCons(length, init) ->
+        mkTree "ArrayCons" node [("length", formatASTRec length)
+                                 ("init", formatASTRec init)]
+    | ArrayLength target ->
+        mkTree "ArrayLength" node [("target", formatASTRec target)]
+    | ArrayElem(target, index) ->
+        mkTree "ArrayElem" node [("target", formatASTRec target)
+                                 ("index", formatASTRec index)]
+
 /// Return a description of an AST node, and possibly some subtrees (that are
 /// added to the overall tree structure).
 and internal formatNodeTypingInfo (node: Node<'E,'T>): List<string * Tree> =
@@ -259,6 +269,9 @@ and internal formatPretypeNode (node: PretypeNode): Tree =
             List.map (fun (name, t) -> ((formatPretypeDescr t $"field %s{name}"),
                                         formatPretypeNode t)) fields
         Node((formatPretypeDescr node "Struct pretype"), fieldsChildren)
+    | Pretype.TArray(arrType) ->
+        Node((formatPretypeDescr node "Array pretype"),
+             [("arrType", formatPretypeNode arrType)])
 
 /// Format the description of a pretype AST node (without printing its
 /// children).

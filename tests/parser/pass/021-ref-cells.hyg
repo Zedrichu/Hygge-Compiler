@@ -1,0 +1,2 @@
+type r = ref {int};
+ref {if a = 0 then a + 100 / 2 else 0}
