@@ -547,10 +547,11 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         /// followed by an 'if' on the condition. First execute the body.
         /// Then we evaluate 'cond'. If is true we continue with the whole loop again.
         /// Otherwise, when 'cond' is false we do nothing (unit)
-        let rewritten = Seq([body;
-                            {node with Expr = If(cond,
+        let varName = Util.genSymbol "doWhileResult"
+        let rewritten = Let (varName, body,
+                             {node with Expr = If(cond,
                                                 {node with Expr = DoWhile(body, cond)},
-                                                body)}])
+                                                { body with Expr = Var(varName) })})
         Some(env, {node with Expr = rewritten})
 
     | Application(expr, args) ->
