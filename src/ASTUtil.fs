@@ -122,7 +122,7 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substCond = subst cond var sub
         let substBody = subst body var sub
         {node with Expr = While(substCond, substBody)}
-        
+
     | DoWhile(body, cond) ->
         let substBody = subst body var sub
         let substCond = subst cond var sub
@@ -146,3 +146,12 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 
     | FieldSelect(target, field) ->
         {node with Expr = FieldSelect((subst target var sub), field)}
+
+    | ArrayCons(length, init) ->
+        {node with Expr = ArrayCons((subst length var sub), (subst init var sub))}
+
+    | ArrayLength(target) ->
+        {node with Expr = ArrayLength(subst target var sub)}
+
+    | ArrayElem(target, index) ->
+        {node with Expr = ArrayElem((subst target var sub), (subst index var sub))}

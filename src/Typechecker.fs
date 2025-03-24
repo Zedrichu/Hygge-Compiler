@@ -110,6 +110,10 @@ let rec internal resolvePretype (env: TypingEnv) (pt: AST.PretypeNode): Result<T
                 /// Type of each struct field
                 let fieldTypes = List.map getOkValue fieldTypes
                 Ok(TStruct(List.zip fieldNames fieldTypes))
+    | Pretype.TArray(arrType) ->
+        match (resolvePretype env arrType) with
+        | Ok(t) -> Ok(TArray(t))
+        | Error(es) -> Error(es)
 
 /// Resolve a type variable using the given typing environment: optionally
 /// return the Type corresponding to variable 'name', or None if 'name' is not
@@ -165,6 +169,8 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             else
                 List.forall2 (fun t1 t2 -> isSubtypeOf env t1 t2)
                              fieldTypes1 fieldTypes2
+    | TArray(t1), TArray(t2) ->
+        isSubtypeOf env t1 t2
     | (_, _) -> false
 
 
@@ -446,6 +452,9 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
             | FieldSelect(_, _) ->
                 Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
                      Expr = Assign(ttarget, texpr) }
+            | ArrayElem(_, _) ->
+                Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
+                     Expr = Assign(ttarget, texpr) }
             | _ -> Error([(node.Pos, "invalid assignment target")])
         | (Ok(ttarget), Ok(texpr)) ->
             Error([(texpr.Pos,
@@ -467,7 +476,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                               + $"found %O{tcond.Type}") :: es)
         | Error(es), Ok(_) -> Error(es)
         | Error(esCond), Error(esBody) -> Error(esCond @ esBody)
-        
+
     | DoWhile(body, cond) ->
         match ((typer env body), (typer env cond)) with
         | (Ok(tbody), Ok(tcond)) when (isSubtypeOf env tcond.Type TBool) ->
@@ -578,12 +587,51 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                     let idx = List.findIndex (fun f -> f = field) fieldNames
                     Ok { Pos = node.Pos; Env = env; Type = fieldTypes.[idx];
                          Expr = FieldSelect(texpr, field)}
-            | _ -> Error([(node.Pos, $"cannot access field '%s{field}' "
+            | _ -> Error([(node.Pos, $"cannot access struct field '%s{field}' "
                                      + $"on expression of type %O{texpr.Type}")])
         | Error(es) -> Error(es)
 
     | Pointer(_) ->
         Error([(node.Pos, "pointers cannot be type-checked (by design!)")])
+
+    | ArrayCons(length, init) ->
+        let initTyping = typer env init
+        let lengthTyping = typer env length
+        match (lengthTyping, initTyping) with
+        | Ok(tlength), Ok(tinit) when (isSubtypeOf env tlength.Type TInt) ->
+            Ok { Pos = node.Pos; Env = env; Type = TArray(tinit.Type);
+                 Expr = ArrayCons(tlength, tinit) }
+        | Ok(tlength), Ok(_) ->
+            Error([(node.Pos, $"expected array length of type %O{TInt}, "
+                              + $"found %O{tlength.Type}")])
+        | Error(es), Ok _
+        | Ok _, Error(es) -> Error(es)
+        | Error(es1), Error(es2) -> Error(es1 @ es2)
+
+    | ArrayElem(target, index) ->
+        match (typer env target) with
+        | Ok(ttarget) ->
+            match (expandType env ttarget.Type) with
+            | TArray elemType ->
+                match (typer env index) with
+                | Ok(tindex) when (isSubtypeOf env tindex.Type TInt) ->
+                    Ok { Pos = node.Pos; Env = env; Type = elemType;
+                         Expr = ArrayElem(ttarget, tindex) }
+                | Ok(tindex) -> Error([(node.Pos, $"expected array index of type %O{TInt}, "
+                                        + $"found %O{tindex.Type}")])
+                | Error(es) -> Error(es)
+            | _ -> Error([(node.Pos, $"cannot access array element on expression of type %O{ttarget.Type}")])
+        | Error(es) -> Error(es)
+
+    | ArrayLength(target) ->
+        match (typer env target) with
+        | Ok(ttarget) ->
+            match (expandType env ttarget.Type) with
+            | TArray _ ->
+                Ok { Pos = node.Pos; Env = env; Type = TInt;
+                     Expr = ArrayLength(ttarget) }
+            | _ -> Error([(node.Pos, $"cannot access array length on expression of type %O{ttarget.Type}")])
+        | Error(es) -> Error(es)
 
 /// Compute the typing of a binary numerical operation, by computing and
 /// combining the typings of the 'lhs' and 'rhs'.  The argument 'descr' (used in
