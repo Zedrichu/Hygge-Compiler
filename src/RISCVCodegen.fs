@@ -1188,12 +1188,14 @@ and internal compileFunction (args: List<string * Type>)
                 .AddText(RV.JR(Reg.ra), "End of function, return to caller")
 and internal checkIndexOutOfBounds env target index node: Asm =
     let errorNode =
-            {node with
+            { node with
                 Expr = Seq([
-                    {node with Expr = PrintLn({node with
-                                                Expr = StringVal("SEGFAULT: Array index out of bounds")
+                    {node with Expr = Print({node with
+                                                Expr = StringVal($"SEGFAULT [{index.Pos.FileName}:{index.Pos.LineStart}:{index.Pos.ColStart}]: Array index out of bounds with value: ")
                                                 Type = TString
-                                             })
+                                            })
+                               Type = TUnit}
+                    {node with Expr = PrintLn(index)
                                Type = TUnit}
                     {node with Expr = Assertion({node with Expr = BoolVal(false)
                                                            Type = TBool})
@@ -1203,13 +1205,30 @@ and internal checkIndexOutOfBounds env target index node: Asm =
                 Type = TUnit
                 Pos = node.Pos
             }
+
+    // Create a node to check if index is greater than or equal to 0
+    let indexNonNegativeCheck =
+            { node with
+                Expr = GreaterEq(index, {node with Expr = IntVal(0)})
+                Type = TBool
+                Pos = node.Pos
+            }
+
+    // Create a node to check if index is less than array length
+    let indexLessThanLengthCheck =
+            { node with
+                Expr = Less(index, {node with Expr = ArrayLength(target)})
+                Type = TBool
+                Pos = node.Pos
+            }
+
     let indexOutOfBoundsCheck =
             { node with
-                Expr = If({node with Expr = Less(index, {node with Expr = ArrayLength(target)})
-                                     Type = TBool},
-                          {node with Expr = Assertion({node with Expr = BoolVal(true)
-                                                                 Type = TBool})
-                                     Type = TUnit},
+                Expr = If({ node with Expr = And(indexNonNegativeCheck, indexLessThanLengthCheck)
+                                      Type = TBool
+                                      Pos = node.Pos },
+                          { node with Expr = UnitVal
+                                      Type = TUnit },
                           errorNode)
                 Type = TUnit
                 Pos = node.Pos
