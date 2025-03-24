@@ -654,8 +654,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             /// Code for the 'rhs', leaving its result in the target+2 register
             let rhsCode = doCodegen {env with Target = env.Target + 2u} rhs
 
-            let indexOutBoundsCode = checkIndexOutOfBounds env target index lhs
-
             match (expandType target.Env target.Type) with
             | TArray elemType ->
                 /// Offset of the selected index from the beginning of the array
@@ -690,7 +688,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                              (RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
                               "Copying assigned value to target register")])
                 // Put everything together
-                indexOutBoundsCode ++ arrTargetCode ++ indexCode ++ offsetCode ++ rhsCode ++ assignCode
+                arrTargetCode ++ indexCode ++ offsetCode ++ rhsCode ++ assignCode
             | t ->
                 failwith $"BUG: array length retrieved on invalid object type: %O{t}"
         | _ ->
@@ -1022,8 +1020,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let targetCode = doCodegen env target
         let indexCode = doCodegen {env with Target = env.Target + 1u} index
 
-        let indexOutBoundsCode = checkIndexOutOfBounds env target index node
-
         /// Code that accesses a single array element. The `target` register holds
         /// the base memory address of the array. The `target+1` register holds the
         /// current element address in memory. We load the element value from the
@@ -1057,7 +1053,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             (RV.ADD(Reg.r(env.Target + 1u), Reg.r(env.Target), Reg.r(env.Target + 1u)),
              "Memory address of the selected array element (base pointer + offset)")
         ])
-        indexOutBoundsCode ++ targetCode ++ indexCode ++ memorySetCode ++ elemAccessCode
+        targetCode ++ indexCode ++ memorySetCode ++ elemAccessCode
 
     | ArrayLength(target) ->
         /// To compile an array length operation, we first compile the array `target` pointer
@@ -1186,37 +1182,6 @@ and internal compileFunction (args: List<string * Type>)
             .AddText(RV.COMMENT("Restore callee-saved registers"))
             ++ (restoreRegisters saveRegs [])
                 .AddText(RV.JR(Reg.ra), "End of function, return to caller")
-and internal checkIndexOutOfBounds env target index node: Asm =
-    let errorNode =
-            {node with
-                Expr = Seq([
-                    {node with Expr = PrintLn({node with
-                                                Expr = StringVal("SEGFAULT: Array index out of bounds")
-                                                Type = TString
-                                             })
-                               Type = TUnit}
-                    {node with Expr = Assertion({node with Expr = BoolVal(false)
-                                                           Type = TBool})
-                               Type = TUnit
-                               Pos = node.Pos }
-                ])
-                Type = TUnit
-                Pos = node.Pos
-            }
-    let indexOutOfBoundsCheck =
-            { node with
-                Expr = If({node with Expr = Less(index, {node with Expr = ArrayLength(target)})
-                                     Type = TBool},
-                          {node with Expr = Assertion({node with Expr = BoolVal(true)
-                                                                 Type = TBool})
-                                     Type = TUnit},
-                          errorNode)
-                Type = TUnit
-                Pos = node.Pos
-            }
-
-    Asm().AddText((RV.COMMENT "Check: Array index out of bounds?")) ++
-                                doCodegen env indexOutOfBoundsCheck
 
 /// Generate RISC-V assembly for the given AST.
 let codegen (node: TypedAST): RISCV.Asm =
