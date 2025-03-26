@@ -483,15 +483,18 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         match (env.PtrInfo.TryFind addr) with
         | Some(attrs) ->
             match (List.tryFindIndex (fun a -> a = "~data") attrs) with
-            | Some(data) ->
-                match index.Expr with
-                | IntVal(i) when i >= 0 ->
-                    match env.Heap[addr].Expr with
-                    | IntVal(length) when i >= length -> None
-                    | IntVal(_) ->
-                        /// Updated heap with selected array element overwritten by 'value'
-                        let env' = {env with Heap = env.Heap.Add(addr + (uint data) + (uint i), value)}
-                        Some(env', value)
+            | Some(dataOffset) ->
+                match env.Heap[addr + (uint dataOffset)].Expr with
+                | Pointer(dataPointer) ->
+                    match index.Expr with
+                    | IntVal(i) when i >= 0 ->
+                        match env.Heap[addr].Expr with
+                        | IntVal(length) when i >= length -> None
+                        | IntVal(_) ->
+                            /// Updated heap with selected array element overwritten by 'value'
+                            let env' = {env with Heap = env.Heap.Add(dataPointer + (uint i), value)}
+                            Some(env', value)
+                        | _ -> None
                     | _ -> None
                 | _ -> None
             | None -> None
@@ -629,12 +632,17 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | None when isValue init ->
             match length.Expr with
             | IntVal(l) when l > 0 ->
-                /// Allocate the array on the heap, with all elements initialized
-                /// Updated heap with newly-allocated struct, placed at `baseAddr`
-                let (heap', baseAddr) = heapAlloc env.Heap (length :: (List.init l (fun _ -> init)))
+                /// Allocate the array on the heap, with all elements initialized, from memory `arrAddr`
+                let (heap', arrAddr) = heapAlloc env.Heap (List.init l (fun _ -> init))
+
+                let dataNode = { node with Expr = Pointer(arrAddr) }
+                /// Updated heap with newly-allocated struct for array, placed at `baseAddr` | length + data |
+                let (heap'', baseAddr) = heapAlloc heap' [ length; dataNode ]
+
                 /// Update pointer info, mapping `baseAddr` to the length and data of the array
                 let ptrInfo' = env.PtrInfo.Add(baseAddr, ["~length"; "~data"])
-                Some({ env with Heap = heap'; PtrInfo = ptrInfo' },
+                                          .Add(arrAddr, ["~array"])
+                Some({ env with Heap = heap''; PtrInfo = ptrInfo' },
                      { node with Expr = Pointer(baseAddr) })
             | _ -> None
         | None -> None
@@ -661,8 +669,10 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | IntVal(length) when i >= length -> None
             | IntVal(_) ->
                 match (List.tryFindIndex (fun a -> a = "~data") attrs) with
-                | Some(data) ->
-                    Some(env, env.Heap[addr + (uint data) + (uint i)])
+                | Some(dataOffset) ->
+                    match env.Heap[addr + (uint dataOffset)].Expr with
+                    | Pointer(dataPointer) -> Some(env, env.Heap[dataPointer + (uint i)])
+                    | _ -> None
                 | None -> None
             | _ -> None
         | None -> None
@@ -677,6 +687,49 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             Some(env', {node with Expr = ArrayElem(target', index)})
         | None -> None
     | ArrayElem _ -> None
+
+    | ArraySlice({ Expr = Pointer(addr) },
+                 { Expr = IntVal(start) },
+                 { Expr = IntVal(endup) }) when start >= 0 ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(attrs) ->
+            match env.Heap[addr].Expr with
+            | IntVal(length) when endup < length ->
+                match (List.tryFindIndex (fun a -> a = "~data") attrs) with
+                | Some(data) ->
+                    match env.Heap[addr + (uint 1)].Expr with
+                    | Pointer(dataPointer) ->
+                        /// Allocate the array slice struct on the heap, with data pointing at range start
+                        /// Since elements are in the subset of range [start, endup]
+                        let lengthNode = { node with Expr = IntVal(endup - start + 1) }
+                        let dataNode = { node with Expr = Pointer(dataPointer + uint start) }
+                        /// Updated heap with newly-allocated struct, placed at `baseAddr`
+                        let (heap', baseAddr) = heapAlloc env.Heap [ lengthNode; dataNode ]
+
+                        /// Update pointer info, mapping `baseAddr` to the length and data of the array slice
+                        let ptrInfo' = env.PtrInfo.Add(baseAddr, ["~length"; "~data"])
+                        Some({ env with Heap = heap'; PtrInfo = ptrInfo' },
+                             { node with Expr = Pointer(baseAddr) })
+                    | _ -> None
+                | None -> None
+            | _ -> None
+        | None -> None
+    | ArraySlice(target, startIdx, endIdx) when not (isValue target) ->
+        match (reduce env target) with
+        | Some(env', target') ->
+            Some(env', {node with Expr = ArraySlice(target', startIdx, endIdx)})
+        | None -> None
+    | ArraySlice(target, startIdx, endIdx) when not (isValue startIdx) ->
+        match (reduce env startIdx) with
+        | Some(env', startIdx') ->
+            Some(env', {node with Expr = ArraySlice(target, startIdx', endIdx)})
+        | None -> None
+    | ArraySlice(target, startIdx, endIdx) when not (isValue endIdx) ->
+        match (reduce env endIdx) with
+        | Some(env', endIdx') ->
+            Some(env', {node with Expr = ArraySlice(target, startIdx, endIdx')})
+        | None -> None
+    | ArraySlice _ -> None
 
 /// Attempt to reduce the given lhs, and then (if the lhs is a value) the rhs,
 /// using the given runtime environment.  Return None if either (a) the lhs

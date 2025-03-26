@@ -645,9 +645,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                          Expr = ArraySlice(ttarget, tstart, tend) }
                 | Ok(tstart), Ok(tend) -> Error([(node.Pos, $"expected array slice indices of type %O{TInt}, "
                                                           + $"found %O{tstart.Type} and %O{tend.Type}")])
-                | Error(es), Ok _
-                | Ok _, Error(es) -> Error(es)
-                | Error(es1), Error(es2) -> Error(es1 @ es2)
+                | es1, es2 -> mergeErrors (es1, es2)
             | _ -> Error([(node.Pos, $"cannot create array slice on expression of type %O{ttarget.Type}")])
         | Error(es) -> Error(es)
 
