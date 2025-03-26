@@ -633,6 +633,24 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
             | _ -> Error([(node.Pos, $"cannot access array length on expression of type %O{ttarget.Type}")])
         | Error(es) -> Error(es)
 
+    | ArraySlice(target, startIdx, endIdx) ->
+        match (typer env target) with
+        | Ok(ttarget) ->
+            match (expandType env ttarget.Type) with
+            | TArray elemType ->
+                match (typer env startIdx, typer env endIdx) with
+                | Ok(tstart), Ok(tend) when (isSubtypeOf env tstart.Type TInt) &&
+                                            (isSubtypeOf env tend.Type TInt) ->
+                    Ok { Pos = node.Pos; Env = env; Type = TArray elemType;
+                         Expr = ArraySlice(ttarget, tstart, tend) }
+                | Ok(tstart), Ok(tend) -> Error([(node.Pos, $"expected array slice indices of type %O{TInt}, "
+                                                          + $"found %O{tstart.Type} and %O{tend.Type}")])
+                | Error(es), Ok _
+                | Ok _, Error(es) -> Error(es)
+                | Error(es1), Error(es2) -> Error(es1 @ es2)
+            | _ -> Error([(node.Pos, $"cannot create array slice on expression of type %O{ttarget.Type}")])
+        | Error(es) -> Error(es)
+
 /// Compute the typing of a binary numerical operation, by computing and
 /// combining the typings of the 'lhs' and 'rhs'.  The argument 'descr' (used in
 /// error messages) specifies which expression is being typed, while 'pos'
