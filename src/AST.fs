@@ -266,6 +266,12 @@ and Expr<'E,'T> =
     | ArrayElem of target: Node<'E,'T>
                  * index: Node<'E,'T>
 
+    /// Constructor of an array slice from an array target pointer and
+    /// indices defining the beginning and end of the subset range
+    | ArraySlice of target: Node<'E,'T>
+                  * startIdx: Node<'E,'T>
+                  * endIdx: Node<'E,'T>
+
 
 /// A type alias for an untyped AST, where there is no typing environment nor
 /// typing information (unit).
