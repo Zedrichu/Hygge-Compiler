@@ -779,7 +779,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     // .AddText(RV.ADDI(Reg.fp, Reg.sp, Imm12(totalOffset)),
                     //  "Update frame pointer for stack saved arguments")
 
-        /// Code that loads each application arguSment into a register 'a', by
+        /// Code that loads each application argument into a register 'a', by
         /// copying the contents of the target registers used by 'compileArgs'
         /// and 'argsCode' above.  To this end, this code folds over the indexes
         /// of all arguments (from 0 to args.Length), using 'copyArg' above.
