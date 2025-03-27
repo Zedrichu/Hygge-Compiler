@@ -922,7 +922,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
     | ArrayCons(length, init) ->
         // To compile an array constructor, we allocate heap space for the whole array
-        // instance (struct + sequence), and then compile its initialisation once and
+        // instance (struct + container), and then compile its initialisation once and
         // for all elements, storing each result in the corresponding heap location.
         // The struct heap address will end up in the 'target' register - i.e.
         // the register will contain a pointer to the first element of the
@@ -1094,6 +1094,71 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 )
             | _ -> failwith $"BUG: array length access on invalid target: %O{target.Type}"
         targetCode ++ lengthAccessCode
+
+    | ArraySlice(parent, startIdx, endIdx) ->
+        // To compile an array slice definition, we allocate heap space for an array instance
+        // without a new container, hence only a struct with 2 fields: `length` and `data`.
+        // The struct heap address will end up in the 'target' register. The `data` field
+        // contains a pointer to the memory address of the first slice element from the container.
+
+        /// Compile the parent array as target
+        let parentCode = doCodegen env parent
+
+        /// Compile the start index of the slice
+        let startIndexCode = doCodegen { env with Target = env.Target + 2u } startIdx
+
+        /// Assembly code to compute the updated data pointer of the slice based on start offset
+        let dataPointerCode =
+            match parent.Type, startIdx.Type with
+            | TArray _, TInt ->
+                Asm().AddText([
+                    (RV.LW(Reg.r(env.Target + 1u), Imm12(4), Reg.r(env.Target)),
+                     "Load the parent array data pointer in register `target+1`")
+                    (RV.LI(Reg.r(env.Target + 3u), 4),
+                     "Store word size in register for word-aligned slice start computation")
+                    (RV.MUL(Reg.r(env.Target + 2u), Reg.r(env.Target + 2u), Reg.r(env.Target + 3u)),
+                     "Multiply the slice start offset by 4 for word-alignment ( 4 x startIdx )")
+                    (RV.ADD(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Reg.r(env.Target + 2u)),
+                     "Update data pointer from parent array with start index offset")
+                ])
+            | TArray _, _ -> failwith $"BUG: slice with invalid index type: %O{startIdx.Type}"
+            | _, TInt
+            | _ -> failwith $"BUG: slice on invalid array target: %O{parent.Type}"
+
+        /// Allocation of heap space for the new array struct through a 'Sbrk'
+        /// system call. The size of the structure is 8 bytes (2 fields x 4 bytes)
+        let structAllocCode =
+            (beforeSysCall [Reg.a0] [])
+                .AddText([
+                    (RV.ADDI(Reg.a0, Reg.zero, Imm12(8)),
+                     "Amount of memory to allocate for array struct (2 fields, in bytes)")
+                    (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                    (RV.ECALL, "")
+                    (RV.MV(Reg.r(env.Target), Reg.a0),
+                     "Move syscall result (struct mem address) to target")
+                ])
+                ++ (afterSysCall [Reg.a0] [])
+
+        /// Construct typed AST node for the resulting array slice length
+        let lengthNode = { node with Expr = Add({ node with Expr = Sub(endIdx, startIdx)
+                                                            Type = TInt },
+                                                { node with Expr = IntVal(1)
+                                                            Type = TInt })
+                                     Type = TInt }
+
+        /// Compile the array slice length in register `target+2`
+        let lengthCode = doCodegen { env with Target = env.Target + 2u } lengthNode
+
+        /// Code to store the length of the array at the beginning of the array struct memory
+        let instanceFieldSetCode =
+                Asm().AddText([
+                    (RV.SW(Reg.r(env.Target + 2u), Imm12(0), Reg.r(env.Target)),
+                    "Store array length at the beginning of the array memory (1st field)")
+                    (RV.SW(Reg.r(env.Target + 1u), Imm12(4), Reg.r(env.Target)),
+                    "Store array container pointer in data (2nd struct field)")
+                ])
+
+        parentCode ++ startIndexCode ++ dataPointerCode ++ structAllocCode ++ lengthCode ++ instanceFieldSetCode
 
     | Pointer(_) ->
         failwith "BUG: pointers cannot be compiled (by design!)"
