@@ -690,18 +690,18 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | ArraySlice({ Expr = Pointer(addr) },
                  { Expr = IntVal(start) },
-                 { Expr = IntVal(endup) }) when start >= 0 ->
+                 { Expr = IntVal(final) }) when start >= 0 ->
         match (env.PtrInfo.TryFind addr) with
         | Some(attrs) ->
             match env.Heap[addr].Expr with
-            | IntVal(length) when endup < length && endup >= start ->
+            | IntVal(length) when final < length && final >= start ->
                 match (List.tryFindIndex (fun a -> a = "~data") attrs) with
                 | Some(data) ->
                     match env.Heap[addr + (uint 1)].Expr with
                     | Pointer(dataPointer) ->
                         /// Allocate the array slice struct on the heap, with data pointing at range start
-                        /// Since elements are in the subset of range [start, endup]
-                        let lengthNode = { node with Expr = IntVal(endup - start + 1) }
+                        /// Since elements are in the subset of range [start, final]
+                        let lengthNode = { node with Expr = IntVal(final - start + 1) }
                         let dataNode = { node with Expr = Pointer(dataPointer + uint start) }
                         /// Updated heap with newly-allocated struct, placed at `baseAddr`
                         let (heap', baseAddr) = heapAlloc env.Heap [ lengthNode; dataNode ]
