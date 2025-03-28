@@ -1037,10 +1037,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// `data` instance field referencing the array container. Finally, we iterate memory
         ///  addresses from container pointer until the offset to retrieve the element value.
 
+        let indexOutBoundsCode = checkIndexOutOfBounds env array (index, index) node
+
         let arrayTargetCode = doCodegen env array
         let indexCode = doCodegen {env with Target = env.Target + 1u} index
-
-        let indexOutBoundsCode = checkIndexOutOfBounds env array (index, index) node
 
         /// Code to compute the element offset within array container memory
         let memorySetCode = Asm().AddText([
@@ -1101,6 +1101,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // The struct heap address will end up in the 'target' register. The `data` field
         // contains a pointer to the memory address of the first slice element from the container.
 
+        let indexOutBoundsCode = checkIndexOutOfBounds env parent (startIdx, endIdx) node
+
         /// Compile the parent array as target
         let parentCode = doCodegen env parent
 
@@ -1158,7 +1160,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     "Store array container pointer in data (2nd struct field)")
                 ])
 
-        parentCode ++ startIndexCode ++ dataPointerCode ++ structAllocCode ++ lengthCode ++ instanceFieldSetCode
+        indexOutBoundsCode
+            ++ parentCode ++ startIndexCode ++ dataPointerCode
+            ++ structAllocCode ++ lengthCode ++ instanceFieldSetCode
 
     | Pointer(_) ->
         failwith "BUG: pointers cannot be compiled (by design!)"
@@ -1291,6 +1295,27 @@ and internal errorSegFaultNode (index: Node<TypingEnv, Type>) (node: Node<Typing
                     Pos = node.Pos
                 }
     error
+and internal errorInvalidSlice (indexL: Node<TypingEnv, Type>, indexR: Node<TypingEnv, Type>) (node:Node<TypingEnv, Type>) =
+    let error = { node with
+                    Expr = Seq([
+                        {node with Expr = Print({node with
+                                                    Expr = StringVal($"Invalid Slice: [{indexL.Pos.FileName}:{indexL.Pos.LineStart}:{indexL.Pos.ColStart}]: Start index is higher than end index of slice: ")
+                                                    Type = TString
+                                                })
+                                   Type = TUnit}
+                        {node with Expr = PrintLn(indexL)
+                                   Type = TUnit}
+                        {node with Expr = PrintLn(indexR)
+                                   Type = TUnit}
+                        {node with Expr = Assertion({node with Expr = BoolVal(false)
+                                                               Type = TBool})
+                                   Type = TUnit
+                                   Pos = node.Pos }
+                    ])
+                    Type = TUnit
+                    Pos = node.Pos
+                }
+    error
 and internal checkIndexOutOfBounds env target (indexL, indexR) node: Asm =
 
     // Create a node to check if index is greater than or equal to 0
@@ -1302,6 +1327,16 @@ and internal checkIndexOutOfBounds env target (indexL, indexR) node: Asm =
     // Create a node to check if left index is less or equal than right index
     let leftIndexLessEqRightIndexCheck = LessEq(indexL, indexR)
 
+    let sliceNode = match indexL = indexR with
+                    | true -> { node with Expr = UnitVal
+                                          Type = TUnit }
+                    | false -> { node with Expr = If({ node with Expr = leftIndexLessEqRightIndexCheck
+                                                                 Type = TBool
+                                                                 Pos = node.Pos },
+                                                     { node with Expr = UnitVal
+                                                                 Type = TUnit },
+                                                     errorInvalidSlice (indexL, indexR) node)}
+
     let indexOutOfBoundsCheck =
             { node with
                 Expr = If({ node with Expr = indexNonNegativeCheck
@@ -1310,8 +1345,7 @@ and internal checkIndexOutOfBounds env target (indexL, indexR) node: Asm =
                           { node with Expr = If({ node with Expr = indexLessThanLengthCheck
                                                             Type = TBool
                                                             Pos = node.Pos },
-                                                { node with Expr = UnitVal
-                                                            Type = TUnit },
+                                                sliceNode,
                                                 errorSegFaultNode indexR node)
                                       Type = TUnit },
                           errorSegFaultNode indexL node)

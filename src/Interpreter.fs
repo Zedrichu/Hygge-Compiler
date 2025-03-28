@@ -694,7 +694,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         match (env.PtrInfo.TryFind addr) with
         | Some(attrs) ->
             match env.Heap[addr].Expr with
-            | IntVal(length) when endup < length ->
+            | IntVal(length) when endup < length && endup >= start ->
                 match (List.tryFindIndex (fun a -> a = "~data") attrs) with
                 | Some(data) ->
                     match env.Heap[addr + (uint 1)].Expr with
