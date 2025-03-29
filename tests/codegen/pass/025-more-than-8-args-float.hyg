@@ -5,3 +5,10 @@ let result_add = addFirstAndLast(1.0f,2.0f,3.0f,4.0f,5.0f,6.0f,7.0f,8.0f,9.0f,10
 println(result_add);
 assert(result_add = 11.0f)
 
+
+//fun addFirstAndLast(x1: float, x2: float, x3: float, x4: float, x5: float, x6: float, x7: float, x8: float): float = x1 + x8;
+
+//let result_add = addFirstAndLast(1.0f,2.0f,3.0f,4.0f,5.0f,6.0f,7.0f,8.0f);
+//println(result_add);
+//assert(result_add = 9.0f)
+

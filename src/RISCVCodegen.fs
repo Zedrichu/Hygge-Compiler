@@ -64,8 +64,11 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         if (not System.BitConverter.IsLittleEndian)
             then System.Array.Reverse(bytes) // RISC-V is little-endian
         let word: int32 = System.BitConverter.ToInt32(bytes)
-        Asm([ (RV.LI(Reg.r(env.Target), word), $"Float value %f{v}")
-              (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)), "") ])
+        // Current handling of floats writes bytes to t0 then to fpreg, but we use t0 to store the function address.
+        // Solution: hard code to write to t1 instead... might need to change this in the future.
+        //Asm([ (RV.LI(Reg.r(env.Target), word), $"Float value %f{v}")
+        Asm([ (RV.LI(Reg.r(1u), word), $"Float value %f{v}")
+              (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(1u)), $"Move float value %f{v} to FP register") ])
 
     | StringVal(v) ->
         let escapedV = v.Replace("\"", "\\\"")
@@ -813,7 +816,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 
                 if i < 8 then
                     acc.AddText(RV.FMV_S(FPReg.fa(uint i), FPReg.r(env.FPTarget + (uint i) + 1u)),
-                        $"Load float function call argument %d{i+1}")
+                        //$"Load float function call argument %d{i+1}")
+                        $"Load float function call argument %d{i+1} from FP register '%s{(FPReg.r(env.FPTarget + (uint i) + 1u)).ToString()}' to target FP register 'fa%d{i}'") // Better debug comment
                 else 
                     let stackOffset = (i - 8) * 4
                     let totalOffset = stackOffset + (saveRegs.Length * 4)
