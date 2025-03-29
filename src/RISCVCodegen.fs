@@ -753,6 +753,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// for compiling each expression.
         let indexedArgs = List.indexed args
 
+        /// Separate arguments by type and index them separately
+        let floatArgs, intArgs = 
+            args 
+            |> List.partition (fun arg -> isSubtypeOf arg.Env arg.Type TFloat)
+            |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
+
         /// Function that compiles an argument (using its index to determine its
         /// target register) and accumulates the generated assembly code
         let compileArg (acc: Asm) (i, (arg: TypedAST)) =
@@ -766,14 +772,45 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// 'indexedArgs'
         let argsCode = List.fold compileArg (Asm()) indexedArgs
 
+
         /// Function that copies the content of a target register (used by
         /// 'compileArgs' and 'argsCode' above) into an 'a' register, using an
         /// index to determine the source and target registers, and accumulating
         /// the generated assembly code
+        // let copyArg (acc: Asm) (i: int, arg: TypedAST) =
+        //     match arg.Type with
+        //     | t when (isSubtypeOf arg.Env t TFloat) ->
+        //         // Here we handle floats
+        //         if i < 8 then
+        //             acc.AddText(RV.FMV_S(FPReg.fa(uint i), FPReg.r(env.FPTarget + (uint i) + 1u)),
+        //                 $"Load float function call argument %d{i+1}")
+        //         else 
+        //             let stackOffset = (i - 8) * 4
+        //             let totalOffset = stackOffset + (saveRegs.Length * 4)
+        //             acc.AddText(RV.FSW_S(FPReg.r(env.FPTarget + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
+        //             $"Store float function call argument %d{i+1} to stack at offset {totalOffset}")
+        //     | t when (isSubtypeOf arg.Env t TInt) ->
+        //         // Here we handle integers
+        //         if i < 8 then
+        //             acc.AddText(RV.MV(Reg.a(uint i), Reg.r(env.Target + (uint i) + 1u)),
+        //                         $"Load function call argument %d{i+1}")
+        //         else 
+        //             let stackOffset = (i - 8) * 4
+        //             // Use offset that accounts for saved registers
+        //             let totalOffset = stackOffset + (saveRegs.Length * 4)
+        //             acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
+        //                 $"Store function call argument %d{i+1} to stack at offset {totalOffset}")
+        //     | _ -> 
+        //         // All other arg types a comment is made for now.
+        //         let typeName = arg.Type.ToString()
+        //         acc.AddText(RV.COMMENT($"Arg %d{i+1} is of type: {typeName}, floats and integers are only accepted."))
+
         let copyArg (acc: Asm) (i: int, arg: TypedAST) =
+
             match arg.Type with
             | t when (isSubtypeOf arg.Env t TFloat) ->
                 // Here we handle floats
+                
                 if i < 8 then
                     acc.AddText(RV.FMV_S(FPReg.fa(uint i), FPReg.r(env.FPTarget + (uint i) + 1u)),
                         $"Load float function call argument %d{i+1}")
@@ -782,6 +819,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     let totalOffset = stackOffset + (saveRegs.Length * 4)
                     acc.AddText(RV.FSW_S(FPReg.r(env.FPTarget + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
                     $"Store float function call argument %d{i+1} to stack at offset {totalOffset}")
+                    
             | t when (isSubtypeOf arg.Env t TInt) ->
                 // Here we handle integers
                 if i < 8 then
@@ -804,6 +842,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// of all arguments (from 0 to args.Length), using 'copyArg' above.
         //let argsLoadCode = List.fold copyArg (Asm()) [0..(args.Length-1)]
         let argsLoadCode = List.fold copyArg (Asm()) (List.indexed args)
+
 
         /// Code that performs the function call
         let callCode =
