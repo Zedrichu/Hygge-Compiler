@@ -66,6 +66,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let word: int32 = System.BitConverter.ToInt32(bytes)
         // Current handling of floats writes bytes to t0 then to fpreg, but we use t0 to store the function address.
         // Solution: hard code to write to t1 instead... might need to change this in the future.
+        //TODO: This is actually an issue from calling floa targs since the env.Target is ALWAYS t0...
         //Asm([ (RV.LI(Reg.r(env.Target), word), $"Float value %f{v}")
         Asm([ (RV.LI(Reg.r(1u), word), $"Float value %f{v}")
               (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(1u)), $"Move float value %f{v} to FP register") ])
@@ -94,9 +95,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                        $"Load value of variable '%s{name}'")
                       (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)),
                        $"Transfer '%s{name}' to fp register") ])
-            | Some(Storage.Stack(offset)) ->
-                Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-            $"Load variable '%s{name}' from stack at offset %d{offset}")
+            // Stack storage logic
+            |Some(Storage.Stack(offset)) ->
+                    match node.Type with
+                    | t when (isSubtypeOf node.Env t TFloat) ->
+                        Asm(RV.FLW_S(FPReg.r(env.FPTarget), Imm12(offset), Reg.fp),
+                            $"Load float variable '%s{name}' from stack at offset %d{offset}")
+                    | _ -> 
+                        Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+                            $"Load variable '%s{name}' from stack at offset %d{offset}")
             | Some(Storage.Reg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: float variable without storage: %s{name}"
@@ -114,9 +121,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                $"Load address of variable '%s{name}'")
                               (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
                                $"Load value of variable '%s{name}'") ])
-                | Some(Storage.Stack(offset)) ->
-                    Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-            $"Load variable '%s{name}' from stack at offset %d{offset}")
+                // Stack storage logic
+                |Some(Storage.Stack(offset)) ->
+                    match node.Type with
+                    | t when (isSubtypeOf node.Env t TFloat) ->
+                        Asm(RV.FLW_S(FPReg.r(env.FPTarget), Imm12(offset), Reg.fp),
+                            $"Load float variable '%s{name}' from stack at offset %d{offset}")
+                    | _ -> 
+                        Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+                            $"Load variable '%s{name}' from stack at offset %d{offset}")
             | Some(Storage.FPReg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
