@@ -733,12 +733,13 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
     | DoWhile(body, cond) ->
         /// Label to mark the beginning of the 'do-while' loop body
         let doWhileBodyBeginLabel = Util.genSymbol "do_while_body_begin"
-
+        let scopeTarget = env.Target + 1u
+        let scopeEnv = { env with Target = scopeTarget}
         Asm(RV.LABEL(doWhileBodyBeginLabel))
             ++ (doCodegen env body)
-            ++ (doCodegen env cond)
+            ++ (doCodegen scopeEnv cond)
                 .AddText([
-                    (RV.BNEZ(Reg.r(env.Target), doWhileBodyBeginLabel),
+                    (RV.BNEZ(Reg.r(scopeTarget), doWhileBodyBeginLabel),
                      "Jump to loop body if 'while' condition is true")
                 ])
 
