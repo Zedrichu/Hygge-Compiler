@@ -201,8 +201,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             failwith $"BUG: numerical operation codegen invoked on invalid type %O{t}"
 
     | Sqrt(arg) ->
-        //Code generation for the Square Root Operator
-
         // Generate code for the argument expression
         let argAsm = doCodegen env arg
 
