@@ -150,14 +150,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     | Mod(_,_) ->
                         Asm(RV.REM(Reg.r(env.Target),
                                    Reg.r(env.Target), Reg.r(rtarget)))
-                    | Min(_,_) ->
-                        Asm(RV.BLT(Reg.r(env.Target), Reg.r(rtarget), label)) ++
-                        Asm(RV.MV(Reg.r(env.Target), Reg.r(rtarget))) ++
-                        Asm(RV.LABEL(label))
-                    | Max(_,_) ->
-                        Asm(RV.BLT(Reg.r(rtarget), Reg.r(env.Target), label)) ++
-                        Asm(RV.MV(Reg.r(env.Target), Reg.r(rtarget))) ++
-                        Asm(RV.LABEL(label))
+                    | Min(_,_) -> Asm().AddText([
+                            (RV.BLT(Reg.r(env.Target), Reg.r(rtarget), label), "")
+                            (RV.MV(Reg.r(env.Target), Reg.r(rtarget)), "")
+                            (RV.LABEL(label), "")
+                        ])
+                    | Max(_,_) -> Asm().AddText([
+                            (RV.BLT(Reg.r(rtarget), Reg.r(env.Target), label), "")
+                            (RV.MV(Reg.r(env.Target), Reg.r(rtarget)), "")
+                            (RV.LABEL(label), "")
+                        ])
                     | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
             lAsm ++ rAsm ++ opAsm
