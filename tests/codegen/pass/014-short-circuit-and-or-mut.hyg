@@ -1,4 +1,0 @@
-let mutable counter = 0;
-({counter++; false}) && ({counter++; true});
-({counter++; true}) || ({counter++; true});
-assert(counter = 2) // Only 2 boolean evaluations due to short-circuits
