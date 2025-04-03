@@ -51,6 +51,8 @@ and Pretype =
             * ret: PretypeNode
     /// A structure pretype, with pretypes for each field.
     | TStruct of fields: List<string * PretypeNode>
+    /// An array pretype, with the pretype of the elements (unique).
+    | TArray of arrType: PretypeNode
 
 
 /// Node of the Abstract Syntax Tree of a Hygge expression.  The meaning of the
@@ -252,6 +254,17 @@ and Expr<'E,'T> =
     /// result; it has no syntax in the parser, so it cannot be written in Hygge
     /// programs.
     | Pointer of addr: uint
+
+    /// Constructor of an array instance of certain length and initial value.
+    | ArrayCons of length: Node<'E,'T>
+                 * init: Node<'E,'T>
+
+    /// Access the length of an array (size).
+    | ArrayLength of target: Node<'E,'T>
+
+    /// Access a specific element of an array (indexed).
+    | ArrayElem of target: Node<'E,'T>
+                 * index: Node<'E,'T>
 
 
 /// A type alias for an untyped AST, where there is no typing environment nor

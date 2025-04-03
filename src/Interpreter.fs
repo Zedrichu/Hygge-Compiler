@@ -464,6 +464,38 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | None -> None
         | None -> None
 
+    | Assign({Expr = ArrayElem(arrTarget, index)} as target, expr) when not (isValue arrTarget) ->
+        match (reduce env arrTarget) with
+        | Some(env', arrTarget') ->
+            Some(env', {node with Expr = Assign({target with Expr = ArrayElem(arrTarget', index)}, expr)})
+        | None -> None
+    | Assign({Expr = ArrayElem(arrTarget, index)} as target, expr) when not (isValue index) ->
+        match (reduce env index) with
+        | Some(env', index') ->
+            Some(env', {node with Expr = Assign({target with Expr = ArrayElem(arrTarget, index')}, expr)})
+        | None -> None
+    | Assign({Expr = ArrayElem(_,_)} as target, expr) when not (isValue expr) ->
+        match (reduce env expr) with
+        | Some(env', expr') ->
+            Some(env', {node with Expr = Assign(target, expr')})
+        | None -> None
+    | Assign({Expr = ArrayElem({Expr = Pointer(addr)}, index)}, value) ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(attrs) ->
+            match (List.tryFindIndex (fun a -> a = "~data") attrs) with
+            | Some(data) ->
+                match index.Expr with
+                | IntVal(i) when i >= 0 ->
+                    match env.Heap[addr].Expr with
+                    | IntVal(length) when i >= length -> None
+                    | IntVal(_) ->
+                        /// Updated heap with selected array element overwritten by 'value'
+                        let env' = {env with Heap = env.Heap.Add(addr + (uint data) + (uint i), value)}
+                        Some(env', value)
+                    | _ -> None
+                | _ -> None
+            | None -> None
+        | None -> None
     | Assign({Expr = FieldSelect(selTarget, field)} as target,
              expr) when not (isValue selTarget)->
         match (reduce env selTarget) with
@@ -509,16 +541,17 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                            {body with Expr = Seq([body; node])},
                            {body with Expr = UnitVal})
         Some(env, {node with Expr = rewritten})
-        
+
      | DoWhile(body, cond) ->
         /// Rewritten 'DoWhile' loop, transformed into a sequence of the body
         /// followed by an 'if' on the condition. First execute the body.
         /// Then we evaluate 'cond'. If is true we continue with the whole loop again.
-        /// Otherwise, when 'cond' is false we do nothing (unit)
-        let rewritten = Seq([body;
-                            {node with Expr = If(cond,
+        /// Otherwise, when 'cond' is false we return the value produced by the last "body" execution
+        let varName = Util.genSymbol "~doWhileResult"
+        let rewritten = Let (varName, body,
+                             {node with Expr = If(cond,
                                                 {node with Expr = DoWhile(body, cond)},
-                                                {body with Expr = UnitVal})}])
+                                                {body with Expr = Var(varName) })})
         Some(env, {node with Expr = rewritten})
 
     | Application(expr, args) ->
@@ -583,11 +616,72 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | Some(env', target') ->
             Some(env', {node with Expr = FieldSelect(target', field)})
         | None -> None
-    | FieldSelect(_, _) -> None
+    | FieldSelect _ -> None
+
+    | ArrayCons(length, init) when not (isValue length) ->
+        match (reduce env length) with
+        | Some(env', length') ->
+            Some(env', {node with Expr = ArrayCons(length', init)})
+        | None -> None
+    | ArrayCons(length, init) ->
+        match (reduce env init) with
+        | Some(env', init') ->
+            Some(env', {node with Expr = ArrayCons(length, init')})
+        | None when isValue init ->
+            match length.Expr with
+            | IntVal(l) when l > 0 ->
+                /// Allocate the array on the heap, with all elements initialized
+                /// Updated heap with newly-allocated struct, placed at `baseAddr`
+                let (heap', baseAddr) = heapAlloc env.Heap (length :: (List.init l (fun _ -> init)))
+                /// Update pointer info, mapping `baseAddr` to the length and data of the array
+                let ptrInfo' = env.PtrInfo.Add(baseAddr, ["~length"; "~data"])
+                Some({ env with Heap = heap'; PtrInfo = ptrInfo' },
+                     { node with Expr = Pointer(baseAddr) })
+            | _ -> None
+        | None -> None
+
+    | ArrayLength({Expr = Pointer(addr) }) ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(attrs) ->
+            match (List.tryFindIndex (fun a -> a = "~length") attrs) with
+            | Some(offset) ->
+                Some(env, env.Heap[addr + (uint offset)])
+            | None -> None
+        | None -> None
+    | ArrayLength(target) when not (isValue target) ->
+        match (reduce env target) with
+        | Some(env', target') ->
+            Some(env', {node with Expr = ArrayLength(target')})
+        | None -> None
+    | ArrayLength _ -> None
+
+    | ArrayElem ({Expr = Pointer(addr)}, {Expr = IntVal(i)}) when i >= 0 ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(attrs) ->
+            match env.Heap[addr].Expr with
+            | IntVal(length) when i >= length -> None
+            | IntVal(_) ->
+                match (List.tryFindIndex (fun a -> a = "~data") attrs) with
+                | Some(data) ->
+                    Some(env, env.Heap[addr + (uint data) + (uint i)])
+                | None -> None
+            | _ -> None
+        | None -> None
+    | ArrayElem(target, index) when not (isValue index) ->
+        match (reduce env index) with
+        | Some(env', index') ->
+            Some(env', {node with Expr = ArrayElem(target, index')})
+        | None -> None
+    | ArrayElem(target, index) when not (isValue target) ->
+        match (reduce env target) with
+        | Some(env', target') ->
+            Some(env', {node with Expr = ArrayElem(target', index)})
+        | None -> None
+    | ArrayElem _ -> None
 
 /// Attempt to reduce the given lhs, and then (if the lhs is a value) the rhs,
 /// using the given runtime environment.  Return None if either (a) the lhs
-/// cannot reduce although it is not a value, or (b) the lhs is a value but the
+/// cannot reduce, although it is not a value, or (b) the lhs is a value but the
 /// rhs cannot reduce.
 and internal reduceLhsRhs (env: RuntimeEnv<'E,'T>)
                           (lhs: Node<'E,'T>)

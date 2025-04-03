@@ -1,0 +1,7 @@
+﻿//Do while returns unitValue
+let mutable x = 0;
+let y: int = do {
+   x <- x +1;
+   println("hello")
+} while (x < 5);
+assert(y = 5)

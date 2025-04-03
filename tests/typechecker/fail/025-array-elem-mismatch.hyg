@@ -1,0 +1,8 @@
+let n = readInt();
+let arr: array {int} = array(n, 40 + 2);
+
+let mutable i = 0;
+while (i < arrayLength(arr)) do {
+    arrayElem(n, i) <- arrayElem(arr, i) + i;
+    i <- i + 1
+}; ()
