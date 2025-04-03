@@ -846,7 +846,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     let totalOffset = stackOffset + (saveRegs.Length * 4)
                     acc.AddText(RV.FSW_S(FPReg.r(env.FPTarget + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
                     $"Store float function call argument %d{i+1} to stack at offset {totalOffset}")   
-            | t when (isSubtypeOf arg.Env t TInt) ->
+            | _ ->
                 // Here we handle integers
                 if i < 8 then
                     acc.AddText(RV.MV(Reg.a(uint i), Reg.r(env.Target + (uint i) + 1u)),
@@ -859,10 +859,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     let totalOffset = stackOffset + (saveRegs.Length * 4) + overflowOffset
                     acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
                         $"Store function call argument %d{i+1} to stack at offset {totalOffset}")
-            | _ -> 
-                // All other arg types a comment is made for now.
-                let typeName = arg.Type.ToString()
-                acc.AddText(RV.COMMENT($"Arg %d{i+1} is of type: {typeName}, floats and integers are only accepted."))
 
 
         /// Code that loads each application arguSment into a register 'a', by
@@ -1088,19 +1084,13 @@ and internal compileFunction (args: List<string * Type>)
         let totalOffsetFloat = totalOffset + (floatArgsOnStack * 4)
 
         match _tpe with
-        // | t when (isSubtypeOf body.Env t TInt) ->
-        //     if i < 8 then
-        //         acc.Add(var, Storage.Reg(Reg.a((uint)i)))
-        //     else
-        //         acc.Add(var, Storage.Stack totalOffsetFloat)
         | t when (isSubtypeOf body.Env t TFloat) ->
             if i < 8 then
                 acc.Add(var, Storage.FPReg(FPReg.fa((uint)i)))
             else
                 acc.Add(var, Storage.Stack totalOffset)
         | _ -> 
-            // All other cases do nothing for now but leaving possibility to add other arg types.
-            //acc
+        // Handle all else.
             if i < 8 then
                 acc.Add(var, Storage.Reg(Reg.a((uint)i)))
             else
