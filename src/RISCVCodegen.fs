@@ -64,13 +64,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         if (not System.BitConverter.IsLittleEndian)
             then System.Array.Reverse(bytes) // RISC-V is little-endian
         let word: int32 = System.BitConverter.ToInt32(bytes)
-        // Current handling of floats writes bytes to t0 then to fpreg, but we use t0 to store the function address.
-        // Solution: hard code to write to t1 instead... might need to change this in the future.
-        //TODO: This is actually an issue from calling floa targs since the env.Target is ALWAYS t0...
-        //Asm([ (RV.LI(Reg.r(env.Target), word), $"Float value %f{v}")
-        Asm([ (RV.LI(Reg.r(1u), word), $"Float value %f{v}")
-              (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(1u)), $"Move float value %f{v} to FP register") ])
 
+        // Current handling of floats writes bytes to t0 then to fpreg, but we use t0 to store the function address.
+        // Solution: We save the contents of the env.Target register before using it to perform the conversion, then it is restored after the float val is loaded into FP reg.
+        Asm([ (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space to save register") // RARS commenting for debugging... if it's annoying you can remove it.
+              (RV.SW(Reg.r(env.Target), Imm12(0), Reg.sp), "Save env.Target register to stack")
+              (RV.LI(Reg.r(env.Target), word), $"Float value %f{v}")
+              (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)), $"Move float value %f{v} to FP register")
+              (RV.LW(Reg.r(env.Target), Imm12(0), Reg.sp), "Restore env.Target register from stack")
+              (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space") ])
     | StringVal(v) ->
         let escapedV = v.Replace("\"", "\\\"")
         // Label marking the string constant in the data segment
@@ -822,29 +824,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             |> List.partition (fun arg -> isSubtypeOf arg.Env arg.Type TFloat)
             |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
 
-
-        // Separate arguments by type and index them separately
-        // let floatArgs, intArgs = 
-        //     args 
-        //     |> List.partition (fun arg -> isSubtypeOf arg.Env arg.Type TFloat)
-        //     |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
-
-        /// Function that compiles an argument (using its index to determine its
-        /// target register) and accumulates the generated assembly code
-        // let compileArg (acc: Asm) (i, (arg: TypedAST)) =
-        //     match arg.Type with 
-        //     | t when (isSubtypeOf arg.Env t TFloat) ->
-        //         acc ++ (doCodegen {env with FPTarget = env.FPTarget + (uint i) + 1u} arg)
-        //     | _ ->
-        //         acc ++ (doCodegen {env with Target = env.Target + (uint i) + 1u} arg)
         let compileArgFloat (acc: Asm) (i: int, arg: TypedAST) =
             acc ++ (doCodegen {env with FPTarget = env.FPTarget + (uint i) + 1u} arg)
         let compileArgInt (acc: Asm) (i: int, arg: TypedAST) =
             acc ++ (doCodegen {env with Target = env.Target + (uint i) + 1u} arg)
 
         /// Assembly code of all application arguments, obtained by folding over
-        /// 'indexedArgs'
-        //let argsCode = List.fold compileArg (Asm()) indexedArgs
         let floatArgsCode =
             List.fold compileArgFloat (Asm()) indexedArgsFloat
         let intArgsCode =
@@ -855,34 +840,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// 'compileArgs' and 'argsCode' above) into an 'a' register, using an
         /// index to determine the source and target registers, and accumulating
         /// the generated assembly code
-        // let copyArg (acc: Asm) (i: int, arg: TypedAST) =
-        //     match arg.Type with
-        //     | t when (isSubtypeOf arg.Env t TFloat) ->
-        //         // Here we handle floats
-        //         if i < 8 then
-        //             acc.AddText(RV.FMV_S(FPReg.fa(uint i), FPReg.r(env.FPTarget + (uint i) + 1u)),
-        //                 $"Load float function call argument %d{i+1}")
-        //         else 
-        //             let stackOffset = (i - 8) * 4
-        //             let totalOffset = stackOffset + (saveRegs.Length * 4)
-        //             acc.AddText(RV.FSW_S(FPReg.r(env.FPTarget + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
-        //             $"Store float function call argument %d{i+1} to stack at offset {totalOffset}")
-        //     | t when (isSubtypeOf arg.Env t TInt) ->
-        //         // Here we handle integers
-        //         if i < 8 then
-        //             acc.AddText(RV.MV(Reg.a(uint i), Reg.r(env.Target + (uint i) + 1u)),
-        //                         $"Load function call argument %d{i+1}")
-        //         else 
-        //             let stackOffset = (i - 8) * 4
-        //             // Use offset that accounts for saved registers
-        //             let totalOffset = stackOffset + (saveRegs.Length * 4)
-        //             acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
-        //                 $"Store function call argument %d{i+1} to stack at offset {totalOffset}")
-        //     | _ -> 
-        //         // All other arg types a comment is made for now.
-        //         let typeName = arg.Type.ToString()
-        //         acc.AddText(RV.COMMENT($"Arg %d{i+1} is of type: {typeName}, floats and integers are only accepted."))
-
         let copyArg (acc: Asm) (i: int, arg: TypedAST) (overflowInt: int)=
             match arg.Type with
             | t when (isSubtypeOf arg.Env t TFloat) ->
@@ -915,12 +872,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// copying the contents of the target registers used by 'compileArgs'
         /// and 'argsCode' above.  To this end, this code folds over the indexes
         /// of all arguments (from 0 to args.Length), using 'copyArg' above.
-        //let argsLoadCode = List.fold copyArg (Asm()) [0..(args.Length-1)]
-        //let argsLoadCode = List.fold copyArg (Asm()) (List.indexed args)
-        // let argsLoadCode =
-        //     let floatArgsLoadCode = List.fold copyArg (Asm()) indexedArgsFloat
-        //     let intArgsLoadCode = List.fold copyArg (Asm()) indexedArgsInt
-        //     floatArgsLoadCode ++ intArgsLoadCode
+
         let argsLoadCode =
             // Calculate the exact number of float arguments that overflow to stack if its none then max 0 ensures that it doesn't go neg
             let floatArgsOnStack = max 0 (indexedArgsFloat.Length - 8)
@@ -1279,9 +1231,12 @@ and internal compileFunction (args: List<string * Type>)
             args 
             |> List.filter (fun (_, t) -> isSubtypeOf body.Env t TFloat)
             |> List.length
+        
         let stackOffset = max 0 ((i - 8) * 4)
         let totalOffset = stackOffset + (callerSaveRegs.Length * 4)
-    
+
+        /// Since floats are handled and saved to the stack first, we must consider if there are floats already in the stack 
+        /// before we assign memory for overflowing ints.
         let floatArgsOnStack = max 0 (floatArgsCount - 8)  
         let totalOffsetFloat = totalOffset + (floatArgsOnStack * 4)
 
@@ -1292,7 +1247,7 @@ and internal compileFunction (args: List<string * Type>)
             else
                 acc.Add(var, Storage.Stack totalOffset)
         | _ -> 
-        // Handle all else.
+        // Handle all else since everything else is an int.
             if i < 8 then
                 acc.Add(var, Storage.Reg(Reg.a((uint)i)))
             else
