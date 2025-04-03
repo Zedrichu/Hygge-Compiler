@@ -121,15 +121,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                $"Load address of variable '%s{name}'")
                               (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
                                $"Load value of variable '%s{name}'") ])
-                // Stack storage logic
-                |Some(Storage.Stack(offset)) ->
-                    match node.Type with
-                    | t when (isSubtypeOf node.Env t TFloat) ->
-                        Asm(RV.FLW_S(FPReg.r(env.FPTarget), Imm12(offset), Reg.fp),
-                            $"Load float variable '%s{name}' from stack at offset %d{offset}")
-                    | _ -> 
-                        Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-                            $"Load variable '%s{name}' from stack at offset %d{offset}")
+            // Stack storage logic
+            | Some(Storage.Stack(offset)) ->
+                match node.Type with
+                | t when (isSubtypeOf node.Env t TFloat) ->
+                    Asm(RV.FLW_S(FPReg.r(env.FPTarget), Imm12(offset), Reg.fp),
+                        $"Load float variable '%s{name}' from stack at offset %d{offset}")
+                | _ -> 
+                    Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+                        $"Load variable '%s{name}' from stack at offset %d{offset}")
             | Some(Storage.FPReg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
@@ -634,7 +634,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                           (RV.SW(Reg.r(env.Target), Imm12(0),
                                                  Reg.r(env.Target + 1u)),
                                            $"Transfer value of '%s{name}' to memory") ])
-                // Note to self...is this the correct way about this?
                 | Some(Storage.Stack(offset)) ->
                     rhsCode.AddText(RV.SW(Reg.r(env.Target), Imm12(offset), Reg.fp),
                 $"Assignment to variable %s{name} on stack at offset %d{offset}")
@@ -1082,18 +1081,18 @@ and internal compileFunction (args: List<string * Type>)
             args 
             |> List.filter (fun (_, t) -> isSubtypeOf body.Env t TFloat)
             |> List.length
-        let stackOffset = (i - 8) * 4
+        let stackOffset = max 0 ((i - 8) * 4)
         let totalOffset = stackOffset + (callerSaveRegs.Length * 4)
     
         let floatArgsOnStack = max 0 (floatArgsCount - 8)  
         let totalOffsetFloat = totalOffset + (floatArgsOnStack * 4)
 
         match _tpe with
-        | t when (isSubtypeOf body.Env t TInt) ->
-            if i < 8 then
-                acc.Add(var, Storage.Reg(Reg.a((uint)i)))
-            else
-                acc.Add(var, Storage.Stack totalOffsetFloat)
+        // | t when (isSubtypeOf body.Env t TInt) ->
+        //     if i < 8 then
+        //         acc.Add(var, Storage.Reg(Reg.a((uint)i)))
+        //     else
+        //         acc.Add(var, Storage.Stack totalOffsetFloat)
         | t when (isSubtypeOf body.Env t TFloat) ->
             if i < 8 then
                 acc.Add(var, Storage.FPReg(FPReg.fa((uint)i)))
@@ -1101,7 +1100,11 @@ and internal compileFunction (args: List<string * Type>)
                 acc.Add(var, Storage.Stack totalOffset)
         | _ -> 
             // All other cases do nothing for now but leaving possibility to add other arg types.
-            acc
+            //acc
+            if i < 8 then
+                acc.Add(var, Storage.Reg(Reg.a((uint)i)))
+            else
+                acc.Add(var, Storage.Stack totalOffsetFloat)
     /// Updated storage information including function arguments
     let varStorage2 = List.fold folder env.VarStorage indexedArgs
 
