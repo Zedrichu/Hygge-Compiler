@@ -26,8 +26,9 @@ type internal Storage =
     /// The variable is stored in memory, in a location marked with a
     /// label in the compiled assembly code.
     | Label of label: string
-    /// The variable is stored in the stack.
-    | Stack of int: int
+    /// The variable is stored in the stack, at `offset` (bytes) from
+    /// the memory address contained in the frame pointer register (fp).
+    | Frame of offset: int
 
 
 /// Code generation environment.
@@ -91,9 +92,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                        $"Load value of variable '%s{name}'")
                       (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)),
                        $"Transfer '%s{name}' to fp register") ])
-            | Some(Storage.Stack(offset)) ->
-                Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-            $"Load variable '%s{name}' from stack at offset %d{offset}")
+            | Some(Storage.Frame(offset)) ->
+                Asm(RV.FLW_S(FPReg.r(env.FPTarget), Imm12(offset), Reg.fp),
+                $"Load float variable '%s{name}' from stack at offset %d{offset}")
             | Some(Storage.Reg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: float variable without storage: %s{name}"
@@ -105,15 +106,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 match (expandType node.Env node.Type) with
                     | TFun(_,_) ->
                         Asm(RV.LA(Reg.r(env.Target), lab),
-                            $"Load variable '%s{name}' (labmda term)")
+                            $"Load variable '%s{name}' (lambda term)")
                     | _ ->
                         Asm([ (RV.LA(Reg.r(env.Target), lab),
                                $"Load address of variable '%s{name}'")
                               (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
                                $"Load value of variable '%s{name}'") ])
-                | Some(Storage.Stack(offset)) ->
+                | Some(Storage.Frame(offset)) ->
                     Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-            $"Load variable '%s{name}' from stack at offset %d{offset}")
+                    $"Load variable '%s{name}' from stack at offset %d{offset}")
             | Some(Storage.FPReg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
@@ -619,9 +620,14 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                                  Reg.r(env.Target + 1u)),
                                            $"Transfer value of '%s{name}' to memory") ])
                 // Note to self...is this the correct way about this?
-                | Some(Storage.Stack(offset)) ->
-                    rhsCode.AddText(RV.SW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-                $"Assignment to variable %s{name} on stack at offset %d{offset}")
+                | Some(Storage.Frame(offset)) ->
+                    match rhs.Type with
+                    | t when (isSubtypeOf rhs.Env t TFloat) ->
+                        rhsCode.AddText(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(offset), Reg.fp),
+                        $"Assignment to float variable %s{name} on stack at offset %d{offset}")
+                    | _ ->
+                        rhsCode.AddText(RV.SW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+                        $"Assignment to variable %s{name} on stack at offset %d{offset}")
                 | None -> failwith $"BUG: variable without storage: %s{name}"
         | FieldSelect(target, field) ->
             /// Assembly code for computing the 'target' object of which we are
@@ -691,12 +697,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
                 (RV.LABEL(whileEndLabel), "")
             ])
-            
-            
+
+
     | DoWhile(body, cond) ->
         /// Label to mark the beginning of the 'do-while' loop body
         let doWhileBodyBeginLabel = Util.genSymbol "do_while_body_begin"
-        
+
         Asm(RV.LABEL(doWhileBodyBeginLabel))
             ++ (doCodegen env body)
             ++ (doCodegen env cond)
@@ -704,7 +710,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     (RV.BNEZ(Reg.r(env.Target), doWhileBodyBeginLabel),
                      "Jump to loop body if 'while' condition is true")
                 ])
-            
+
 
     | Lambda(args, body) ->
         /// Label to mark the position of the lambda term body
@@ -770,7 +776,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             if i < 8 then
                 acc.AddText(RV.MV(Reg.a(uint i), Reg.r(env.Target + (uint i) + 1u)),
                             $"Load function call argument %d{i+1}")
-            else 
+            else
                 let stackOffset = (i - 8) * 4
                 // Use offset that accounts for saved registers
                 let totalOffset = stackOffset + (saveRegs.Length * 4)
@@ -982,8 +988,8 @@ and internal compileFunction (args: List<string * Type>)
                 List.except [Reg.r(0u)]  // Using 0u as placeholder for env.Target
                         (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
                          @ [for i in 0u..6u do yield Reg.t(i)])
-            let totalOffset = stackOffset + (callerSaveRegs.Length * 4)             
-            acc.Add(var, Storage.Stack totalOffset)
+            let totalOffset = stackOffset + (callerSaveRegs.Length * 4)
+            acc.Add(var, Storage.Frame totalOffset)
     /// Updated storage information including function arguments
     let varStorage2 = List.fold folder env.VarStorage indexedArgs
 
