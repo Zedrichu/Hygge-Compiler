@@ -4,10 +4,8 @@ do println("Hygge") while false;
 
 let mutable x = 0;
 
-do {
+let y = 4 + (do {
     x <- x + 1
-} while (x < 5);
-
+} while (x < 5));
 
 do println("Hygge") while (true and x < 10)
-
