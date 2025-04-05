@@ -752,7 +752,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 (RV.LABEL(whileEndLabel), "")
             ])
 
-
     | DoWhile(body, cond) ->
         /// Label to mark the beginning of the 'do-while' loop body
         let doWhileBodyBeginLabel = Util.genSymbol "do_while_body_begin"
@@ -768,10 +767,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                      "Jump to loop body if 'while' condition is true")
                 ])
 
-
     | Lambda(args, body) ->
         /// Label to mark the position of the lambda term body
         let funLabel = Util.genSymbol "lambda"
+
+        /// Save all variables captured by the lambda term
+        let cv = ASTUtil.capturedVars node
+        let structFieldList = [("f", node.Type)] @ (
+            Set.toList cv |>
+            List.map (fun k -> (k, body.Env.Vars[k])))
 
         /// Names of the Lambda arguments
         let (argNames, _) = List.unzip args
@@ -779,7 +783,28 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// List of pairs associating each Lambda argument to its type.  We
         /// retrieve the type of each argument by looking into the environment
         /// used to type-check the Lambda 'body'
-        let argNamesTypes = List.map (fun a -> (a, body.Env.Vars[a])) argNames
+        let argNamesTypes = 
+            (List.map (fun a -> (a, body.Env.Vars[a])) argNames) @ 
+            [("~clos", TStruct(structFieldList))]
+        
+        // env.VarStorage[]
+        // TODO: either pull captured variables from the context, or update how the compileFunction uses them
+        //       IMPORTANT: check +8 arguments
+        // let cvVals = 
+        //     Set.toList cv |>
+        //     List.map (fun k -> (k, env.VarStorage[k]))
+        // let clos = { node with 
+        //                 Expr = StructCons([])
+        //                 Type = TStruct(structFieldList) }
+
+        // let rec updateCapturedBody (body: TypedAST) =
+        //     match body.Expr with
+        //     | Var(name) ->
+        //         if Set.contains name cv then 
+        //             { body with
+        //                 Expr = FieldSelect() }
+        //         else body
+        //     | _ -> body
 
         /// Compiled function body
         let bodyCode = compileFunction argNamesTypes body env
@@ -1292,7 +1317,10 @@ and internal compileFunction (args: List<string * Type>)
             .AddText(RV.COMMENT("Restore callee-saved registers"))
             ++ (restoreRegisters saveRegs [])
                 .AddText(RV.JR(Reg.ra), "End of function, return to caller")
-and internal checkIndexOutOfBounds env target index node: Asm =
+and internal checkIndexOutOfBounds (env: CodegenEnv)
+                                   (target: Node<TypingEnv,Type>)
+                                   (index: Node<TypingEnv,Type>)
+                                   (node: Node<TypingEnv,Type>): Asm =
     let errorNode =
             { node with
                 Expr = Seq([
