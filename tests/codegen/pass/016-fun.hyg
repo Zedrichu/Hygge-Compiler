@@ -4,9 +4,5 @@ fun h(y: int): int = {
     if f(y) then g(f(y)) else g(false)
 };
 
-let result = h(42);
-println(result);
-
 assert(h(1) = 42);
 assert(h(42) = 1)
-
