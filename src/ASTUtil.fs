@@ -156,6 +156,9 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 
     | ArrayElem(target, index) ->
         {node with Expr = ArrayElem((subst target var sub), (subst index var sub))}
+        
+    | Copy(arg) ->
+        {node with Expr = Copy(subst arg var sub)}
 
     | ArraySlice(target, startIdx, endIdx) ->
         {node with Expr = ArraySlice((subst target var sub),

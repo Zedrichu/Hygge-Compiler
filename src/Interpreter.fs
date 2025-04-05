@@ -666,6 +666,26 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             Some(env', {node with Expr = ArrayElem(target', index)})
         | None -> None
     | ArrayElem _ -> None
+    
+    
+    //Shallow copy of struct
+    | Copy(arg) ->
+        match (reduce env arg) with
+        | Some(env', arg') -> Some(env', { node with Expr = Copy(arg') })
+        | None ->
+            match arg.Expr with
+            | Pointer (addr) ->
+                match env.PtrInfo.TryFind addr with
+                 | Some (fields) ->
+                     let fieldValues = fields |> List.mapi (fun i field -> (field, env.Heap[addr + (uint i)]))
+                     let shallowCopy = StructCons(fieldValues)
+                     Some(env, {node with Expr = shallowCopy})
+                 | None -> None
+            | _ -> None
+   
+             
+                 
+             
 
     | ArraySlice({ Expr = Pointer(addr) },
                  { Expr = IntVal(start) },

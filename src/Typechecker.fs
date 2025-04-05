@@ -663,6 +663,18 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                      Expr = ArrayLength(ttarget) }
             | _ -> Error([(node.Pos, $"cannot access array length on expression of type %O{ttarget.Type}")])
         | Error(es) -> Error(es)
+        
+    //Copy of structures
+    //Arg needs to be of struct type
+    | Copy(arg) ->
+        match (typer env arg) with
+        | Ok(targ) ->
+            match (expandType env targ.Type) with
+            | TStruct _ ->
+                Ok{ Pos = node.Pos; Env = env; Type = targ.Type; Expr = Copy(targ) }
+            | _ -> Error([(node.Pos, $"Cannot copy expression of type %O{targ.Type}. Only struct types can be copied")])
+        | Error(es) -> Error(es)
+        
 
     | UnionCons(label, expr) ->
         match (typer env expr) with

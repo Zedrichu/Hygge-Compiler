@@ -1367,6 +1367,11 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
     | Pointer(_) ->
         failwith "BUG: pointers cannot be compiled (by design!)"
+        
+    | Copy(arg) ->
+        //TODO: implement copy codegen
+        failwith "TODO: not yet implemented"
+
 
 /// Generate code to save the given registers on the stack, before a RARS system
 /// call. Register a7 (which holds the system call number) is backed-up by
