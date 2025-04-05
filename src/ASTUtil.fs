@@ -102,9 +102,10 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 
     | LetRec(vname, tpe, init, scope) when vname = var ->
         // The variable is shadowed, do not substitute it in the "let rec" scope
-        {node with Expr = LetRec(vname, tpe, (subst init var sub), scope)}
+        // and similarly in "let rec" initialisation as it might be recursively defined
+        node
     | LetRec(vname, tpe, init, scope) ->
-        // Propagate the substitution in the "let rec" scope and init
+        // Propagate the substitution in the "let rec" scope and init safely
         {node with Expr = LetRec(vname, tpe, (subst init var sub),
                                  (subst scope var sub))}
 
