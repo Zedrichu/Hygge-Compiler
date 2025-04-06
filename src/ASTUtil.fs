@@ -102,9 +102,10 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 
     | LetRec(vname, tpe, init, scope) when vname = var ->
         // The variable is shadowed, do not substitute it in the "let rec" scope
-        {node with Expr = LetRec(vname, tpe, (subst init var sub), scope)}
+        // and similarly in "let rec" initialisation as it might be recursively defined
+        node
     | LetRec(vname, tpe, init, scope) ->
-        // Propagate the substitution in the "let rec" scope and init
+        // Propagate the substitution in the "let rec" scope and init safely
         {node with Expr = LetRec(vname, tpe, (subst init var sub),
                                  (subst scope var sub))}
 
@@ -173,11 +174,11 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
     | Add(lhs, rhs)
     | Mult(lhs, rhs) ->
         Set.union (freeVars lhs) (freeVars rhs)
+    | Not(arg)
     | Sqrt(arg) -> freeVars arg
     | And(lhs, rhs)
     | Or(lhs, rhs) ->
         Set.union (freeVars lhs) (freeVars rhs)
-    | Not(arg) -> freeVars arg
     | Eq(lhs, rhs)
     | Min(lhs, rhs)
     | Max(lhs, rhs)
@@ -214,17 +215,16 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
         // names of the arguments
         Set.difference (freeVars body) (Set.ofList argNames)
     | Application(expr, args) ->
-        let fvArgs = List.map freeVars args
         // Union of free variables in the applied expr, plus all its arguments
         Set.union (freeVars expr) (freeVarsInList args)
     | StructCons(fields) ->
         let (_, nodes) = List.unzip fields
         freeVarsInList nodes
     | FieldSelect(expr, _) -> freeVars expr
-
-    // TODO: not sure how to handle this one yet as well
-    | LetRec(name, tpe, init, scope) -> failwith "Not Implemented"
-
+    | LetRec(name, _, init, scope) ->
+        // Remove the newly-bound variable from the free variables of both
+        // init and scope since it might be recursively referenced in init
+        Set.remove name (Set.union (freeVars init) (freeVars scope))
     | ArrayCons(length, init) ->
         Set.union (freeVars length) (freeVars init)
     | ArrayLength(target) -> freeVars target
@@ -248,7 +248,7 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
     | FloatVal(_)
     | StringVal(_)
     | Pointer(_)
-    | Lambda(_, _) ->
+    | Lambda _ ->
         // All free variables of a value are considered as captured
         freeVars node
     | Var(_) -> Set[]
@@ -258,11 +258,11 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
     | Mod(lhs, rhs)
     | Mult(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)
+    | Not(arg)
     | Sqrt(arg) -> capturedVars arg
     | And(lhs, rhs)
     | Or(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)
-    | Not(arg) -> capturedVars arg
     | Min(lhs, rhs)
     | Max(lhs, rhs)
     | Greater(lhs, rhs)
@@ -301,10 +301,10 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
         let (_, nodes) = List.unzip fields
         capturedVarsInList nodes
     | FieldSelect(expr, _) -> capturedVars expr
-
-    // TODO: not sure how to handle this one yet
-    | LetRec(name, tpe, init, scope) -> failwith "Not Implemented"
-
+    | LetRec(name, _, init, scope) ->
+        // Remove the newly-bound variable from the captured variables of both
+        // init and scope since it might be recursively referenced in init
+        Set.remove name (Set.union (capturedVars init) (capturedVars scope))
     | ArrayCons(length, init) ->
         Set.union (capturedVars length) (capturedVars init)
     | ArrayLength(target) -> capturedVars target
