@@ -735,7 +735,7 @@ and internal letTyper pos (env: TypingEnv) (name: string) (init: UntypedAST)
     match (typer env init) with
     | Ok(tinit) ->
         /// Variables and types to type-check the 'let...' scope: we add the
-        /// newly-declared variable and its type (obtained fron the 'init'
+        /// newly-declared variable and its type (obtained from the 'init'
         /// sub-expression) to the typing environment
         let envVars2 = env.Vars.Add(name, tinit.Type)
         /// Mutable variables in the 'let...' scope: if we are declaring an
@@ -775,7 +775,7 @@ and internal letTypeAnnotTyper pos (env: TypingEnv) (name: string)
                 else
                     /// Variables and types to type-check the 'let...' scope: we
                     /// add the newly-declared variable and its type (obtained
-                    /// fron the resolved type annotation) to the typing
+                    /// from the resolved type annotation) to the typing
                     /// environment
                     let envVars2 = env.Vars.Add(name, letVariableType)
                     /// Mutable variables in the 'let...' scope: since we are
