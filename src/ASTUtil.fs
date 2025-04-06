@@ -168,14 +168,23 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
     | StringVal(_)
     | Pointer(_) -> Set[]
     | Var(name) -> Set[name]
+    | Sub(lhs, rhs)
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs)
     | Add(lhs, rhs)
     | Mult(lhs, rhs) ->
         Set.union (freeVars lhs) (freeVars rhs)
+    | Not(arg)
+    | Sqrt(arg) -> freeVars arg
     | And(lhs, rhs)
     | Or(lhs, rhs) ->
         Set.union (freeVars lhs) (freeVars rhs)
-    | Not(arg) -> freeVars arg
     | Eq(lhs, rhs)
+    | Min(lhs, rhs)
+    | Max(lhs, rhs)
+    | Greater(lhs, rhs)
+    | LessEq(lhs, rhs)
+    | GreaterEq(lhs, rhs)
     | Less(lhs, rhs) ->
         Set.union (freeVars lhs) (freeVars rhs)
     | ReadInt
@@ -196,6 +205,7 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
     | Assign(target, expr) ->
         // Union of the free names of the lhs and the rhs of the assignment
         Set.union (freeVars target) (freeVars expr)
+    | DoWhile(body, cond)
     | While(cond, body) -> Set.union (freeVars cond) (freeVars body)
     | Assertion(arg) -> freeVars arg
     | Type(_, _, scope) -> freeVars scope
@@ -205,13 +215,21 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
         // names of the arguments
         Set.difference (freeVars body) (Set.ofList argNames)
     | Application(expr, args) ->
-        let fvArgs = List.map freeVars args
         // Union of free variables in the applied expr, plus all its arguments
         Set.union (freeVars expr) (freeVarsInList args)
     | StructCons(fields) ->
         let (_, nodes) = List.unzip fields
         freeVarsInList nodes
     | FieldSelect(expr, _) -> freeVars expr
+    | LetRec(name, _, init, scope) ->
+        // Remove the newly-bound variable from the free variables of both
+        // init and scope since it might be recursively referenced in init
+        Set.remove name (Set.union (freeVars init) (freeVars scope))
+    | ArrayCons(length, init) ->
+        Set.union (freeVars length) (freeVars init)
+    | ArrayLength(target) -> freeVars target
+    | ArrayElem(target, index) ->
+        Set.union (freeVars target) (freeVars index)
 
 /// Compute the union of the free variables in a list of AST nodes.
 and internal freeVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
@@ -230,17 +248,26 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
     | FloatVal(_)
     | StringVal(_)
     | Pointer(_)
-    | Lambda(_, _) ->
+    | Lambda _ ->
         // All free variables of a value are considered as captured
         freeVars node
     | Var(_) -> Set[]
     | Add(lhs, rhs)
+    | Sub(lhs, rhs)
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs)
     | Mult(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)
+    | Sqrt(arg) -> capturedVars arg
     | And(lhs, rhs)
     | Or(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)
     | Not(arg) -> capturedVars arg
+    | Min(lhs, rhs)
+    | Max(lhs, rhs)
+    | Greater(lhs, rhs)
+    | LessEq(lhs, rhs)
+    | GreaterEq(lhs, rhs)
     | Eq(lhs, rhs)
     | Less(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)
@@ -262,6 +289,7 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
     | Assign(target, expr) ->
         // Union of the captured vars of the lhs and the rhs of the assignment
         Set.union (capturedVars target) (capturedVars expr)
+    | DoWhile(body, cond)
     | While(cond, body) -> Set.union (capturedVars cond) (capturedVars body)
     | Assertion(arg) -> capturedVars arg
     | Type(_, _, scope) -> capturedVars scope
@@ -273,6 +301,15 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
         let (_, nodes) = List.unzip fields
         capturedVarsInList nodes
     | FieldSelect(expr, _) -> capturedVars expr
+    | LetRec(name, _, init, scope) ->
+        // Remove the newly-bound variable from the captured variables of both
+        // init and scope since it might be recursively referenced in init
+        Set.remove name (Set.union (capturedVars init) (capturedVars scope))
+    | ArrayCons(length, init) ->
+        Set.union (capturedVars length) (capturedVars init)
+    | ArrayLength(target) -> capturedVars target
+    | ArrayElem(target, index) ->
+        Set.union (capturedVars target) (capturedVars index)
 
 /// Compute the union of the captured variables in a list of AST nodes.
 and internal capturedVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
