@@ -773,7 +773,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         /// Save all variables captured by the lambda term
         let cv = ASTUtil.capturedVars node
-        let structFieldList = [("f", node.Type)] @ (
+        let structFieldList = [("~f", node.Type)] @ (
             Set.toList cv |>
             List.map (fun k -> (k, body.Env.Vars[k])))
 
@@ -783,28 +783,31 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// List of pairs associating each Lambda argument to its type.  We
         /// retrieve the type of each argument by looking into the environment
         /// used to type-check the Lambda 'body'
-        let argNamesTypes = 
-            (List.map (fun a -> (a, body.Env.Vars[a])) argNames) @ 
+        let argNamesTypes =
+            (List.map (fun a -> (a, body.Env.Vars[a])) argNames) @
             [("~clos", TStruct(structFieldList))]
-        
+
         // env.VarStorage[]
         // TODO: either pull captured variables from the context, or update how the compileFunction uses them
         //       IMPORTANT: check +8 arguments
-        // let cvVals = 
-        //     Set.toList cv |>
-        //     List.map (fun k -> (k, env.VarStorage[k]))
-        // let clos = { node with 
-        //                 Expr = StructCons([])
-        //                 Type = TStruct(structFieldList) }
 
-        // let rec updateCapturedBody (body: TypedAST) =
-        //     match body.Expr with
-        //     | Var(name) ->
-        //         if Set.contains name cv then 
-        //             { body with
-        //                 Expr = FieldSelect() }
-        //         else body
-        //     | _ -> body
+        let cvVals =
+            Set.toList cv |>
+            List.map (fun k -> (k, env.VarStorage[k]))
+
+        let cvVars =
+            Set.toList cv |>
+            List.map (fun k -> (k, {node with Expr = Var(k); Type = body.Env.Vars[k]}))
+
+        let clos = { node with
+                        Expr = StructCons([("~f", {node with Expr = Var("v'")} )] @ cvVars)
+                        Type = TStruct(structFieldList) }
+
+        let nonCaptureFolder (fbody: TypedAST) (name: string) =
+            ASTUtil.subst fbody name {node with
+                                        Expr = FieldSelect(clos, name)}
+
+        let nonCaptureBody = Set.fold nonCaptureFolder body cv
 
         /// Compiled function body
         let bodyCode = compileFunction argNamesTypes body env
