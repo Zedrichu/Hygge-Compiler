@@ -1044,10 +1044,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         ])
             | _ -> failwith $"BUG: array length initialised with invalid type: %O{length.Type}"
 
-        /// Code that initialises a single array element. The init result is compiled by targeting
-        /// the register (`target+3`), because the 'target' register holds the base memory address
-        /// of the array instance. We copy the pre-computed init value into its heap location, with 0 offset
-        /// from the element memory address (stored and computed in the `target+2`  register)
+        /// Compiled code for initialisation value, targeting the register `target+3`
         let initCode = doCodegen {env with Target = env.Target + 3u} init
 
         /// Assembly code that initialises a single array element by assigning the pre-computed init
@@ -1083,7 +1080,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Use the precomputed container memory address as a forward element address iterator
         let initArrayLoopCode =
             Asm().AddText([
-                // (RV.MV(Reg.r(env.Target + 4u), Reg.r(env.Target + 2u)), "Initialise next element address with base pointer")
                 (RV.LABEL(loopStartLabel), "Start of array initialisation loop")
                 (RV.BEQZ(Reg.r(env.Target + 1u), loopEndLabel), "Exit loop if remaining length is 0")
             ])
