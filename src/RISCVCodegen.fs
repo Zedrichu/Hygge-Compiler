@@ -799,15 +799,22 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             Set.toList cv |>
             List.map (fun k -> (k, {node with Expr = Var(k); Type = body.Env.Vars[k]}))
 
-        let clos = { node with
-                        Expr = StructCons([("~f", {node with Expr = Var("v'")} )] @ cvVars)
-                        Type = TStruct(structFieldList) }
-
         let nonCaptureFolder (fbody: TypedAST) (name: string) =
             ASTUtil.subst fbody name {node with
-                                        Expr = FieldSelect(clos, name)}
+                                        Expr = FieldSelect({node with Expr = Var("~clos")}, name)}
 
         let nonCaptureBody = Set.fold nonCaptureFolder body cv
+
+        let nonCaptureFunctionCode = compileFunction argNamesTypes nonCaptureBody {env with Target = env.Target + 1u}
+
+        let env' = {env with VarStorage = env.VarStorage.Add("v'", Storage.Reg(Reg.r(env.Target + 1u)))}
+
+        let clos = { node with
+                        Expr = StructCons([("~f", {node with Expr = Var("v'")})] @ cvVars)
+                        Type = TStruct(structFieldList) }
+
+        /// Compile `clos` into env.Target
+        let closCode = doCodegen env' clos
 
         /// Compiled function body
         let bodyCode = compileFunction argNamesTypes body env
