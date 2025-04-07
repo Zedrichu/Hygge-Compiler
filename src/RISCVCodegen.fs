@@ -771,12 +771,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Label to mark the position of the lambda term body
         let funLabel = Util.genSymbol "lambda"
 
-        /// Save all variables captured by the lambda term
-        let cv = ASTUtil.capturedVars node
-        let structFieldList = [("~f", node.Type)] @ (
-            Set.toList cv |>
-            List.map (fun k -> (k, body.Env.Vars[k])))
-
         /// Names of the Lambda arguments
         let (argNames, _) = List.unzip args
 
@@ -784,51 +778,75 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// retrieve the type of each argument by looking into the environment
         /// used to type-check the Lambda 'body'
         let argNamesTypes =
-            (List.map (fun a -> (a, body.Env.Vars[a])) argNames) @
-            [("~clos", TStruct(structFieldList))]
+            (List.map (fun a -> (a, body.Env.Vars[a])) argNames)
 
-        // env.VarStorage[]
-        // TODO: either pull captured variables from the context, or update how the compileFunction uses them
-        //       IMPORTANT: check +8 arguments
+        /// Save all variables captured by the lambda term
+        let cv = Set.toList (ASTUtil.capturedVars node)
 
-        let cvVals =
-            Set.toList cv |>
-            List.map (fun k -> (k, env.VarStorage[k]))
+        match cv.IsEmpty with
+        | true ->
+            /// Compiled function body
+            let bodyCode = compileFunction argNamesTypes body env
 
-        let cvVars =
-            Set.toList cv |>
-            List.map (fun k -> (k, {node with Expr = Var(k); Type = body.Env.Vars[k]}))
+            /// Compiled function code where the function label is located just
+            /// before the 'bodyCode', and everything is placed at the end of the
+            /// text segment (i.e. in the "PostText")
+            let funCode =
+                (Asm(RV.LABEL(funLabel), "Lambda term (i.e. function instance) code")
+                    ++ bodyCode).TextToPostText // Move to the end of text segment
 
-        let nonCaptureFolder (fbody: TypedAST) (name: string) =
-            ASTUtil.subst fbody name {node with
-                                        Expr = FieldSelect({node with Expr = Var("~clos")}, name)}
+            // Finally, load the function address (label) in the target register
+            Asm(RV.LA(Reg.r(env.Target), funLabel), "Load lambda function address")
+                ++ funCode
+        | false ->
+            let structFieldList = [("~f", node.Type)] @ (
+                cv |>
+                List.map (fun k -> (k, body.Env.Vars[k])))
 
-        let nonCaptureBody = Set.fold nonCaptureFolder body cv
+            let closuredArgNamesTypes =
+                argNamesTypes @ [("~clos", TStruct(structFieldList))]
 
-        let nonCaptureFunctionCode = compileFunction argNamesTypes nonCaptureBody {env with Target = env.Target + 1u}
+            // env.VarStorage[]
+            // TODO: either pull captured variables from the context, or update how the compileFunction uses them
+            //       IMPORTANT: check +8 arguments
 
-        let env' = {env with VarStorage = env.VarStorage.Add("v'", Storage.Reg(Reg.r(env.Target + 1u)))}
+            let cvVals =
+                cv |>
+                List.map (fun k -> (k, env.VarStorage[k]))
 
-        let clos = { node with
-                        Expr = StructCons([("~f", {node with Expr = Var("v'")})] @ cvVars)
-                        Type = TStruct(structFieldList) }
+            let cvVars =
+                cv |>
+                List.map (fun k -> (k, {node with Expr = Var(k); Type = body.Env.Vars[k]}))
 
-        /// Compile `clos` into env.Target
-        let closCode = doCodegen env' clos
+            let envClosVar = Util.genSymbol "~clos"
+            let nonCaptureFolder (fbody: TypedAST) (capturedVar: string) =
+                let fieldSelect = FieldSelect({node with Expr = Var(envClosVar); Type = TStruct(structFieldList)}, capturedVar)
+                ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
 
-        /// Compiled function body
-        let bodyCode = compileFunction argNamesTypes body env
+            let nonCaptureBody = List.fold nonCaptureFolder body cv
 
-        /// Compiled function code where the function label is located just
-        /// before the 'bodyCode', and everything is placed at the end of the
-        /// text segment (i.e. in the "PostText")
-        let funCode =
-            (Asm(RV.LABEL(funLabel), "Lambda term (i.e. function instance) code")
-                ++ bodyCode).TextToPostText // Move to the end of text segment
+            /// Compiled function code where the function label is located just
+            /// before the 'bodyCode', and everything is placed at the end of the
+            /// text segment (i.e. in the "PostText")
+            let nonCaptureFunctionCode =
+                (Asm(RV.LABEL(funLabel), "Lambda term (i.e. function instance) code")
+                    ++ (compileFunction argNamesTypes nonCaptureBody env)).TextToPostText // Move to the end of text segment
 
-        // Finally, load the function address (label) in the target register
-        Asm(RV.LA(Reg.r(env.Target), funLabel), "Load lambda function address")
-            ++ funCode
+            // Finally, load the function address (label) in the target register
+            let storeFunctionCode = Asm(RV.LA(Reg.r(env.Target), funLabel), "Load lambda function address")
+            let env' = {env with VarStorage = env.VarStorage.Add("v'", Storage.Reg(Reg.r(env.Target)))
+                                 Target = env.Target + 1u }
+
+            let clos = { node with
+                            Expr = StructCons([("~f", {node with Expr = Var("v'")})] @ cvVars)
+                            Type = TStruct(structFieldList) }
+
+            /// Compile `clos` into env.Target
+            let closCode = doCodegen env' clos
+
+            let moveClosResult = Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                                     "Move closure result to target register")
+            storeFunctionCode ++ closCode ++ moveClosResult ++ nonCaptureFunctionCode
 
     | Application(expr, args) ->
         /// Integer registers to be saved on the stack before executing the
