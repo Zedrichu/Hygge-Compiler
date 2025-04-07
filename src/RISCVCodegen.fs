@@ -799,54 +799,51 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             Asm(RV.LA(Reg.r(env.Target), funLabel), "Load lambda function address")
                 ++ funCode
         | false ->
-            let structFieldList = [("~f", node.Type)] @ (
+            /// Define the closure environment type T_clos as a struct with a function pointer f and
+            /// a named field for each of the captured variables in the closure
+            let closureEnvType = TStruct([("~f", node.Type)] @ (
                 cv |>
-                List.map (fun k -> (k, body.Env.Vars[k])))
+                List.map (fun k -> (k, body.Env.Vars[k]))))
 
-            let closuredArgNamesTypes =
-                argNamesTypes @ [("~clos", TStruct(structFieldList))]
-
-            // env.VarStorage[]
-            // TODO: either pull captured variables from the context, or update how the compileFunction uses them
-            //       IMPORTANT: check +8 arguments
-
-            let cvVals =
-                cv |>
-                List.map (fun k -> (k, env.VarStorage[k]))
-
-            let cvVars =
+            let closureEnvNamedFields =
                 cv |>
                 List.map (fun k -> (k, {node with Expr = Var(k); Type = body.Env.Vars[k]}))
 
-            let envClosVar = Util.genSymbol "~clos"
-            let nonCaptureFolder (fbody: TypedAST) (capturedVar: string) =
-                let fieldSelect = FieldSelect({node with Expr = Var(envClosVar); Type = TStruct(structFieldList)}, capturedVar)
-                ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
+            let closureEnvVar = Util.genSymbol "~clos"
 
-            let nonCaptureBody = List.fold nonCaptureFolder body cv
+            let closureArgNamesTypes =
+                argNamesTypes @ [(closureEnvVar, closureEnvType)]
+
+            /// Compute "plain" function by applying closure-conversion through the argument environment
+            let nonCaptureFolder (fbody: TypedAST) (capturedVar: string) =
+                let fieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureEnvType}, capturedVar)
+                ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
+            let plainBody = List.fold nonCaptureFolder body cv
+
+            // let plainType = TFun(List.map snd argNamesTypes @ [closureEnvType], node.Type)
 
             /// Compiled function code where the function label is located just
-            /// before the 'bodyCode', and everything is placed at the end of the
+             /// before the 'bodyCode', and everything is placed at the end of the
             /// text segment (i.e. in the "PostText")
-            let nonCaptureFunctionCode =
+            let plainFunctionCode =
                 (Asm(RV.LABEL(funLabel), "Lambda term (i.e. function instance) code")
-                    ++ (compileFunction argNamesTypes nonCaptureBody env)).TextToPostText // Move to the end of text segment
+                    ++ (compileFunction closureArgNamesTypes plainBody env)).TextToPostText // Move to the end of text segment
 
-            // Finally, load the function address (label) in the target register
+            // Finally, load the plain function address (label) in the target register as storage for v'
             let storeFunctionCode = Asm(RV.LA(Reg.r(env.Target), funLabel), "Load lambda function address")
-            let env' = {env with VarStorage = env.VarStorage.Add("v'", Storage.Reg(Reg.r(env.Target)))
+            let env' = {env with VarStorage = env.VarStorage.Add("~v'", Storage.Reg(Reg.r(env.Target)))
                                  Target = env.Target + 1u }
 
             let clos = { node with
-                            Expr = StructCons([("~f", {node with Expr = Var("v'")})] @ cvVars)
-                            Type = TStruct(structFieldList) }
+                            Expr = StructCons([("~f", {node with Expr = Var("~v'")})] @ closureEnvNamedFields)
+                            Type = closureEnvType }
 
             /// Compile `clos` into env.Target
             let closCode = doCodegen env' clos
 
             let moveClosResult = Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
                                      "Move closure result to target register")
-            storeFunctionCode ++ closCode ++ moveClosResult ++ nonCaptureFunctionCode
+            storeFunctionCode ++ closCode ++ moveClosResult ++ plainFunctionCode
 
     | Application(expr, args) ->
         /// Integer registers to be saved on the stack before executing the
@@ -859,16 +856,22 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
                          @ [for i in 0u..6u do yield Reg.t(i)])
 
+        let closurePlainFAccessCode = Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+                                          "Load plain function address `~f` from closure")
+
+        let closureEnv = {expr with Type = TStruct([("~f", expr.Type)])}
+
         /// Assembly code for the expression being applied as a function
         let appTermCode =
             Asm().AddText(RV.COMMENT("Load expression to be applied as a function"))
-            ++ (doCodegen env expr)
+            ++ (doCodegen env closureEnv)
+             ++ closurePlainFAccessCode
 
         /// Indexed list of argument expressions.  We will use the index as an offset
         /// (above the current target register) to determine the target register
         /// for compiling each expression.
         let indexedArgsFloat, indexedArgsInt =
-            args
+            args @ [expr]
             |> List.partition (fun arg -> isSubtypeOf arg.Env arg.Type TFloat)
             |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
 
