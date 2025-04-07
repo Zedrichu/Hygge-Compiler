@@ -525,30 +525,101 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// List of pairs associating each function argument to its type
         let argNamesTypes = List.zip argNames targs
 
-        /// Compiled function body
-        let bodyCode =
-            match node.Expr with
-            | LetRec _ ->
-                let recEnv = { env with VarStorage = env.VarStorage.Add(name, Storage.Label(funLabel)) }
-                compileFunction argNamesTypes body recEnv
-            | _ -> compileFunction argNamesTypes body env
+        /// Save all variables captured by the lambda term
+        let cv = Set.toList (ASTUtil.capturedVars node)
 
-        /// Compiled function code where the function label is located just
-        /// before the 'bodyCode', and everything is placed at the end of the
-        /// Text segment (i.e. in the "PostText")
-        let funCode =
-            (Asm(RV.LABEL(funLabel), $"Code for function '%s{name}'")
-                ++ bodyCode).TextToPostText
+        match cv.IsEmpty with
+        | true ->
+            /// Compiled function body
+            let bodyCode =
+                match node.Expr with
+                | LetRec _ ->
+                    let recEnv = { env with VarStorage = env.VarStorage.Add(name, Storage.Label(funLabel)) }
+                    compileFunction argNamesTypes body recEnv
+                | _ -> compileFunction argNamesTypes body env
 
-        /// Storage info where the name of the compiled function points to the
-        /// label 'funLabel'
-        let varStorage2 = env.VarStorage.Add(name, Storage.Label(funLabel))
+            /// Compiled function code where the function label is located just
+            /// before the 'bodyCode', and everything is placed at the end of the
+            /// Text segment (i.e. in the "PostText")
+            let funCode =
+                (Asm(RV.LABEL(funLabel), $"Code for function '%s{name}'")
+                    ++ bodyCode).TextToPostText
 
-        // Finally, compile the 'let...'' scope with the newly-defined function
-        // label in the variables storage, and append the 'funCode' above. The
-        // 'scope' code leaves its result in the 'let...' target register
-        (doCodegen {env with VarStorage = varStorage2} scope)
-            ++ funCode
+            /// Storage info where the name of the compiled function points to the
+            /// label 'funLabel'
+            let varStorage2 = env.VarStorage.Add(name, Storage.Label(funLabel))
+
+            // Finally, compile the 'let...'' scope with the newly-defined function
+            // label in the variables storage, and append the 'funCode' above. The
+            // 'scope' code leaves its result in the 'let...' target register
+            (doCodegen {env with VarStorage = varStorage2} scope)
+                ++ funCode
+        | false ->
+            /// Define the closure environment type T_clos as a struct with a function pointer f and
+            /// a named field for each of the captured variables in the closure
+            let closureEnvType = TStruct([("~f", node.Type)] @ (
+                cv |>
+                List.map (fun k -> (k, body.Env.Vars[k]))))
+
+            let closureEnvNamedFields =
+                cv |>
+                List.map (fun k -> (k, {node with Expr = Var(k); Type = body.Env.Vars[k]}))
+
+            let closureEnvVar = Util.genSymbol "~clos"
+
+            let closureArgNamesTypes =
+                argNamesTypes @ [(closureEnvVar, closureEnvType)]
+
+            /// Compute "plain" function by applying closure-conversion through the argument environment
+            let nonCaptureFolder (fbody: TypedAST) (capturedVar: string) =
+                let fieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureEnvType}, capturedVar)
+                ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
+            let plainBody = List.fold nonCaptureFolder body cv
+
+            let plainBodyCode =
+                match node.Expr with
+                | LetRec _ ->
+                    let recEnv = { env with VarStorage = env.VarStorage.Add(name, Storage.Label(funLabel)) }
+                    compileFunction closureArgNamesTypes plainBody recEnv
+                | _ -> compileFunction closureArgNamesTypes plainBody env
+
+            let plainType = TFun(List.map snd argNamesTypes @ [closureEnvType], node.Type)
+
+            /// Compiled function code where the function label is located just
+            /// before the 'bodyCode', and everything is placed at the end of the
+            /// text segment (i.e. in the "PostText")
+            let plainFunctionCode =
+                (Asm(RV.LABEL(funLabel), $"Code for plain function '%s{name}'")
+                    ++ plainBodyCode).TextToPostText // Move to the end of text segment
+
+
+            // Finally, load the plain function address (label) in the target register as storage for v'
+            let storeFunctionCode = Asm(RV.LA(Reg.r(env.Target), funLabel), $"Load plain function '%s{name}' address")
+            let env' = {env with VarStorage = env.VarStorage.Add("~v'", Storage.Reg(Reg.r(env.Target)))
+                                 Target = env.Target + 1u }
+
+            let clos = { node with
+                            Expr = StructCons([("~f", {node with Expr = Var("~v'")
+                                                                 Type = plainType})]
+                                              @ closureEnvNamedFields)
+                            Type = closureEnvType }
+
+            /// Compile `clos` into env.Target
+            let closCode = doCodegen env' clos
+
+            let moveClosResult = Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                                     "Move closure result to target register")
+
+            /// Storage info where the name of the compiled function points to the
+            /// label 'funLabel'
+            let varStorage2 = env.VarStorage.Add(name, Storage.Reg(Reg.r(env.Target)))
+
+            // Finally, compile the 'let...'' scope with the newly-defined function
+            // label in the variables storage, and append the 'funCode' above. The
+            // 'scope' code leaves its result in the 'let...' target register
+            let scopeCode = doCodegen {env with VarStorage = varStorage2} scope
+
+            storeFunctionCode ++ closCode ++ moveClosResult ++ scopeCode ++ plainFunctionCode
 
     // Typechecking should ensure that a LetRec expression is always initialised with a lambda expression (see notes Module 6).
     | LetRec _ ->
@@ -820,10 +891,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
             let plainBody = List.fold nonCaptureFolder body cv
 
-            // let plainType = TFun(List.map snd argNamesTypes @ [closureEnvType], node.Type)
+            let plainType = TFun(List.map snd argNamesTypes @ [closureEnvType], node.Type)
 
             /// Compiled function code where the function label is located just
-             /// before the 'bodyCode', and everything is placed at the end of the
+            /// before the 'bodyCode', and everything is placed at the end of the
             /// text segment (i.e. in the "PostText")
             let plainFunctionCode =
                 (Asm(RV.LABEL(funLabel), "Lambda term (i.e. function instance) code")
@@ -835,7 +906,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                  Target = env.Target + 1u }
 
             let clos = { node with
-                            Expr = StructCons([("~f", {node with Expr = Var("~v'")})] @ closureEnvNamedFields)
+                            Expr = StructCons([("~f", {node with Expr = Var("~v'")
+                                                                 Type = plainType})]
+                                              @ closureEnvNamedFields)
                             Type = closureEnvType }
 
             /// Compile `clos` into env.Target
@@ -856,7 +929,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
                          @ [for i in 0u..6u do yield Reg.t(i)])
 
-        let closurePlainFAccessCode = Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+        let closurePlainFAccessCode = Asm(RV.LW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
                                           "Load plain function address `~f` from closure")
 
         /// Assembly code for the expression being applied as a function
@@ -880,7 +953,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Function that compiles an int argument (using its index to determine its
         /// target register by type) and accumulates the generated assembly code
         let compileArgInt (acc: Asm) (i: int, arg: TypedAST) =
-            acc ++ (doCodegen {env with Target = env.Target + (uint i) + 1u} arg)
+            acc ++ (doCodegen {env with Target = env.Target + (uint i) + 2u} arg)
 
         /// Assembly code of all application arguments, obtained by folding over (int/float)
         let floatArgsCode =
@@ -909,7 +982,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | _ ->
                 // Here we handle integers
                 if i < 8 then
-                    acc.AddText(RV.MV(Reg.a(uint i), Reg.r(env.Target + (uint i) + 1u)),
+                    acc.AddText(RV.MV(Reg.a(uint i), Reg.r(env.Target + (uint i) + 2u)),
                                 $"Load function call argument %d{i+1}")
                 else
                     // Since we handle int stack after float stack, we can just check if there are floats already in the stack.
@@ -917,7 +990,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     let stackOffset = (i - 8) * 4
                     // Use offset that accounts for saved registers
                     let totalOffset = stackOffset + (saveRegs.Length * 4) + overflowOffset
-                    acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
+                    acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 2u), Imm12(totalOffset), Reg.sp),
                         $"Store function call argument %d{i+1} to stack at offset {totalOffset}")
 
         /// Code that loads each application argument into a register 'a', by
@@ -941,7 +1014,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                .AddText(RV.COMMENT("Before function call: save caller-saved registers"))
                ++ (saveRegisters saveRegs [])
                ++ argsLoadCode // Code to load arg values into arg registers
-                  .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
+                  .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target + 1u)), "Function call")
 
         /// Code that handles the function return value (if any)
         let retCode =
@@ -965,7 +1038,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let (fieldNames, fieldInitNodes) = List.unzip fields
         /// Generate the code that initialises a struct field, and accumulates
         /// the result.  This function is folded over all indexed struct fields,
-        /// to produce the assembly code that initialises all fields.
+        /// to produce the assembly code that initialises all fields.\
         let folder = fun (acc: Asm) (fieldOffset: int, fieldInit: TypedAST) ->
             /// Code that initialises a single struct field.  Each field init
             /// result is compiled by targeting the register (target+1u),
