@@ -118,9 +118,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                $"Load address of variable '%s{name}'")
                               (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
                                $"Load value of variable '%s{name}'") ])
-                | Some(Storage.Frame(offset)) ->
-                    Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-                    $"Load variable '%s{name}' from stack at offset %d{offset}")
+            | Some(Storage.Frame(offset)) ->
+                Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+                $"Load variable '%s{name}' from stack at offset %d{offset}")
             | Some(Storage.FPReg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
@@ -859,12 +859,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let closurePlainFAccessCode = Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
                                           "Load plain function address `~f` from closure")
 
-        let closureEnv = {expr with Type = TStruct([("~f", expr.Type)])}
-
         /// Assembly code for the expression being applied as a function
         let appTermCode =
             Asm().AddText(RV.COMMENT("Load expression to be applied as a function"))
-            ++ (doCodegen env closureEnv)
+            ++ (doCodegen env expr)
              ++ closurePlainFAccessCode
 
         /// Indexed list of argument expressions.  We will use the index as an offset
