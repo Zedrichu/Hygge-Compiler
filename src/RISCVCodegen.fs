@@ -516,6 +516,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                        Node.Type = TFun(targs, _)}, scope)
     | LetT(name, _, {Node.Expr = Lambda(args, body);
                      Node.Type = TFun(targs, _)}, scope) ->
+        Log.debug($"{env} -> Let {name}: {args} -> {body} -> {scope}")
         /// Assembly label to mark the position of the compiled function body.
         /// For readability, we make the label similar to the function name
         let funLabel = Util.genSymbol $"fun_%s{name}"
@@ -617,7 +618,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // Finally, compile the 'let...'' scope with the newly-defined function
         // label in the variables storage, and append the 'funCode' above. The
         // 'scope' code leaves its result in the 'let...' target register
-        let scopeCode = doCodegen {env with VarStorage = varStorage2} scope
+        let scopeCode = doCodegen {env with VarStorage = varStorage2
+                                            Target = env.Target + 1u } scope
 
         storeFunctionCode ++ closCode ++ moveClosResult ++ scopeCode ++ plainFunctionCode
 
