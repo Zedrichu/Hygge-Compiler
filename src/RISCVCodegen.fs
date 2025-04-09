@@ -576,14 +576,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
         let plainBody = List.fold nonCaptureFolder body cv
 
+        let plainType = TFun(closureEnvType :: List.map snd argNamesTypes, node.Type)
         let plainBodyCode =
             match node.Expr with
             | LetRec _ ->
-                let recEnv = { env with VarStorage = env.VarStorage.Add(name, Storage.Label(funLabel)) }
-                compileFunction closureArgNamesTypes plainBody recEnv
+                let recEnv = { env with VarStorage = env.VarStorage.Add(name, Storage.Reg(Reg.a0)) }
+                let replacer = {node with Expr = FieldSelect({node with Expr = Var(name); Type = closureEnvType}, "~f"); Type = plainType }
+                let recPlainBody = ASTUtil.subst plainBody name replacer
+                compileFunction closureArgNamesTypes recPlainBody recEnv
             | _ -> compileFunction closureArgNamesTypes plainBody env
 
-        let plainType = TFun(closureEnvType :: List.map snd argNamesTypes, node.Type)
 
         /// Compiled function code where the function label is located just
         /// before the 'bodyCode', and everything is placed at the end of the
@@ -596,7 +598,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // Finally, load the plain function address (label) in the target register as storage for v'
         let storeFunctionCode = Asm(RV.LA(Reg.r(env.Target), funLabel), $"Load plain function '%s{name}' address")
         let env' = {env with VarStorage = env.VarStorage.Add("~v'", Storage.Reg(Reg.r(env.Target)))
-                             Target = env.Target + 1u }
+                             Target = env.Target + 1u}
 
         let clos = { node with
                         Expr = StructCons([("~f", {node with Expr = Var("~v'")
@@ -920,7 +922,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         storeFunctionCode ++ closCode ++ moveClosResult ++ plainFunctionCode
 
     | Application(expr, args) ->
-        Log.error($"Application {expr.Expr}")
         /// Integer registers to be saved on the stack before executing the
         /// function call, and restored when the function returns.  The list of
         /// saved registers excludes the target register for this application.
@@ -955,7 +956,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Function that compiles an int argument (using its index to determine its
         /// target register by type) and accumulates the generated assembly code
         let compileArgInt (acc: Asm) (i: int, arg: TypedAST) =
-            Log.error($"Target - {env.Target + (uint i) + 1u}")
             acc ++ (doCodegen {env with Target = env.Target + (uint i) + 1u} arg)
 
         /// Assembly code of all application arguments, obtained by folding over (int/float)
