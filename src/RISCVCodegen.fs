@@ -516,7 +516,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                        Node.Type = TFun(targs, _)}, scope)
     | LetT(name, _, {Node.Expr = Lambda(args, body);
                      Node.Type = TFun(targs, _)}, scope) ->
-        Log.debug($"{env} -> Let {name}: {args} -> {body} -> {scope}")
         /// Assembly label to mark the position of the compiled function body.
         /// For readability, we make the label similar to the function name
         let funLabel = Util.genSymbol $"fun_%s{name}"
@@ -569,7 +568,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let closureEnvVar = Util.genSymbol "~clos"
 
         let closureArgNamesTypes =
-            argNamesTypes @ [(closureEnvVar, closureEnvType)]
+            (closureEnvVar, closureEnvType) :: argNamesTypes
 
         /// Compute "plain" function by applying closure-conversion through the argument environment
         let nonCaptureFolder (fbody: TypedAST) (capturedVar: string) =
@@ -584,7 +583,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 compileFunction closureArgNamesTypes plainBody recEnv
             | _ -> compileFunction closureArgNamesTypes plainBody env
 
-        let plainType = TFun(List.map snd argNamesTypes @ [closureEnvType], node.Type)
+        let plainType = TFun(closureEnvType :: List.map snd argNamesTypes, node.Type)
 
         /// Compiled function code where the function label is located just
         /// before the 'bodyCode', and everything is placed at the end of the
@@ -885,7 +884,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let closureEnvVar = Util.genSymbol "~clos"
 
         let closureArgNamesTypes =
-            argNamesTypes @ [(closureEnvVar, closureEnvType)]
+           (closureEnvVar, closureEnvType) :: argNamesTypes
 
         /// Compute "plain" function by applying closure-conversion through the argument environment
         let nonCaptureFolder (fbody: TypedAST) (capturedVar: string) =
@@ -893,7 +892,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
         let plainBody = List.fold nonCaptureFolder body cv
 
-        let plainType = TFun(List.map snd argNamesTypes @ [closureEnvType], node.Type)
+        let plainType = TFun(closureEnvType::List.map snd argNamesTypes, node.Type)
 
         /// Compiled function code where the function label is located just
         /// before the 'bodyCode', and everything is placed at the end of the
@@ -921,6 +920,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         storeFunctionCode ++ closCode ++ moveClosResult ++ plainFunctionCode
 
     | Application(expr, args) ->
+        Log.error($"Application {expr.Expr}")
         /// Integer registers to be saved on the stack before executing the
         /// function call, and restored when the function returns.  The list of
         /// saved registers excludes the target register for this application.
@@ -931,7 +931,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
                          @ [for i in 0u..6u do yield Reg.t(i)])
 
-        let closurePlainFAccessCode = Asm(RV.LW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
+        let closurePlainFAccessCode = Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
                                           "Load plain function address `~f` from closure")
 
         /// Assembly code for the expression being applied as a function
@@ -944,7 +944,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// (above the current target register) to determine the target register
         /// for compiling each expression.
         let indexedArgsFloat, indexedArgsInt =
-            args @ [expr]
+            [expr] @ args
             |> List.partition (fun arg -> isSubtypeOf arg.Env arg.Type TFloat)
             |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
 
@@ -955,7 +955,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Function that compiles an int argument (using its index to determine its
         /// target register by type) and accumulates the generated assembly code
         let compileArgInt (acc: Asm) (i: int, arg: TypedAST) =
-            acc ++ (doCodegen {env with Target = env.Target + (uint i) + 2u} arg)
+            Log.error($"Target - {env.Target + (uint i) + 1u}")
+            acc ++ (doCodegen {env with Target = env.Target + (uint i) + 1u} arg)
 
         /// Assembly code of all application arguments, obtained by folding over (int/float)
         let floatArgsCode =
@@ -984,7 +985,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | _ ->
                 // Here we handle integers
                 if i < 8 then
-                    acc.AddText(RV.MV(Reg.a(uint i), Reg.r(env.Target + (uint i) + 2u)),
+                    acc.AddText(RV.MV(Reg.a(uint i), Reg.r(env.Target + (uint i) + 1u)),
                                 $"Load function call argument %d{i+1}")
                 else
                     // Since we handle int stack after float stack, we can just check if there are floats already in the stack.
@@ -992,7 +993,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     let stackOffset = (i - 8) * 4
                     // Use offset that accounts for saved registers
                     let totalOffset = stackOffset + (saveRegs.Length * 4) + overflowOffset
-                    acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 2u), Imm12(totalOffset), Reg.sp),
+                    acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
                         $"Store function call argument %d{i+1} to stack at offset {totalOffset}")
 
         /// Code that loads each application argument into a register 'a', by
@@ -1016,7 +1017,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                .AddText(RV.COMMENT("Before function call: save caller-saved registers"))
                ++ (saveRegisters saveRegs [])
                ++ argsLoadCode // Code to load arg values into arg registers
-                  .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target + 1u)), "Function call")
+                  .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
 
         /// Code that handles the function return value (if any)
         let retCode =
