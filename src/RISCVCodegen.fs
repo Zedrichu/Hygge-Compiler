@@ -120,7 +120,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                $"Load value of variable '%s{name}'") ])
                 | Some(Storage.Frame(offset)) ->
                     Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-                    $"Load variable '%s{name}' from stack at offset %d{offset}")
+                    $"Load variable '%s{name}' from stack at offset %d{offset}, with fp at %d{Reg.fp.Number}")
             | Some(Storage.FPReg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
@@ -835,11 +835,13 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             List.fold compileArgInt (Asm()) indexedArgsInt
 
 
+
         /// Function that copies the content of a target register (used by
         /// 'compileArgs' and 'argsCode' above) into an 'a' register, using an
         /// index to determine the source and target registers, and accumulating
         /// the generated assembly code
-        let copyArg (acc: Asm) (i: int, arg: TypedAST) (overflowInt: int)=
+        let copyArg (acc: Asm) (i: int, arg: TypedAST) (overflowFloat: int) (overflowInt: int)=
+            //let totalOverflow = overflowInt + overflowFloat
             match arg.Type with
             | t when (isSubtypeOf arg.Env t TFloat) ->
                 // Here we handle floats
@@ -848,23 +850,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         //$"Load float function call argument %d{i+1}")
                         $"Load float function call argument %d{i+1} from FP register '%s{(FPReg.r(env.FPTarget + (uint i) + 1u)).ToString()}' to target FP register 'fa%d{i}'") // Better debug comment
                 else
-                    let stackOffset = (i - 8) * 4
-                    let totalOffset = stackOffset + (saveRegs.Length * 4)
-                    acc.AddText(RV.FSW_S(FPReg.r(env.FPTarget + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
-                        $"Store float function call argument %d{i+1} to stack at offset {totalOffset}")
+                    acc.AddText(RV.FSW_S(FPReg.r(env.FPTarget + (uint i) + 1u), Imm12((i - 8) * 4), Reg.sp),
+                        $"Store float function call argument %d{i+1} to stack at offset {(i - 8) * 4}")
             | _ ->
-                // Here we handle integers
+                // Here we handle integer types
                 if i < 8 then
                     acc.AddText(RV.MV(Reg.a(uint i), Reg.r(env.Target + (uint i) + 1u)),
                                 $"Load function call argument %d{i+1}")
                 else
-                    // Since we handle int stack after float stack, we can just check if there are floats already in the stack.
-                    let overflowOffset = overflowInt * 4
-                    let stackOffset = (i - 8) * 4
-                    // Use offset that accounts for saved registers
-                    let totalOffset = stackOffset + (saveRegs.Length * 4) + overflowOffset
-                    acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12(totalOffset), Reg.sp),
-                        $"Store function call argument %d{i+1} to stack at offset {totalOffset}")
+                    acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12((i - 8 + overflowFloat) * 4), Reg.sp),
+                        $"Store function call argument %d{i+1} to stack at offset {(i - 8) * 4}")
 
         /// Code that loads each application argument into a register 'a', by
         /// copying the contents of the target registers used by 'compileArgs'
@@ -874,9 +869,17 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let argsLoadCode =
             // Calculate the exact number of float arguments that overflow to stack if its none then max 0 ensures that it doesn't go neg
             let floatArgsOnStack = max 0 (indexedArgsFloat.Length - 8)
-            let floatArgsLoadCode = List.fold (fun acc arg -> copyArg acc arg 0) (Asm()) indexedArgsFloat
-            let intArgsLoadCode = List.fold (fun acc arg -> copyArg acc arg floatArgsOnStack) (Asm()) indexedArgsInt
-            floatArgsLoadCode ++ intArgsLoadCode
+            let intArgsOnStack = max 0 (indexedArgsInt.Length - 8)
+            
+            let stackAdjustment = 
+                if (floatArgsOnStack + intArgsOnStack) > 0 then
+                    Asm(RV.ADDI(Reg.sp, Reg.sp, Imm12(-4 * (floatArgsOnStack + intArgsOnStack))),
+                                    $"Update stack pointer for the overflowing args with overflow of %d{floatArgsOnStack + intArgsOnStack}")
+                else
+                    Asm()
+            let floatArgsLoadCode = List.fold (fun acc arg -> copyArg acc arg floatArgsOnStack intArgsOnStack) (Asm()) indexedArgsFloat
+            let intArgsLoadCode = List.fold (fun acc arg -> copyArg acc arg floatArgsOnStack intArgsOnStack) (Asm()) indexedArgsInt
+            stackAdjustment ++ floatArgsLoadCode ++ intArgsLoadCode
 
         /// Code that performs the function call
         let callCode =
@@ -1219,37 +1222,47 @@ and internal compileFunction (args: List<string * Type>)
     /// it assigns an 'a' register to each function argument, and accumulates
     /// the result in a mapping (that will be used as env.VarStorage)
     let folder (acc: Map<string, Storage>) (i, (var, _tpe)) =
-        let callerSaveRegs =
-            List.except [Reg.r(0u)]  // Using 0u as placeholder for env.Target
-                    (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
-                    @ [for i in 0u..6u do yield Reg.t(i)])
+        // let callerSaveRegs =
+        //     List.except [Reg.r(0u)]  // Using 0u as placeholder for env.Target
+        //             (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
+        //             @ [for i in 0u..6u do yield Reg.t(i)])
 
         // Simplified function to just grab length of float args
-        let floatArgsCount =
-            args
-            |> List.filter (fun (_, t) -> isSubtypeOf body.Env t TFloat)
-            |> List.length
+        // let floatArgsCount =
+        //     args
+        //     |> List.filter (fun (_, t) -> isSubtypeOf body.Env t TFloat)
+        //     |> List.length
 
-        let stackOffset = max 0 ((i - 8) * 4)
-        let totalOffset = stackOffset + (callerSaveRegs.Length * 4)
+        // let stackOffset = max 0 ((i - 8) * 4)
+        // let totalOffset = stackOffset + (callerSaveRegs.Length * 4)
 
-        /// Since floats are handled and saved to the stack first, we must consider if there are floats already in the stack
-        /// before we assign memory for overflowing ints.
-        let floatArgsOnStack = max 0 (floatArgsCount - 8)
-        let totalOffsetFloat = totalOffset + (floatArgsOnStack * 4)
+        // /// Since floats are handled and saved to the stack first, we must consider if there are floats already in the stack
+        // /// before we assign memory for overflowing ints.
+        // let floatArgsOnStack = max 0 (floatArgsCount - 8)
+        // let totalOffsetFloat = totalOffset + (floatArgsOnStack * 4)
 
         match _tpe with
         | t when (isSubtypeOf body.Env t TFloat) ->
             if i < 8 then
                 acc.Add(var, Storage.FPReg(FPReg.fa((uint)i)))
             else
-                acc.Add(var, Storage.Frame totalOffset)
+                // Args beyond our 8 registers are at a (+) offset from frame pointer
+                let offset = (i - 8) * 4
+                acc.Add(var, Storage.Frame offset)
         | _ ->
         // Handle all else since everything else is an int.
             if i < 8 then
                 acc.Add(var, Storage.Reg(Reg.a((uint)i)))
             else
-                acc.Add(var, Storage.Frame totalOffsetFloat)
+                // Account for float args already on the stack...
+                let floatArgsCount =
+                    args
+                    |> List.filter (fun (_, t) -> isSubtypeOf body.Env t TFloat)
+                    |> List.length
+                let floatArgsOnStack = max 0 (floatArgsCount - 8)
+                let offset = (i - 8 + floatArgsOnStack) * 4
+                acc.Add(var, Storage.Frame offset)
+
     /// Updated storage information including function arguments
     let varStorage2 = List.fold folder env.VarStorage indexedArgs
 
