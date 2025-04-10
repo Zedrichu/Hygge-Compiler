@@ -732,6 +732,44 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | None -> None
     | ArraySlice _ -> None
 
+    | UnionCons(label, expr) ->
+        match (reduce env expr) with
+        | Some(env', expr') -> Some(env', {node with Expr = UnionCons(label, expr')})
+        | None when isValue expr ->
+            /// Updated heap and base address, with union instance label
+            /// followed by 'expr' (which is a value)
+            let (heap', baseAddr) =
+                heapAlloc env.Heap [{node with Expr = StringVal(label)}; expr]
+            Some({env with Heap = heap'}, {node with Expr = Pointer(baseAddr)})
+        | None -> None
+
+    | Match(expr, cases) ->
+        match (reduce env expr) with
+        | Some(env', expr') ->
+            Some(env', {node with Expr = Match(expr', cases)})
+        | None when isValue expr ->
+            match expr.Expr with
+            | Pointer(addr) ->
+                // Retrieve the label of the union instance from the heap
+                match (env.Heap.TryFind addr) with
+                | Some({Expr = StringVal(label)}) ->
+                    // Retrieve the value of the union instance from the heap
+                    match (env.Heap.TryFind (addr + 1u)) with
+                    | Some(v) ->
+                        // Find match case with label equal to union instance
+                        match List.tryFind (fun (l,_,_) -> l = label) cases with
+                        | Some(_, var, cont) ->
+                            /// Continuation expression where the matched
+                            /// variable is substituted by the value of the
+                            /// matched union instance
+                            let contSubst = ASTUtil.subst cont var v
+                            Some(env, {node with Expr = contSubst.Expr})
+                        | None -> None
+                    | None -> None
+                | _ -> None
+            | _ -> None
+        | None -> None
+
 /// Attempt to reduce the given lhs, and then (if the lhs is a value) the rhs,
 /// using the given runtime environment.  Return None if either (a) the lhs
 /// cannot reduce, although it is not a value, or (b) the lhs is a value but the

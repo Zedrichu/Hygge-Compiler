@@ -111,6 +111,9 @@ rule tokenize = parse
 | "fun"         { Parser.FUN }
 | "rec"         { Parser.REC }
 | "struct"      { Parser.STRUCT }
+| "union"      { Parser.UNION }
+| "match"      { Parser.MATCH }
+| "with"       { Parser.WITH }
 | "ref"         { Parser.REF }
 | "tuple"       { Parser.TUPLE }
 | "array"       { Parser.ARRAY }

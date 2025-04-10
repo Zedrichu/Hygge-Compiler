@@ -30,6 +30,8 @@ type Type =
     | TStruct of fields: List<string * Type>
     /// An array type, with the type of the elements.
     | TArray of elemType: Type
+    /// Discriminated union type.  Each case consists of a label and a type.
+    | TUnion of cases: List<string * Type>
 
     /// Returns a human-readable string describing the type.
     override this.ToString(): string =
@@ -50,6 +52,10 @@ type Type =
             "struct {" + System.String.Join("; ", entriesStr) + "}"
         | TArray elemType ->
             "array {" + $"%O{elemType}" + "}"
+        | TUnion(cases) ->
+            let fmtCase (f: string, t: Type) = $"%s{f}: %O{t}"
+            let casesStr = Seq.map fmtCase cases
+            "union {" + System.String.Join("; ", casesStr) + "}"
 
 /// List of basic types known by the compiler.  NOTE: this list must be kept in
 /// sync with the definition of 'Type'.
@@ -71,6 +77,9 @@ let rec freeTypeVars (t: Type): Set<string> =
         let (_, fieldTypes) = List.unzip fields
         collectFreeTypeVars fieldTypes
     | TArray elemType -> freeTypeVars elemType
+    | TUnion(cases) ->
+        let (_, caseTypes) = List.unzip cases
+        collectFreeTypeVars caseTypes
 
 /// Collect all free type variables in the given list of types.
 and collectFreeTypeVars (ts: List<Type>): Set<string> =

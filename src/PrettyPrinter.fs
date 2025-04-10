@@ -67,6 +67,12 @@ let rec internal formatType (t: Type.Type): Tree =
         Node("struct", fieldsChildren)
     | Type.TArray elemType ->
         Node("array", [("elemType", formatType elemType)])
+    | Type.TUnion(cases) ->
+        /// Formatted case labels with their respective type
+        let casesChildren =
+            List.map (fun (f, t) -> ($"label %s{f}", formatType t)) cases
+        Node("union", casesChildren)
+
 
 /// Traverse a Hygge typing environment and return its hierarchical
 /// representation.
@@ -215,6 +221,14 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | Pointer(addr) ->
         mkTree $"Pointer 0x%x{addr}" node []
 
+    | UnionCons(label, expr) ->
+        mkTree $"UnionCons %s{label}" node [("expr", formatASTRec expr)]
+    | Match(expr, cases) ->
+        let casesChildren =
+            List.map (fun (l, v, cont) -> ($"case %s{l}{{%s{v}}}",
+                                           formatASTRec cont)) cases
+        mkTree "Match" node (("expr", formatASTRec expr) :: casesChildren)
+
     | ArrayCons(length, init) ->
         mkTree "ArrayCons" node [("length", formatASTRec length)
                                  ("init", formatASTRec init)]
@@ -276,6 +290,12 @@ and internal formatPretypeNode (node: PretypeNode): Tree =
     | Pretype.TArray(arrType) ->
         Node((formatPretypeDescr node "Array pretype"),
              [("arrType", formatPretypeNode arrType)])
+    | Pretype.TUnion(cases) ->
+        /// Formatted pretypes of each union case with their respective label
+        let casesChildren =
+            List.map (fun (name, t) -> ((formatPretypeDescr t $"label %s{name}"),
+                                        formatPretypeNode t)) cases
+        Node((formatPretypeDescr node "Union pretype"), casesChildren)
 
 /// Format the description of a pretype AST node (without printing its
 /// children).
