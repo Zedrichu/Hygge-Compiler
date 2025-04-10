@@ -271,7 +271,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
 
     | Min(lhs,rhs) ->
         match (binaryNumericalOpTyper "minimize" node.Pos env lhs rhs) with
-        | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
+        | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Min(tlhs, trhs) }
         | Ok(tpe, _, _) ->
              Error([(node.Pos, $"'min' operator: expected type %O{TInt} or %O{TFloat}, "
@@ -280,7 +280,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
 
      | Max(lhs,rhs) ->
         match (binaryNumericalOpTyper "maximize" node.Pos env lhs rhs) with
-        | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
+        | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Max(tlhs, trhs) }
         | Ok(tpe, _, _) ->
              Error([(node.Pos, $"'max' operator: expected type %O{TInt} or %O{TFloat}, "
@@ -782,8 +782,8 @@ and internal binaryNumericalOpTyper descr pos (env: TypingEnv)
         Ok(TFloat, ln, {Pos = rn.Pos; Env = env; Type = TFloat; Expr = FloatVal(single n)})
 
     | (Ok(t1), Ok(t2)) ->
-        Error([(pos, $"%s{descr}: expected arguments of a same type "
-                     + $"between %O{TInt} or %O{TFloat}, "
+        Error([(pos, $"%s{descr}: expected arguments of type "
+                     + $"between %O{TInt} or %O{TFloat} (only right hand type promotion), "
                      + $"found %O{t1.Type} and %O{t2.Type}")])
     | otherwise -> mergeErrors otherwise
 
