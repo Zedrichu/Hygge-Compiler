@@ -3,4 +3,3 @@ fun addFirstAndLast(x1: float, x2: float, x3: float, x4: float, x5: float, x6: f
 
 let result_add = addFirstAndLast(1.0f,2.0f,3.0f,4.0f,5.0f,6.0f,7.0f,8.0f,9.0f,10.0f);
 assert(result_add = 11.0f)
-
