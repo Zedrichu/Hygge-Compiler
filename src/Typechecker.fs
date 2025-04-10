@@ -275,11 +275,11 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Min(tlhs, trhs) }
         | Error(es) -> Error(es)
 
-     | Max(lhs,rhs) ->
-        match (binaryNumericalOpTyper "maximize" node.Pos env lhs rhs) with
-        | Ok(tpe, tlhs, trhs) ->
+    | Max(lhs,rhs) ->
+       match (binaryNumericalOpTyper "maximize" node.Pos env lhs rhs) with
+       | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Max(tlhs, trhs) }
-        | Error(es) -> Error(es)
+       | Error(es) -> Error(es)
 
 
     | And(lhs, rhs) ->
