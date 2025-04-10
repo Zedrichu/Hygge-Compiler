@@ -157,6 +157,8 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         match (lhs.Expr, rhs.Expr) with
         | IntVal(v1), IntVal(v2) when v2 <> 0 ->
             Some(env, {node with Expr = IntVal(v1 % v2)})
+        | IntVal(v1), IntVal(v2) when v2 = 0 ->
+            None // Division by zero
         | _,_ ->
             match(reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
