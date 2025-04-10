@@ -51,6 +51,8 @@ and Pretype =
             * ret: PretypeNode
     /// A structure pretype, with pretypes for each field.
     | TStruct of fields: List<string * PretypeNode>
+    /// Discriminated union type.  Each case consists of a name and a pretype.
+    | TUnion of cases: List<string * PretypeNode>
     /// An array pretype, with the pretype of the elements (unique).
     | TArray of arrType: PretypeNode
 
@@ -265,6 +267,19 @@ and Expr<'E,'T> =
     /// Access a specific element of an array (indexed).
     | ArrayElem of target: Node<'E,'T>
                  * index: Node<'E,'T>
+
+    /// Constructor of a discriminated union type instance, with a label and an
+    /// expression.
+    | UnionCons of label: string
+                 * expr: Node<'E,'T>
+
+    /// Pattern matching construct: check whether the given expression matches
+    /// one the specified cases of a discriminated union.  Each case contains
+    /// the case label, a variable that is bound to the matched case value,
+    /// and a continuation expression (that can use that variable to access the
+    /// match case value).
+    | Match of expr: Node<'E,'T>
+             * cases: List<string * string * Node<'E,'T>>
 
 
 /// A type alias for an untyped AST, where there is no typing environment nor

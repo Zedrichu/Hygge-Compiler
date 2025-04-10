@@ -114,6 +114,23 @@ let rec internal resolvePretype (env: TypingEnv) (pt: AST.PretypeNode): Result<T
         match (resolvePretype env arrType) with
         | Ok(t) -> Ok(TArray(t))
         | Error(es) -> Error(es)
+    | Pretype.TUnion(cases) ->
+        /// Union type labels and pretypes
+        let (caseLabels, casePretypes) = List.unzip cases
+        /// List of duplicate label names
+        let dups = Util.duplicates caseLabels
+        if not dups.IsEmpty then
+            Error([(pt.Pos, $"duplicate label names in union type: %s{Util.formatSeq dups}")])
+        else
+            /// List of case types (possibly with errors)
+            let caseTypes = List.map (fun a -> resolvePretype env a) casePretypes
+            /// Errors occurred while resolving 'caseTypes'
+            let errors = collectErrors caseTypes
+            if not errors.IsEmpty then Error(errors)
+            else
+                /// Type of each union case
+                let caseTypes = List.map getOkValue caseTypes
+                Ok(TUnion(List.zip caseLabels caseTypes))
 
 /// Resolve a type variable using the given typing environment: optionally
 /// return the Type corresponding to variable 'name', or None if 'name' is not
@@ -171,6 +188,19 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
                              fieldTypes1 fieldTypes2
     | TArray(t1), TArray(t2) ->
         isSubtypeOf env t1 t2
+    | (TUnion(cases1), TUnion(cases2)) ->
+        /// Labels of the subtype union
+        let (labels1, _) = List.unzip cases1
+        /// Labels of the supertype union
+        let (labels2, _) = List.unzip cases2
+        // A subtype union must have a subset of the labels of the supertype
+        if not (Set.isSubset (Set(labels1)) (Set(labels2))) then false
+        else
+            // A label that appears in both the subtype and supertype unions
+            // must have a subtyped argument in the subtype union
+            let map1 = Map.ofList cases1
+            let map2 = Map.ofList cases2
+            List.forall (fun l -> isSubtypeOf env map1.[l] map2.[l]) labels1
     | (_, _) -> false
 
 
@@ -363,6 +393,9 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
             Error([(node.Pos, $"cannot redefine basic type '%s{name}'")])
         else
             match def.Pretype with
+            | Pretype.TId(tname) when tname = name ->
+                // The type definition is something like:  type T = T
+                Error([(node.Pos, $"invalid recursive definition for type %s{name}")])
             | _ ->
                 // We disallow the redefinition of type aliases.  This avoids
                 // tricky corner cases and simplifies the handling of typing
@@ -371,7 +404,11 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                 | Some(_) ->
                     Error([(node.Pos, $"type '%s{name}' is already defined")])
                 | None ->
-                    match (resolvePretype env def) with
+                    /// Extended typing environment where the type variable
+                    /// being defined maps to 'unit' (although any other type
+                    /// would work).  This allows for recursive type definitions
+                    let env2 = {env with TypeVars = env.TypeVars.Add(name, TUnit)}
+                    match (resolvePretype env2 def) with
                     | Ok(resDef) ->
                         /// Environment to type-check the 'scope' of the type
                         /// variable.  We add the new type variable to this
@@ -632,6 +669,74 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                      Expr = ArrayLength(ttarget) }
             | _ -> Error([(node.Pos, $"cannot access array length on expression of type %O{ttarget.Type}")])
         | Error(es) -> Error(es)
+
+    | UnionCons(label, expr) ->
+        match (typer env expr) with
+        | Ok(texpr) ->
+            // We type the union instance with the most precise labelled union
+            // type that contains it
+            Ok { Pos = node.Pos; Env = env; Type = TUnion([label, texpr.Type]);
+                 Expr = UnionCons(label, texpr) }
+        | Error(es) -> Error(es)
+
+    | Match(expr, cases) ->
+        /// Duplicate labels in the pattern matching cases
+        let dups = Util.duplicates ((List.map (fun (label,_,_) -> label)) cases)
+        if not dups.IsEmpty then
+            Error([(expr.Pos, $"duplicate case labels in pattern matching: %s{Util.formatSeq dups}")])
+        else
+            match (typer env expr) with
+            | Ok(texpr) ->
+                match (expandType env texpr.Type) with
+                | TUnion(unionCases) ->
+                    let (unionLabels, unionTypes) = List.unzip unionCases
+                    /// The function 'caseTyper' is mapped over all
+                    /// 'unionCases': it looks for the matched label in
+                    /// 'unionLabels', extracts the corresponding type from
+                    /// 'unionTypes', and type-checks the match continuation by
+                    /// introducing the matched variable and type in the
+                    /// environment.
+                    let caseTyper (label, v, cont: UntypedAST): TypingResult =
+                        match (List.tryFindIndex (fun l -> l = label) unionLabels) with
+                        | Some(i) ->
+                            /// Updated environment for type-checking the union
+                            /// case continuation
+                            let env2 = {env with Vars = env.Vars.Add(v, unionTypes.[i])}
+                            typer env2 cont
+                        | None -> Error([(cont.Pos, $"invalid match case: %s{label}")])
+                    /// Typed continuations (possibly with errors)
+                    let tconts = List.map caseTyper cases
+                    /// Typing errors in continuations
+                    let errors = collectErrors tconts
+                    if errors.IsEmpty then
+                        /// Typed continuations, without errors
+                        let typedConts = List.map getOkValue tconts
+                        /// Desired type for all union cases (taken from the
+                        /// first union case)
+                        let matchType = typedConts.[0].Type
+                        /// Has the given AST node a "bad" type that is not a
+                        /// subtype of 'matchType'?
+                        let hasBadType (c: TypedAST) =
+                            not (isSubtypeOf env c.Type matchType)
+                        /// List of match continuation types that are not compatible
+                        /// with 'matchType'
+                        let badTypes = List.filter hasBadType typedConts.[1..]
+                        if badTypes.IsEmpty then
+                            /// Match case labels and variables
+                            let (caseLabels, caseVars, _) = List.unzip3 cases
+                            /// Typed match cases
+                            let tcases = List.zip3 caseLabels caseVars typedConts
+                            Ok { Pos = node.Pos; Env = env; Type = matchType;
+                                 Expr = Match(texpr, tcases)}
+                        else
+                            let errFmt (c: TypedAST) =
+                                (c.Pos, $"pattern match result type mismatch: "
+                                        + $"expected %O{matchType}, found %O{c.Type}")
+                            Error(List.map errFmt badTypes)
+                    else Error(errors)
+                | _ ->
+                    Error([(expr.Pos, $"cannot match on expression of type %O{texpr.Type}")])
+            | Error(es) -> Error(es)
 
 /// Compute the typing of a binary numerical operation, by computing and
 /// combining the typings of the 'lhs' and 'rhs'.  The argument 'descr' (used in
