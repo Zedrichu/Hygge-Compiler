@@ -913,7 +913,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Function that compiles an int argument (using its index to determine its
         /// target register by type) and accumulates the generated assembly code
         let compileArgInt (acc: Asm) (i: int, arg: TypedAST) =
-            Log.error($"Target: {env.Target + (1u + (uint i))}")
             acc ++ (doCodegen {env with Target = env.Target + (uint i) + 1u} arg)
 
         /// Assembly code of all application arguments, obtained by folding over (int/float)
