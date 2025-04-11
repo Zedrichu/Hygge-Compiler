@@ -466,31 +466,25 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | Some(env', index') ->
             Some(env', {node with Expr = Assign({target with Expr = ArrayElem(arrTarget, index')}, expr)})
         | None -> None
-    | Assign({Expr = ArrayElem(_,_)} as target, expr) when not (isValue expr) ->
+    | Assign({Expr = ArrayElem _ } as target, expr) when not (isValue expr) ->
         match (reduce env expr) with
         | Some(env', expr') ->
             Some(env', {node with Expr = Assign(target, expr')})
         | None -> None
     | Assign({Expr = ArrayElem({Expr = Pointer(addr)}, index)}, value) ->
         match (env.PtrInfo.TryFind addr) with
-        | Some(attrs) ->
-            match (List.tryFindIndex (fun a -> a = "~data") attrs) with
-            | Some(dataOffset) ->
-                match env.Heap[addr + (uint dataOffset)].Expr with
-                | Pointer(dataPointer) ->
-                    match index.Expr with
-                    | IntVal(i) when i >= 0 ->
-                        match env.Heap[addr].Expr with
-                        | IntVal(length) when i >= length -> None
-                        | IntVal(_) ->
-                            /// Updated heap with selected array element overwritten by 'value'
-                            let env' = {env with Heap = env.Heap.Add(dataPointer + (uint i), value)}
-                            Some(env', value)
-                        | _ -> None
-                    | _ -> None
+        | Some(attrs) when attrs = ["~length"; "~data"] ->
+            let arrayInstance = (env.Heap[addr].Expr, env.Heap[addr + 1u].Expr)
+            match arrayInstance with
+            | IntVal(length), Pointer(dataPointer) ->
+                match index.Expr with
+                | IntVal(i) when i >= 0 && i < length ->
+                    /// Updated heap with selected array element overwritten by 'value'
+                    let env' = {env with Heap = env.Heap.Add(dataPointer + (uint i), value)}
+                    Some(env', value)
                 | _ -> None
-            | None -> None
-        | None -> None
+            | _ -> None
+        | _ -> None
     | Assign({Expr = FieldSelect(selTarget, field)} as target,
              expr) when not (isValue selTarget)->
         match (reduce env selTarget) with
