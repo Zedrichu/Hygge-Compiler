@@ -651,18 +651,13 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | ArrayElem ({Expr = Pointer(addr)}, {Expr = IntVal(i)}) when i >= 0 ->
         match (env.PtrInfo.TryFind addr) with
-        | Some(attrs) ->
-            match env.Heap[addr].Expr with
-            | IntVal(length) when i >= length -> None
-            | IntVal(_) ->
-                match (List.tryFindIndex (fun a -> a = "~data") attrs) with
-                | Some(dataOffset) ->
-                    match env.Heap[addr + (uint dataOffset)].Expr with
-                    | Pointer(dataPointer) -> Some(env, env.Heap[dataPointer + (uint i)])
-                    | _ -> None
-                | None -> None
+        | Some(attrs) when attrs = ["~length"; "~data"] ->
+            let arrayInstance = (env.Heap[addr].Expr, env.Heap[addr + 1u].Expr)
+            match arrayInstance with
+            | IntVal(length), Pointer(dataPointer) when i < length ->
+                Some(env, env.Heap[dataPointer + (uint i)])
             | _ -> None
-        | None -> None
+        | _ -> None
     | ArrayElem(target, index) when not (isValue index) ->
         match (reduce env index) with
         | Some(env', index') ->
