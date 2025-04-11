@@ -636,12 +636,9 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | ArrayLength({Expr = Pointer(addr) }) ->
         match (env.PtrInfo.TryFind addr) with
-        | Some(attrs) ->
-            match (List.tryFindIndex (fun a -> a = "~length") attrs) with
-            | Some(offset) ->
-                Some(env, env.Heap[addr + (uint offset)])
-            | None -> None
-        | None -> None
+        | Some(attrs) when attrs = ["~length"; "~data"] ->
+            Some(env, env.Heap[addr + 0u])
+        | _ -> None
     | ArrayLength(target) when not (isValue target) ->
         match (reduce env target) with
         | Some(env', target') ->
