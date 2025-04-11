@@ -94,6 +94,7 @@ rule tokenize = parse
 
 // Keywords
 | "if"          { Parser.IF }
+| "in"          { Parser.IN }
 | "then"        { Parser.THEN }
 | "else"        { Parser.ELSE }
 | "let"         { Parser.LET }
@@ -110,11 +111,15 @@ rule tokenize = parse
 | "fun"         { Parser.FUN }
 | "rec"         { Parser.REC }
 | "struct"      { Parser.STRUCT }
+| "union"      { Parser.UNION }
+| "match"      { Parser.MATCH }
+| "with"       { Parser.WITH }
 | "ref"         { Parser.REF }
 | "tuple"       { Parser.TUPLE }
 | "array"       { Parser.ARRAY }
 | "arrayLength" { Parser.ARRAY_LENGTH }
 | "arrayElem"   { Parser.ARRAY_ELEM }
+| "slice"       { Parser.SLICE }
 
 // Generic identifier
 | ident        { Parser.IDENT(LexBuffer<_>.LexemeString lexbuf) }

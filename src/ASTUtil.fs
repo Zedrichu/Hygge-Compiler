@@ -157,6 +157,20 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
     | ArrayElem(target, index) ->
         {node with Expr = ArrayElem((subst target var sub), (subst index var sub))}
 
+    | ArraySlice(target, startIdx, endIdx) ->
+        {node with Expr = ArraySlice((subst target var sub),
+                                     (subst startIdx var sub),
+                                     (subst endIdx var sub))}
+    | UnionCons(label, expr) ->
+        {node with Expr = UnionCons(label, (subst expr var sub))}
+
+    | Match(expr, cases) ->
+        /// Mapper function to propagate the substitution along a match case
+        let substCase(lab: string, v: string, cont: Node<'E,'T>) =
+            if (v = var) then (lab, v, cont) // Variable bound, no substitution
+            else (lab, v, (subst cont var sub))
+        let cases2 = List.map substCase cases
+        {node with Expr = Match((subst expr var sub), cases2)}
 
 /// Compute the set of free variables in the given AST node.
 let rec freeVars (node: Node<'E,'T>): Set<string> =
@@ -215,6 +229,7 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
         // names of the arguments
         Set.difference (freeVars body) (Set.ofList argNames)
     | Application(expr, args) ->
+        let fvArgs = List.map freeVars args
         // Union of free variables in the applied expr, plus all its arguments
         Set.union (freeVars expr) (freeVarsInList args)
     | StructCons(fields) ->
@@ -230,6 +245,19 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
     | ArrayLength(target) -> freeVars target
     | ArrayElem(target, index) ->
         Set.union (freeVars target) (freeVars index)
+    | ArraySlice(target, startIdx, endIdx) ->
+        Set.union (freeVars target)
+                  (Set.union (freeVars startIdx) (freeVars endIdx))
+    | UnionCons(_, expr) -> freeVars expr
+    | Match(expr, cases) ->
+        /// Compute the free variables in all match cases continuations, minus
+        /// the variable bound in the corresponding match case.  This 'folder'
+        /// is used to fold over all match cases.
+        let folder (acc: Set<string>) (_, var, cont: Node<'E,'T>): Set<string> =
+            Set.union acc ((freeVars cont).Remove var)
+        /// Free variables in all match continuations
+        let fvConts = List.fold folder Set[] cases
+        Set.union (freeVars expr) fvConts
 
 /// Compute the union of the free variables in a list of AST nodes.
 and internal freeVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
@@ -310,6 +338,19 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
     | ArrayLength(target) -> capturedVars target
     | ArrayElem(target, index) ->
         Set.union (capturedVars target) (capturedVars index)
+    | ArraySlice(target, startIdx, endIdx) ->
+        Set.union (capturedVars target)
+                  (Set.union (capturedVars startIdx) (capturedVars endIdx))
+    | UnionCons(_, expr) -> capturedVars expr
+    | Match(expr, cases) ->
+        /// Compute the captured variables in all match cases continuations,
+        /// minus the variable bound in the corresponding match case.  This
+        /// 'folder' is used to fold over all match cases.
+        let folder (acc: Set<string>) (_, var, cont: Node<'E,'T>): Set<string> =
+            Set.union acc ((capturedVars cont).Remove var)
+        /// Captured variables in all match continuations
+        let cvConts = List.fold folder Set[] cases
+        Set.union (capturedVars expr) cvConts
 
 /// Compute the union of the captured variables in a list of AST nodes.
 and internal capturedVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
