@@ -1,0 +1,5 @@
+let n = 20;
+let arr1: array {int} = array(n / 2, 3);
+let arr2: array {int} = slice(arr1, n / 3 + 3, n  - 11);
+print(arrayLength(arr2));
+assert(arrayLength(arr2) = 1)

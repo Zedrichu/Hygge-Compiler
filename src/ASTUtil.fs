@@ -157,6 +157,10 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
     | ArrayElem(target, index) ->
         {node with Expr = ArrayElem((subst target var sub), (subst index var sub))}
 
+    | ArraySlice(target, startIdx, endIdx) ->
+        {node with Expr = ArraySlice((subst target var sub),
+                                     (subst startIdx var sub),
+                                     (subst endIdx var sub))}
     | UnionCons(label, expr) ->
         {node with Expr = UnionCons(label, (subst expr var sub))}
 
@@ -241,6 +245,9 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
     | ArrayLength(target) -> freeVars target
     | ArrayElem(target, index) ->
         Set.union (freeVars target) (freeVars index)
+    | ArraySlice(target, startIdx, endIdx) ->
+        Set.union (freeVars target)
+                  (Set.union (freeVars startIdx) (freeVars endIdx))
     | UnionCons(_, expr) -> freeVars expr
     | Match(expr, cases) ->
         /// Compute the free variables in all match cases continuations, minus
@@ -331,6 +338,9 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
     | ArrayLength(target) -> capturedVars target
     | ArrayElem(target, index) ->
         Set.union (capturedVars target) (capturedVars index)
+    | ArraySlice(target, startIdx, endIdx) ->
+        Set.union (capturedVars target)
+                  (Set.union (capturedVars startIdx) (capturedVars endIdx))
     | UnionCons(_, expr) -> capturedVars expr
     | Match(expr, cases) ->
         /// Compute the captured variables in all match cases continuations,

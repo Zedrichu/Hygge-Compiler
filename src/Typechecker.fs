@@ -271,21 +271,15 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
 
     | Min(lhs,rhs) ->
         match (binaryNumericalOpTyper "minimize" node.Pos env lhs rhs) with
-        | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
+        | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Min(tlhs, trhs) }
-        | Ok(tpe, _, _) ->
-             Error([(node.Pos, $"'min' operator: expected type %O{TInt} or %O{TFloat}, "
-                              + $"found %O{tpe}")])
         | Error(es) -> Error(es)
 
-     | Max(lhs,rhs) ->
-        match (binaryNumericalOpTyper "maximize" node.Pos env lhs rhs) with
-        | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
+    | Max(lhs,rhs) ->
+       match (binaryNumericalOpTyper "maximize" node.Pos env lhs rhs) with
+       | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Max(tlhs, trhs) }
-        | Ok(tpe, _, _) ->
-             Error([(node.Pos, $"'max' operator: expected type %O{TInt} or %O{TFloat}, "
-                              + $"found %O{tpe}")])
-        | Error(es) -> Error(es)
+       | Error(es) -> Error(es)
 
 
     | And(lhs, rhs) ->
@@ -738,6 +732,22 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                     Error([(expr.Pos, $"cannot match on expression of type %O{texpr.Type}")])
             | Error(es) -> Error(es)
 
+    | ArraySlice(target, startIdx, endIdx) ->
+        match (typer env target) with
+        | Ok(ttarget) ->
+            match (expandType env ttarget.Type) with
+            | TArray elemType ->
+                match (typer env startIdx, typer env endIdx) with
+                | Ok(tstart), Ok(tend) when (isSubtypeOf env tstart.Type TInt) &&
+                                            (isSubtypeOf env tend.Type TInt) ->
+                    Ok { Pos = node.Pos; Env = env; Type = TArray elemType;
+                         Expr = ArraySlice(ttarget, tstart, tend) }
+                | Ok(tstart), Ok(tend) -> Error([(node.Pos, $"expected array slice indices of type %O{TInt}, "
+                                                          + $"found %O{tstart.Type} and %O{tend.Type}")])
+                | es1, es2 -> mergeErrors (es1, es2)
+            | _ -> Error([(node.Pos, $"cannot create array slice on expression of type %O{ttarget.Type}")])
+        | Error(es) -> Error(es)
+
 /// Compute the typing of a binary numerical operation, by computing and
 /// combining the typings of the 'lhs' and 'rhs'.  The argument 'descr' (used in
 /// error messages) specifies which expression is being typed, while 'pos'
@@ -766,8 +776,8 @@ and internal binaryNumericalOpTyper descr pos (env: TypingEnv)
         Ok(TFloat, ln, {Pos = rn.Pos; Env = env; Type = TFloat; Expr = FloatVal(single n)})
 
     | (Ok(t1), Ok(t2)) ->
-        Error([(pos, $"%s{descr}: expected arguments of a same type "
-                     + $"between %O{TInt} or %O{TFloat}, "
+        Error([(pos, $"%s{descr}: expected arguments of type "
+                     + $"between %O{TInt} or %O{TFloat} (only right hand type promotion), "
                      + $"found %O{t1.Type} and %O{t2.Type}")])
     | otherwise -> mergeErrors otherwise
 

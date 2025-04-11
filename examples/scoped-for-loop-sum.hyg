@@ -1,0 +1,5 @@
+let mutable sum = 0;
+for (let mutable i=0; i < 10; i++) {
+    sum += i
+};
+println(sum)
