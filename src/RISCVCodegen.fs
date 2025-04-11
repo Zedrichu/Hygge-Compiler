@@ -708,7 +708,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         Asm([(RV.SW(Reg.r(env.Target + 2u), Imm12(0),
                                     Reg.r(env.Target)),
                               $"Assigning value to array element at index")
-                             (RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                             (RV.MV(Reg.r(env.Target), Reg.r(env.Target + 2u)),
                               "Copying assigned value to target register")])
                 // Put everything together
                 indexOutBoundsCode ++ arrTargetCode ++ indexCode ++ offsetCode ++ rhsCode ++ assignCode
@@ -1060,9 +1060,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 Asm(RV.SW(Reg.r(env.Target + 3u), Imm12(0), Reg.r(env.Target + 2u)),
                     $"Initialize next array element")
 
-        /// Assembly code for initialising each element of the array container, by looping through
-        /// the array length and initialising each element with initial value. The element offset
-        /// is computed in the register `target+4` and the element value is computed in the register `target+3`.
+        /// Assembly code for initialising each element of the array container with pre-computed init,
+        /// by looping through the array length and storing the value on heap. The element offset from data
+        /// pointer computed in register `target+2` and the element value in register `target+3`.
 
         /// Label for array loop start
         let loopStartLabel = Util.genSymbol "array_init_loop_start"
@@ -1099,9 +1099,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// To compile an array element access operation, we first compile the `array` pointer
         /// referencing the array instance, into the `target` register. Then, we compile the
         /// `index` expression to compute the offset of the element to access, indexed from the
-        /// `data` instance field referencing the array container. Finally, we iterate memory
-        ///  addresses from container pointer until the offset to retrieve the element value.
-
+        /// `data` instance field referencing the array container. Finally, we retrieve the
+        /// element value from the heap memory address obtained.
         let indexOutBoundsCode = checkIndexOutOfBounds env array (index, index) node
 
         let arrayTargetCode = doCodegen env array

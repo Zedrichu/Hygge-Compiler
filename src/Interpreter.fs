@@ -637,7 +637,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
     | ArrayLength({Expr = Pointer(addr) }) ->
         match (env.PtrInfo.TryFind addr) with
         | Some(attrs) when attrs = ["~length"; "~data"] ->
-            Some(env, env.Heap[addr + 0u])
+            Some(env, env.Heap[addr + 0u]) // return first field in instance struct
         | _ -> None
     | ArrayLength(target) when not (isValue target) ->
         match (reduce env target) with
