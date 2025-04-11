@@ -671,28 +671,23 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                  { Expr = IntVal(start) },
                  { Expr = IntVal(final) }) when start >= 0 ->
         match (env.PtrInfo.TryFind addr) with
-        | Some(attrs) ->
-            match env.Heap[addr].Expr with
-            | IntVal(length) when final < length && final >= start ->
-                match (List.tryFindIndex (fun a -> a = "~data") attrs) with
-                | Some(data) ->
-                    match env.Heap[addr + (uint 1)].Expr with
-                    | Pointer(dataPointer) ->
-                        /// Allocate the array slice struct on the heap, with data pointing at range start
-                        /// Since elements are in the subset of range [start, final]
-                        let lengthNode = { node with Expr = IntVal(final - start + 1) }
-                        let dataNode = { node with Expr = Pointer(dataPointer + uint start) }
-                        /// Updated heap with newly-allocated struct, placed at `baseAddr`
-                        let (heap', baseAddr) = heapAlloc env.Heap [ lengthNode; dataNode ]
+        | Some(attrs) when attrs = ["~length"; "~data"] ->
+            let arrayInstance = (env.Heap[addr].Expr, env.Heap[addr + 1u].Expr)
+            match arrayInstance with
+            | IntVal(length), Pointer(dataPointer) when final < length && final >= start ->
+                /// Allocate the array slice struct on the heap, with data pointing at range start
+                /// Since elements are in the subset of range [start, final]
+                let lengthNode = { node with Expr = IntVal(final - start + 1) }
+                let dataNode = { node with Expr = Pointer(dataPointer + uint start) }
+                /// Updated heap with newly-allocated struct, placed at `baseAddr`
+                let (heap', baseAddr) = heapAlloc env.Heap [ lengthNode; dataNode ]
 
-                        /// Update pointer info, mapping `baseAddr` to the length and data of the array slice
-                        let ptrInfo' = env.PtrInfo.Add(baseAddr, ["~length"; "~data"])
-                        Some({ env with Heap = heap'; PtrInfo = ptrInfo' },
-                             { node with Expr = Pointer(baseAddr) })
-                    | _ -> None
-                | None -> None
+                /// Update pointer info, mapping `baseAddr` to the length and data of the array slice
+                let ptrInfo' = env.PtrInfo.Add(baseAddr, ["~length"; "~data"])
+                Some({ env with Heap = heap'; PtrInfo = ptrInfo' },
+                     { node with Expr = Pointer(baseAddr) })
             | _ -> None
-        | None -> None
+        | _ -> None
     | ArraySlice(target, startIdx, endIdx) when not (isValue target) ->
         match (reduce env target) with
         | Some(env', target') ->
