@@ -1243,12 +1243,11 @@ and internal compileFunction (args: List<string * Type>)
             if i < 8 then
                 acc.Add(var, Storage.Reg(Reg.a((uint)i)))
             else
-                // Args beyond our 8 registers are at a (+) offset from frame pointer
-                let offset = (i - 8) * 4
-                // Account for int args already on the stack...as ints are handled first by caller
+                // Account for float args already on the stack...as ints are handled first by caller
                 let floatArgsOnStack = max 0 (floatArgsCount - 8)
-                let totalOffsetInt = offset + (floatArgsOnStack * 4)
-                acc.Add(var, Storage.Frame totalOffsetInt)
+                // Args beyond our 8 registers are at a (+) offset from frame pointer
+                let offset = (i - 8 + floatArgsOnStack) * 4
+                acc.Add(var, Storage.Frame offset)
 
     /// Updated storage information including function arguments
     let varStorage2 = List.fold folder env.VarStorage (indexedArgsFloat @ indexedArgsInt)
