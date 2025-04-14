@@ -822,7 +822,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Function that compiles a float argument (using its index to determine its
         /// target register by type) and accumulates the generated assembly code
         let compileArgFloat (acc: Asm) (i: int, arg: TypedAST) =
-            acc ++ (doCodegen {env with FPTarget = env.FPTarget + (uint i) + 1u} arg)
+            acc ++ (doCodegen {env with FPTarget = env.FPTarget + (uint i)} arg)
         /// Function that compiles an int argument (using its index to determine its
         /// target register by type) and accumulates the generated assembly code
         let compileArgInt (acc: Asm) (i: int, arg: TypedAST) =
@@ -840,16 +840,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// the generated assembly code
         let copyArg (acc: Asm) (i: int, arg: TypedAST) (overflowFloat: int)=
             let argOffset = (i - 8) * 4
-            
+
             match arg.Type with
             | t when (isSubtypeOf arg.Env t TFloat) ->
-                // Here we handle floats
+                // Here we handle float types
                 if i < 8 then
-                    acc.AddText(RV.FMV_S(FPReg.fa(uint i), FPReg.r(env.FPTarget + (uint i) + 1u)),
+                    acc.AddText(RV.FMV_S(FPReg.fa(uint i), FPReg.r(env.FPTarget + (uint i))),
                         //$"Load float function call argument %d{i+1}")
-                        $"Load float function call argument %d{i+1} from FP register '%s{(FPReg.r(env.FPTarget + (uint i) + 1u)).ToString()}' to target FP register 'fa%d{i}'") // Better debug comment
+                        $"Load float function call argument %d{i+1} from FP register '%s{FPReg.r(env.FPTarget + (uint i)).ToString()}' to target FP register 'fa%d{i}'") // Better debug comment
                 else
-                    acc.AddText(RV.FSW_S(FPReg.r(env.FPTarget + (uint i) + 1u), Imm12(argOffset), Reg.sp),
+                    acc.AddText(RV.FSW_S(FPReg.r(env.FPTarget + (uint i)), Imm12(argOffset), Reg.sp),
                         $"Store float function call argument %d{i+1} to stack at offset {argOffset}")
             | _ ->
                 // Here we handle integer types
@@ -860,17 +860,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12(argOffset + (overflowFloat * 4)), Reg.sp),
                         $"Store function call argument %d{i+1} to stack at offset {argOffset + (overflowFloat * 4)}")
 
+        let floatArgsOnStack = max 0 (indexedArgsFloat.Length - 8)
+        let intArgsOnStack = max 0 (indexedArgsInt.Length - 8)
+
         /// Code that loads each application argument into a register 'a', by
         /// copying the contents of the target registers used by 'compileArgs'
         /// and 'argsCode' above.  To this end, this code folds over the indexes
         /// of all arguments (from 0 to args.Length), using 'copyArg' above.
-        let floatArgsOnStack = max 0 (indexedArgsFloat.Length - 8)
-        let intArgsOnStack = max 0 (indexedArgsInt.Length - 8)
-
         let argsLoadCode =
-            // Calculate the exact number of float arguments that overflow to stack if its none then max 0 ensures that it doesn't go neg
-
-            let stackAdjustment = 
+            // Calculate the exact number of  arguments that overflow to stack (for stack allocation)
+            let stackAdjustment =
                 if (floatArgsOnStack + intArgsOnStack) > 0 then
                     Asm(RV.ADDI(Reg.sp, Reg.sp, Imm12(-4 * (floatArgsOnStack + intArgsOnStack))),
                                     $"Update stack pointer for the overflowing args with overflow of %d{floatArgsOnStack + intArgsOnStack}")
@@ -1217,9 +1216,15 @@ and internal restoreRegisters (rs: List<Reg>) (fprs: List<FPReg>): Asm =
 and internal compileFunction (args: List<string * Type>)
                              (body: TypedAST)
                              (env: CodegenEnv): Asm =
-    /// List of indexed arguments: we use the index as the number of the 'a'
-    /// register that holds the argument
-    let indexedArgs = List.indexed args
+    /// Indexed lists of argument expressions split by type. We will use the index as the number
+    /// of the 'a' register that holds the argument, with respect to its own type.
+    let indexedArgsFloat, indexedArgsInt =
+        args
+        |> List.partition (fun (arg, tpe) -> isSubtypeOf body.Env tpe TFloat)
+        |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
+
+    let floatArgsCount = indexedArgsFloat.Length
+    let intArgsCount = indexedArgsInt.Length
 
     /// Folder function that assigns storage information to function arguments:
     /// it assigns an 'a' register to each function argument, and accumulates
@@ -1238,17 +1243,15 @@ and internal compileFunction (args: List<string * Type>)
             if i < 8 then
                 acc.Add(var, Storage.Reg(Reg.a((uint)i)))
             else
-                // Account for float args already on the stack...
-                let floatArgsCount =
-                    args
-                    |> List.filter (fun (_, t) -> isSubtypeOf body.Env t TFloat)
-                    |> List.length
+                // Args beyond our 8 registers are at a (+) offset from frame pointer
+                let offset = (i - 8) * 4
+                // Account for int args already on the stack...as ints are handled first by caller
                 let floatArgsOnStack = max 0 (floatArgsCount - 8)
-                let offset = (i - 8 + floatArgsOnStack) * 4
-                acc.Add(var, Storage.Frame offset)
+                let totalOffsetInt = offset + (floatArgsOnStack * 4)
+                acc.Add(var, Storage.Frame totalOffsetInt)
 
     /// Updated storage information including function arguments
-    let varStorage2 = List.fold folder env.VarStorage indexedArgs
+    let varStorage2 = List.fold folder env.VarStorage (indexedArgsFloat @ indexedArgsInt)
 
     /// Code for the body of the function, using the newly-created
     /// variable storage mapping 'varStorage2'.  NOTE: the function body
