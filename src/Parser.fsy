@@ -143,7 +143,7 @@ let decorateAssertion (node: Node<'E,'T>) =
 %token LPAR RPAR LCURLY RCURLY
 
 // Variable and type declarators
-%token LET TYPE MUTABLE
+%token LET TYPE MUTABLE IMMUTABLE
 
 // Misc tokens
 %token SEMI EOF COLON LARROW RARROW COMMA DOT
@@ -526,8 +526,12 @@ field:
 // Non-empty sequence of names and types, separated by semicolons (used for
 // defining structs)
 structFieldTypeSeq:
-  | field COLON pretype SEMI structFieldTypeSeq  { ($1, $3) :: $5 }
-  | field COLON pretype                          { [($1, $3)] }
+  //| field COLON pretype SEMI structFieldTypeSeq  { ($1, $3) :: $5 }
+  | field COLON pretype SEMI structFieldTypeSeq  { ($1, $3, true) :: $5 }
+  | IMMUTABLE field COLON pretype SEMI structFieldTypeSeq { ($2, $4, false) :: $6 }
+  //| field COLON pretype                          { [($1, $3)] }
+  | field COLON pretype                          { [($1, $3, true)] }
+  | IMMUTABLE field COLON pretype                { [($2, $4, false)] }
 
 // Non-empty sequence of labels and types, separated by semicolons (used for
 // defining unions)

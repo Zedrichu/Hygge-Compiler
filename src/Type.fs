@@ -27,7 +27,7 @@ type Type =
     /// A function type, with argument types and return type.
     | TFun of args: List<Type> * ret: Type
     /// A struct type with ordered fields, each having a unique name and a type.
-    | TStruct of fields: List<string * Type>
+    | TStruct of fields: List<string * Type * bool>
     /// An array type, with the type of the elements.
     | TArray of elemType: Type
     /// Discriminated union type.  Each case consists of a label and a type.
@@ -47,7 +47,7 @@ type Type =
             let argsStr = List.map fmtArg args
             "(" + System.String.Join(", ", argsStr) + $") -> %O{ret}"
         | TStruct(fields) ->
-            let fmtEntry (f: string, t: Type) = $"%s{f}: %O{t}"
+            let fmtEntry (f: string, t: Type, b: bool) = $"%s{f}: %O{t}, immutable: %b{b}"
             let entriesStr = Seq.map fmtEntry fields
             "struct {" + System.String.Join("; ", entriesStr) + "}"
         | TArray elemType ->
