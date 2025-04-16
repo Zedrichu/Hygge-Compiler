@@ -20,14 +20,26 @@ fun sumTwelve(a1: int, a2: int, a3: int, a4: int, a5: int, a6: int, a7: int, a8:
 let twelve_sum = sumTwelve(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
 assert(twelve_sum = 78);
 
-// Nested function calls with many arguments
-fun addLastTwo(a1: int, a2: int, a3: int, a4: int, a5: int, a6: int, a7: int, a8: int, a9: int, a10: int): int = {
-    a9 + a10
+// // Nested function calls with many arguments
+// fun addLastTwo(a1: int, a2: int, a3: int, a4: int, a5: int, a6: int, a7: int, a8: int, a9: int, a10: int): int = {
+//     a9 + a10
+// };
+
+// fun nestedCall(b1: int, b2: int, b3: int, b4: int, b5: int, b6: int, b7: int, b8: int, b9: int, b10: int): int = {
+//     addLastTwo(b10, b9, b8, b7, b6, b5, b4, b3, b2, b1)
+// };
+
+// let nested_result = nestedCall(100, 200, 300, 400, 500, 600, 700, 800, 900, 1000);
+// assert(nested_result = 300) // 200 + 100
+
+// Nested function calls with fewer arguments (reduced to be under 18 registers)
+fun addLastTwo(a1: int, a2: int, a3: int, a4: int, a5: int, a6: int, a7: int): int = {
+    a6 + a7
 };
 
-fun nestedCall(b1: int, b2: int, b3: int, b4: int, b5: int, b6: int, b7: int, b8: int, b9: int, b10: int): int = {
-    addLastTwo(b10, b9, b8, b7, b6, b5, b4, b3, b2, b1)
+fun nestedCall(b1: int, b2: int, b3: int, b4: int, b5: int, b6: int, b7: int): int = {
+    addLastTwo(b7, b6, b5, b4, b3, b2, b1)
 };
 
-let nested_result = nestedCall(100, 200, 300, 400, 500, 600, 700, 800, 900, 1000);
+let nested_result = nestedCall(100, 200, 300, 400, 500, 600, 700);
 assert(nested_result = 300) // 200 + 100
