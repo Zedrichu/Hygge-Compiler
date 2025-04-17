@@ -7,6 +7,7 @@
 module RISCVCodegen
 
 open AST
+open PrettyPrinter
 open RISCV
 open Type
 open Typechecker
@@ -528,28 +529,50 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Save all variables captured by the lambda term
         let cv = Set.toList (ASTUtil.capturedVars node)
 
+        /// Fields of the outer closure environment placed in new closure env before any captured variables at current level
+        let outerClosureEnv = retrieveOuterClosure node.Env
+
         /// Define the closure environment type T_clos as a struct with a function pointer f and
-        /// a named field for each of the captured variables in the closure
+        /// a named field for each of the captured variables in the closure + the outer closure env fields
         let closureEnvType = TStruct([("~f", node.Type)] @ (
-            cv |>
+            (outerClosureEnv @ cv) |>
             List.map (fun k -> (k, body.Env.Vars[k]))))
 
-        let closureEnvNamedFields =
-            cv |>
-            List.map (fun k -> (k, {node with Expr = Var(k); Type = body.Env.Vars[k]}))
+        /// Mapper function that decides where to load captured variable values from
+        /// The value might be stored as a local variable or as an environment filed of yet another closure (outer env).
+        let closureEnvMapping (name: string) =
+            if body.Env.Vars.ContainsKey name
+            then (name, {node with Expr = Var(name); Type = body.Env.Vars[name]})
+            else
+                /// First lambda argument is safely assumed to be the outer closure environment
+                let capturedVarType =
+                    match targs.Head with
+                    | TStruct fields ->
+                        match List.tryFind (fun (v, _) -> v = name) fields with
+                        | Some(v, tpe) -> tpe
+                        | None -> failwith $"unknown variable {name}"
+                    | _ -> failwith $"unknown closure no-struct"
+                let closureFieldSelect = FieldSelect({node with Expr = Var("~clos"); Type = capturedVarType}, name)
+                (name, {node with Expr = closureFieldSelect; Type = capturedVarType})
 
-        let closureEnvVar = Util.genSymbol "~clos"
+        let closureEnvNamedFields =
+            (outerClosureEnv @ cv)
+            |> List.map closureEnvMapping
+
+        let closureEnvVar = "~clos"
 
         let closureArgNamesTypes =
             (closureEnvVar, closureEnvType) :: argNamesTypes
 
-        /// Compute "plain" function by applying closure-conversion through the argument environment
+        /// Compute "plain" function by applying closure-conversion through the argument environment fields (folding)
         let nonCaptureFolder (fbody: TypedAST) (capturedVar: string) =
             let fieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureEnvType}, capturedVar)
             ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
-        let plainBody = List.fold nonCaptureFolder body cv
+        /// Compute the plain function body by folding over the captured variables (add the closure environment var)
+        let plainBody = List.fold nonCaptureFolder {body with Env.Vars = Map.add closureEnvVar closureEnvType body.Env.Vars } cv
 
         let plainType = TFun(closureEnvType :: List.map snd argNamesTypes, node.Type)
+
         let plainBodyCode =
             match node.Expr with
             | LetRec _ ->
@@ -582,11 +605,11 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Compile `clos` into env.Target
         let closCode = doCodegen env' clos
 
+        /// Move closure result pointer into the current env.Target to be returned from compilation
         let moveClosResult = Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
                                  "Move closure result to target register")
 
-        /// Storage info where the name of the compiled function points to the
-        /// label 'funLabel'
+        /// Storage info where the name of the compiled function points to the closure environment
         let varStorage2 = env.VarStorage.Add(name, Storage.Reg(Reg.r(env.Target)))
 
         // Finally, compile the 'let...'' scope with the newly-defined function
@@ -826,19 +849,39 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             (List.map (fun a -> (a, body.Env.Vars[a])) argNames)
 
         /// Save all variables captured by the lambda term
-        let cv = Set.toList (ASTUtil.capturedVars node)
+        let cv = Set.toList (Set.difference (ASTUtil.capturedVars node) (Set.singleton "~clos"))
 
-        /// Define the closure environment type T_clos as a struct with a function pointer f and
-        /// a named field for each of the captured variables in the closure
-        let closureEnvType = TStruct([("~f", node.Type)] @ (
-            cv |>
-            List.map (fun k -> (k, body.Env.Vars[k]))))
+        let outerClosureEnv = retrieveOuterClosure node.Env
+
+        /// Mapper function that decides where to load captured variable values from
+        /// The value might be stored as a local variable or as an environment filed of yet another closure (outer env).
+        let closureEnvMapping (name: string) =
+            if List.contains name outerClosureEnv
+            then
+                /// ~clos is safely assumed to be the outer closure environment
+                let closureType = node.Env.Vars["~clos"]
+                let capturedVarType =
+                    match closureType with
+                    | TStruct fields ->
+                        match List.tryFind (fun (v, _) -> v = name) fields with
+                        | Some(v, tpe) -> tpe
+                        | None -> failwith $"unknown variable {name}"
+                    | tpe -> failwith $"unknown closure not-a-struct {tpe}"
+                let closureFieldSelect = FieldSelect({node with Expr = Var("~clos"); Type = closureType}, name)
+                (name, {node with Expr = closureFieldSelect; Type = capturedVarType})
+            else (name, {node with Expr = Var(name); Type = body.Env.Vars[name]})
 
         let closureEnvNamedFields =
-            cv |>
-            List.map (fun k -> (k, {node with Expr = Var(k); Type = body.Env.Vars[k]}))
+            (outerClosureEnv @ cv) |>
+            List.map closureEnvMapping
 
-        let closureEnvVar = Util.genSymbol "~clos"
+        /// Define the closure environment type T_clos as a struct with a function pointer f and
+        /// a named field for each of the captured variables in the closure + the outer closure env fields
+        let closureEnvType = TStruct([("~f", node.Type)] @ (
+            (outerClosureEnv @ cv) |>
+            List.map (fun k -> (k, body.Env.Vars[k]))))
+
+        let closureEnvVar = "~clos"
 
         let closureArgNamesTypes =
            (closureEnvVar, closureEnvType) :: argNamesTypes
@@ -925,7 +968,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// the generated assembly code
         let copyArg (acc: Asm) (i: int, arg: TypedAST) (wordOffset: int)=
             let argOffset = (i - 8 + wordOffset) * 4
-            
+
             match arg.Type with
             | t when (isSubtypeOf arg.Env t TFloat) ->
                 // Here we handle float types
@@ -1462,6 +1505,19 @@ and internal compileFunction (args: List<string * Type>)
             .AddText(RV.COMMENT("Restore callee-saved registers"))
             ++ (restoreRegisters saveRegs [])
                 .AddText(RV.JR(Reg.ra), "End of function, return to caller")
+
+/// Helper function to generate a list of variables found in the surrounding (outer) closure environment
+and internal retrieveOuterClosure (env: TypingEnv) =
+    let envFields =
+        match env.Vars.TryFind "~clos" with
+        | None -> []
+        | Some closureType ->
+            match closureType with
+            | TStruct fields ->
+                fields
+                |> List.map (fun (v, _) -> v)
+            | _ -> failwith $"unknown closure not-a-struct {closureType}"
+    List.except ["~f"] envFields
 
 and internal errorSegFaultNode (index: Node<TypingEnv, Type>) (node: Node<TypingEnv, Type>) =
     let error = { node with
