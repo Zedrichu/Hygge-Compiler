@@ -286,11 +286,11 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
     | Mod(lhs, rhs)
     | Mult(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)
+    | Not(arg)
     | Sqrt(arg) -> capturedVars arg
     | And(lhs, rhs)
     | Or(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)
-    | Not(arg) -> capturedVars arg
     | Min(lhs, rhs)
     | Max(lhs, rhs)
     | Greater(lhs, rhs)

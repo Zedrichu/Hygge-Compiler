@@ -7,6 +7,7 @@
 module RISCVCodegen
 
 open AST
+open PrettyPrinter
 open RISCV
 open Type
 open Typechecker
@@ -491,8 +492,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Label to jump to when the assertion is true
         let passLabel = Util.genSymbol "assert_true"
 
-        let assertionFailString = arg.ToString()
-        // Reconstruct the AST to do a printout and then exit as usual for assertion
+        // Reconstruct the AST to do a printout and then exit as usual for assertion - from Parser
 
         // Check the assertion, and jump to 'passLabel' if it is true;
         // otherwise, fail
@@ -520,35 +520,19 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// For readability, we make the label similar to the function name
         let funLabel = Util.genSymbol $"fun_%s{name}"
 
-        /// Names of the lambda term arguments
-        let (argNames, _) = List.unzip args
-        /// List of pairs associating each function argument to its type
-        let argNamesTypes = List.zip argNames targs
-
-        /// Compiled function body
-        let bodyCode =
-            match node.Expr with
-            | LetRec _ ->
-                let recEnv = { env with VarStorage = env.VarStorage.Add(name, Storage.Label(funLabel)) }
-                compileFunction argNamesTypes body recEnv
-            | _ -> compileFunction argNamesTypes body env
-
-        /// Compiled function code where the function label is located just
-        /// before the 'bodyCode', and everything is placed at the end of the
-        /// Text segment (i.e. in the "PostText")
-        let funCode =
-            (Asm(RV.LABEL(funLabel), $"Code for function '%s{name}'")
-                ++ bodyCode).TextToPostText
-
-        /// Storage info where the name of the compiled function points to the
-        /// label 'funLabel'
-        let varStorage2 = env.VarStorage.Add(name, Storage.Label(funLabel))
+        /// Storage info where the name of the compiled function points to the closure environment
+        let varStorage2 = env.VarStorage.Add(name, Storage.Reg(Reg.r(env.Target)))
 
         // Finally, compile the 'let...'' scope with the newly-defined function
         // label in the variables storage, and append the 'funCode' above. The
         // 'scope' code leaves its result in the 'let...' target register
-        (doCodegen {env with VarStorage = varStorage2} scope)
-            ++ funCode
+        let scopeCode = doCodegen {env with VarStorage = varStorage2
+                                            Target = env.Target + 1u } scope
+
+        /// Perform closure conversion on the lambda term, for immutable variable closures
+        let closureConversionCode = closureConversion env funLabel node (Some(name)) args targs body
+
+        closureConversionCode ++ scopeCode
 
     // Typechecking should ensure that a LetRec expression is always initialised with a lambda expression (see notes Module 6).
     | LetRec _ ->
@@ -634,6 +618,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         rhsCode.AddText(RV.SW(Reg.r(env.Target), Imm12(offset), Reg.fp),
                         $"Assignment to variable %s{name} on stack at offset %d{offset}")
                 | None -> failwith $"BUG: variable without storage: %s{name}"
+
         | FieldSelect(target, field) ->
             /// Assembly code for computing the 'target' object of which we are
             /// selecting the 'field'.  We write the computation result (which
@@ -667,6 +652,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 selTargetCode ++ rhsCode ++ assignCode
             | t ->
                 failwith $"BUG: field selection on invalid object type: %O{t}"
+
         | ArrayElem(target, index) ->
             /// Assembly code for computing the 'target' array object of which we are
             /// retrieving the 'length'.  We write the computation result (which
@@ -750,7 +736,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 (RV.LABEL(whileEndLabel), "")
             ])
 
-
     | DoWhile(body, cond) ->
         /// Label to mark the beginning of the 'do-while' loop body
         let doWhileBodyBeginLabel = Util.genSymbol "do_while_body_begin"
@@ -766,32 +751,20 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                      "Jump to loop body if 'while' condition is true")
                 ])
 
-
     | Lambda(args, body) ->
         /// Label to mark the position of the lambda term body
         let funLabel = Util.genSymbol "lambda"
 
         /// Names of the Lambda arguments
-        let (argNames, _) = List.unzip args
+        let argNames, _ = List.unzip args
 
-        /// List of pairs associating each Lambda argument to its type.  We
-        /// retrieve the type of each argument by looking into the environment
-        /// used to type-check the Lambda 'body'
-        let argNamesTypes = List.map (fun a -> (a, body.Env.Vars[a])) argNames
+        /// Types of the Lambda arguments - retrieved from the type-checking environment
+        let targs = List.map (fun a -> body.Env.Vars[a]) argNames
 
-        /// Compiled function body
-        let bodyCode = compileFunction argNamesTypes body env
+        /// Perform closure conversion on the lambda term, for immutable variable closures
+        let closureConversionCode = closureConversion env funLabel node None args targs body
 
-        /// Compiled function code where the function label is located just
-        /// before the 'bodyCode', and everything is placed at the end of the
-        /// text segment (i.e. in the "PostText")
-        let funCode =
-            (Asm(RV.LABEL(funLabel), "Lambda term (i.e. function instance) code")
-                ++ bodyCode).TextToPostText // Move to the end of text segment
-
-        // Finally, load the function address (label) in the target register
-        Asm(RV.LA(Reg.r(env.Target), funLabel), "Load lambda function address")
-            ++ funCode
+        closureConversionCode
 
     | Application(expr, args) ->
         /// Integer registers to be saved on the stack before executing the
@@ -804,16 +777,20 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
                          @ [for i in 0u..6u do yield Reg.t(i)])
 
+        let closurePlainFAccessCode = Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+                                          "Load plain function address `~f` from closure")
+
         /// Assembly code for the expression being applied as a function
         let appTermCode =
             Asm().AddText(RV.COMMENT("Load expression to be applied as a function"))
             ++ (doCodegen env expr)
+             ++ closurePlainFAccessCode
 
         /// Indexed list of argument expressions split by type.  We will use the index
         /// as an offset (above the current target register) to determine the target
         /// register for compiling each expression.
         let indexedArgsFloat, indexedArgsInt =
-            args
+            [expr] @ args
             |> List.partition (fun arg -> isSubtypeOf arg.Env arg.Type TFloat)
             |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
 
@@ -844,7 +821,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 // Here we handle float types
                 if i < 8 then
                     acc.AddText(RV.FMV_S(FPReg.fa(uint i), FPReg.r(env.FPTarget + (uint i))),
-                        //$"Load float function call argument %d{i+1}")
                         $"Load float function call argument %d{i+1} from FP register '%s{FPReg.r(env.FPTarget + (uint i)).ToString()}' to target FP register 'fa%d{i}'") // Better debug comment
                 else
                     acc.AddText(RV.FSW_S(FPReg.r(env.FPTarget + (uint i)), Imm12(argOffset), Reg.sp),
@@ -866,7 +842,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// and 'argsCode' above.  To this end, this code folds over the indexes
         /// of all arguments (from 0 to args.Length), using 'copyArg' above.
         let argsLoadCode =
-            // Calculate the exact number of  arguments that overflow to stack (for stack allocation)
+            // Calculate the exact number of arguments that overflow to stack (for stack allocation)
             let stackAdjustment =
                 if (floatArgsOnStack + intArgsOnStack) > 0 then
                     Asm(RV.ADDI(Reg.sp, Reg.sp, Imm12(-4 * (floatArgsOnStack + intArgsOnStack))),
@@ -914,7 +890,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let (fieldNames, fieldInitNodes) = List.unzip fields
         /// Generate the code that initialises a struct field, and accumulates
         /// the result.  This function is folded over all indexed struct fields,
-        /// to produce the assembly code that initialises all fields.
+        /// to produce the assembly code that initialises all fields.\
         let folder = fun (acc: Asm) (fieldOffset: int, fieldInit: TypedAST) ->
             /// Code that initialises a single struct field.  Each field init
             /// result is compiled by targeting the register (target+1u),
@@ -1324,7 +1300,7 @@ and internal compileFunction (args: List<string * Type>)
                 let offset = (i - 8) * 4
                 acc.Add(var, Storage.Frame offset)
         | _ ->
-        // Handle all else since everything else is an int.
+        // Handle all else since everything else is an int.+
             if i < 8 then
                 acc.Add(var, Storage.Reg(Reg.a((uint)i)))
             else
@@ -1376,6 +1352,119 @@ and internal compileFunction (args: List<string * Type>)
             .AddText(RV.COMMENT("Restore callee-saved registers"))
             ++ (restoreRegisters saveRegs [])
                 .AddText(RV.JR(Reg.ra), "End of function, return to caller")
+
+and internal closureConversion (env: CodegenEnv) (funLabel: string)
+                (node: TypedAST) (name: Option<string>)
+                args (targs: Type list) (body: Node<TypingEnv, Type>) =
+    /// Names of the Lambda arguments
+    let argNames, _ = List.unzip args
+
+    /// List of pairs associating each Lambda argument to its type.  We
+    /// retrieve the type of each argument by looking into the environment
+    /// used to type-check the Lambda 'body'
+    let argNamesTypes = List.zip argNames targs
+
+    /// Save all variables captured by the lambda term - the closure environment is not captured
+    let cv = Set.toList (Set.difference (ASTUtil.capturedVars node) (Set.singleton "~clos"))
+
+    /// Outer closure environment fields
+    /// ~clos is safely assumed to be the outer closure environment
+    let outerClosureFields =
+        match node.Env.Vars.TryFind "~clos" with
+        | Some closureType ->
+                match closureType with
+                | TStruct fields -> fields
+                | tpe -> failwith $"Bug: Unknown non-structured closure: {tpe}"
+        | None -> []
+
+    /// Fields of the outer closure environment
+    /// Placement in new closure env: before any captured variables at current level
+    let outerClosureEnvV =
+        List.map fst outerClosureFields |>
+        List.except ["~f"]
+
+    /// Define the closure environment type T_clos as a struct with a function pointer f and
+    /// a named field for each of the captured variables in the closure + the outer closure env fields
+    let closureEnvType = TStruct([("~f", node.Type)] @ (
+        (outerClosureEnvV @ cv) |>
+        List.map (fun k -> (k, body.Env.Vars[k]))))
+
+    /// Mapper function for pairing environment fields from the surrounding (outer) closure with their values/types
+    let outerClosureEnvMapping (name: string) =
+        /// ~clos is safely assumed to be the outer closure environment
+        let closureType = node.Env.Vars["~clos"]
+        let capturedVarType =
+            match closureType with
+            | TStruct fields ->
+                match List.tryFind (fun (v, _) -> v = name) fields with
+                | Some(_, tpe) -> tpe
+                | None -> failwith $"unknown variable {name}"
+            | tpe -> failwith $"unknown closure not-a-struct {tpe}"
+        let closureFieldSelect = FieldSelect({node with Expr = Var("~clos"); Type = closureType}, name)
+        (name, {node with Expr = closureFieldSelect; Type = capturedVarType})
+
+    /// Mapper function for pairing the captured variable name with its value and type from environment
+    let capturedEnvMapping (name: string) =
+        (name, {node with Expr = Var(name); Type = body.Env.Vars[name]})
+
+    /// Construct the list of closure environment fields covering captured variables
+    let closureEnvNamedFields =
+        (outerClosureEnvV |> List.map outerClosureEnvMapping) @
+        (cv |> List.map capturedEnvMapping)
+
+    let closureEnvVar = "~clos"
+
+    let closureArgNamesTypes =
+       (closureEnvVar, closureEnvType) :: argNamesTypes
+
+    /// Compute "plain" function by applying closure-conversion through the argument environment fields (folding)
+    let nonCaptureFolder (fbody: TypedAST) (capturedVar: string) =
+        let fieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureEnvType}, capturedVar)
+        ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
+    /// Compute the plain function body by folding over the captured variables (add the closure environment var)
+    let plainBody = List.fold nonCaptureFolder {body with Env.Vars = Map.add closureEnvVar closureEnvType body.Env.Vars } cv
+
+    let plainType = TFun(closureEnvType::List.map snd argNamesTypes, node.Type)
+
+    /// Compiled code for the plain function or lambda body, potentially recursive
+    let plainBodyCode =
+        match node.Expr, name with
+        | LetRec _, Some(name) ->
+            let recEnv = { env with VarStorage = env.VarStorage.Add(name, Storage.Reg(Reg.a0)) }
+            let replacer = {node with Expr = FieldSelect({node with Expr = Var(name); Type = closureEnvType}, "~f"); Type = plainType }
+            let recPlainBody = ASTUtil.subst plainBody name replacer
+            compileFunction closureArgNamesTypes recPlainBody recEnv
+        | _ -> compileFunction closureArgNamesTypes plainBody env
+
+    /// Compiled function code where the function label is located just
+    /// before the 'bodyCode', and everything is placed at the end of the
+    /// text segment (i.e. in the "PostText")
+    let plainFunctionCode =
+        (Asm(RV.LABEL(funLabel), "Plain lambda term (fun instance) or named function code")
+            ++ plainBodyCode).TextToPostText // Move to the end of text segment
+
+
+    // Finally, load the plain function address (label) in the target register as storage for v'
+    let storeFunctionCode = Asm(RV.LA(Reg.r(env.Target), funLabel),
+                                $"Load plain {funLabel} function address")
+    let env' = {env with VarStorage = env.VarStorage.Add("~v'", Storage.Reg(Reg.r(env.Target)))
+                         Target = env.Target + 1u }
+
+    let clos = { node with
+                    Expr = StructCons([("~f", {node with Expr = Var("~v'")
+                                                         Type = plainType})]
+                                      @ closureEnvNamedFields)
+                    Type = closureEnvType }
+
+    /// Compile `clos` into env.Target
+    let closCode = doCodegen env' clos
+
+    /// Move closure result pointer into the current env.Target to be returned from compilation
+    let moveClosResult = Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                             "Move closure result to target register")
+
+    storeFunctionCode ++ closCode ++ moveClosResult ++ plainFunctionCode
+
 and internal errorSegFaultNode (index: Node<TypingEnv, Type>) (node: Node<TypingEnv, Type>) =
     let error = { node with
                     Expr = Seq([
