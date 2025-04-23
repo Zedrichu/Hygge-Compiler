@@ -1146,6 +1146,54 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
     | Pointer(_) ->
         failwith "BUG: pointers cannot be compiled (by design!)"
 
+    | UnionCons(label, expr) ->
+            // Allocate space for the union instance (label ID + value = 2 words = 8 bytes)
+            // kind of like in struct, but with only one field
+            let unionAllocCode =
+                (beforeSysCall [Reg.a0] []) 
+                    .AddText([
+                        (RV.LI(Reg.a0, 8), // Amount of memory for label ID (int) + value (word)
+                            "Amount of memory to allocate for a union instance (8 bytes)")
+                        (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk") // Syscall to allocate heap in RARS
+                        (RV.ECALL, "") 
+                        (RV.MV(Reg.r(env.Target), Reg.a0), 
+                            "Move syscall result (Union mem address) to target")
+                    ])
+                    ++ (afterSysCall [Reg.a0] [])
+
+            // Instead of saving the string, we use genSymbolId to generate a unique int from a string
+            let labelId = Util.genSymbolId label
+            let labelIdCode =
+                Asm().AddText([
+                        (RV.LI(Reg.r(env.Target + 1u), labelId), $"Load integer ID for label '%s{label}'") 
+                        (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)), 
+                            $"Store label ID for '%s{label}' at base address")
+                    ])
+
+
+            // Finally save the expr at an offset of 4
+            let exprCompileAndStoreCode =
+                match expr.Type with
+                | t when (isSubtypeOf expr.Env t TFloat) ->
+                    let exprCode = doCodegen { env with Target = env.Target + 1u } expr 
+
+                    // Store the float value from env.FPTarget at offset 4
+                    let storeCode = Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(4), Reg.r(env.Target)),
+                                        "Store float value of union expr at offset 4")
+                    exprCode ++ storeCode
+                | t when (isSubtypeOf expr.Env t TUnit) ->
+                    Asm() // Unit value - nothing to store yay
+                | _ -> // Default case for everything that's not a float
+                    let exprCode = doCodegen { env with Target = env.Target + 1u } expr
+                    let storeCode = Asm(RV.SW(Reg.r(env.Target + 1u), Imm12(4), Reg.r(env.Target)),
+                                        "Store value of union expr at offset 4")
+                    exprCode ++ storeCode // Compile then store
+
+            unionAllocCode ++ labelIdCode ++ exprCompileAndStoreCode
+
+      
+
+
 /// Generate code to save the given registers on the stack, before a RARS system
 /// call. Register a7 (which holds the system call number) is backed-up by
 /// default, so it does not need to be specified when calling this function.
