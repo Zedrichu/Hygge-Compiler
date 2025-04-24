@@ -40,6 +40,8 @@ type internal CodegenEnv = {
     FPTarget: uint
     /// Storage information about known variables.
     VarStorage: Map<string, Storage>
+    /// Binary flag indicating if active environment is at program top-level.
+    TopLevel: bool
 }
 
 
@@ -544,7 +546,31 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// 'let...' initialisation code, which leaves its result in the
         /// 'target' register (which we overwrite at the end of the 'scope'
         /// execution)
-        let initCode = doCodegen env init
+        let initCode = doCodegen {env with TopLevel = false} init
+
+        let topLevelLabelCode (regOffset: uint) (tpe: Type) =
+            let label = Util.genSymbol $"label_var_{name}"
+            match env.TopLevel, tpe with
+            | true, TFloat ->
+                Asm()
+                    .AddText([
+                        RV.LA(Reg.r(env.Target + regOffset), label),
+                        "Load top-level variable label address"
+                        RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0), Reg.r(env.Target + regOffset)),
+                        "Save top-level variable value to data segment"
+                    ])
+                    .AddData(label, Alloc.Word(1))
+            | true, _ ->
+                Asm()
+                    .AddText([
+                        RV.LA(Reg.r(env.Target + regOffset), label),
+                        "Load top-level variable label address"
+                        RV.SW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target + regOffset)),
+                        "Save top-level variable value to data segment"
+                    ])
+                    .AddData(label, Alloc.Word(1))
+            | false, _ -> Asm()
+
         match init.Type with
         | t when (isSubtypeOf init.Env t TUnit) ->
             // The 'init' produces a unit value, i.e. nothing: we can keep using
@@ -560,7 +586,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             /// Environment for compiling the 'let' scope
             let scopeEnv = { env with FPTarget = scopeTarget
                                       VarStorage = scopeVarStorage }
-            initCode
+            initCode ++ (topLevelLabelCode 0u t)
                 ++ (doCodegen scopeEnv scope)
                     .AddText(RV.FMV_S(FPReg.r(env.FPTarget),
                                       FPReg.r(scopeTarget)),
@@ -574,7 +600,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             /// Environment for compiling the 'let' scope
             let scopeEnv = { env with Target = scopeTarget
                                       VarStorage = scopeVarStorage }
-            initCode
+            initCode ++ (topLevelLabelCode 1u init.Type)
                 ++ (doCodegen scopeEnv scope)
                     .AddText(RV.MV(Reg.r(env.Target), Reg.r(scopeTarget)),
                              "Move 'let' scope result to 'let' target register")
@@ -1321,7 +1347,7 @@ and internal compileFunction (args: List<string * Type>)
     /// ends, we need to move that result into the function return value
     /// register 'a0' or 'fa0'.
     let bodyCode =
-        let env = {Target = 0u; FPTarget = 0u; VarStorage = varStorage2}
+        let env = {Target = 0u; FPTarget = 0u; VarStorage = varStorage2; TopLevel = false}
         doCodegen env body
 
     /// Code to move the body result into the function return value register
@@ -1549,7 +1575,7 @@ and internal checkIndexOutOfBounds env target (indexL, indexR) node: Asm =
 let codegen (node: TypedAST): RISCV.Asm =
     /// Initial codegen environment, targeting generic registers 0 and without
     /// any variable in the storage map
-    let env = {Target = 0u; FPTarget = 0u; VarStorage =  Map[]}
+    let env = {Target = 0u; FPTarget = 0u; VarStorage =  Map[]; TopLevel = true}
     Asm(RV.MV(Reg.fp, Reg.sp), "Initialize frame pointer")
     ++ (doCodegen env node)
         .AddText([
