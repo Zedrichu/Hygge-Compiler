@@ -65,6 +65,28 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
     | Less(lhs, rhs) ->
         {node with Expr = Less((substVar lhs var var2), (substVar rhs var var2))}
 
+    // New addition
+    | LessEq(lhs, rhs) ->
+        {node with Expr = LessEq((substVar lhs var var2), (substVar rhs var var2))}
+
+    | Greater(lhs, rhs) ->
+        {node with Expr = Greater((substVar lhs var var2), (substVar rhs var var2))}
+    
+    | GreaterEq(lhs, rhs) ->
+        {node with Expr = GreaterEq((substVar lhs var var2), (substVar rhs var var2))}
+
+    | Sqrt(arg) ->
+        {node with Expr = Sqrt(substVar arg var var2)}
+
+    | Min(lhs, rhs) -> 
+        {node with Expr = Min((substVar lhs var var2), (substVar rhs var var2))}
+    
+    | Max(lhs, rhs) -> 
+        {node with Expr = Max((substVar lhs var var2), (substVar rhs var var2))}
+
+    | Div(lhs, rhs) -> 
+         {node with Expr = Div((substVar lhs var var2), (substVar rhs var var2))}
+    //   
     | ReadInt
     | ReadFloat -> node // The substitution has no effect
 
@@ -107,11 +129,16 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
 
     | Assign(target, expr) ->
         {node with Expr = Assign((substVar target var var2), (substVar expr var var2))}
-
+    
     | While(cond, body) ->
         let substCond = substVar cond var var2
         let substBody = substVar body var var2
         {node with Expr = While(substCond, substBody)}
+
+    | DoWhile(body, cond) ->
+        let substCond = substVar cond var var2
+        let substBody = substVar body var var2
+        {node with Expr = DoWhile(substBody, substCond)}
 
     | Assertion(arg) ->
         {node with Expr = Assertion(substVar arg var var2)}
@@ -190,7 +217,13 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
     | And(lhs, rhs)
     | Or(lhs, rhs)
     | Eq(lhs, rhs)
-    | Less(lhs, rhs) as expr ->
+    | Less(lhs, rhs)
+    | LessEq(lhs, rhs)
+    | Greater(lhs, rhs)
+    | GreaterEq(lhs, rhs)
+    | Min(lhs, rhs)
+    | Max(lhs, rhs)
+    | Div(lhs, rhs) as expr ->
         /// Left-hand-side argument in ANF and related definitions
         let (lhsANF, lhsDefs) = toANFDefs lhs
         /// Right-hand-side argument in ANF and related definitions
@@ -203,6 +236,12 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
                       | Or(_,_) -> Or(lhsANF, rhsANF)
                       | Eq(_,_) -> Eq(lhsANF, rhsANF)
                       | Less(_,_) -> Less(lhsANF, rhsANF)
+                      | LessEq(_,_) -> LessEq(lhsANF, rhsANF)
+                      | Greater(_,_) -> Greater(lhsANF, rhsANF)
+                      | GreaterEq(_,_) -> GreaterEq(lhsANF, rhsANF)
+                      | Min(_,_) -> Min(lhsANF, rhsANF)
+                      | Max(_,_) -> Max(lhsANF, rhsANF)
+                      | Div(_,_) -> Div(lhsANF, rhsANF)
                       | e -> failwith $"BUG: unexpected expression: %O{e}"
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = anfExpr})
@@ -218,7 +257,8 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
     | Not(arg)
     | Print(arg)
     | PrintLn(arg)
-    | Assertion(arg) as expr ->
+    | Assertion(arg)
+    | Sqrt(arg) as expr ->
         /// Argument in ANF and related definitions
         let (argANF, argDefs) = toANFDefs arg
         /// This expression in ANF
@@ -227,6 +267,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
                       | Print(_) -> Print(argANF)
                       | PrintLn(_) -> PrintLn(argANF)
                       | Assertion(_)  -> Assertion(argANF)
+                      | Sqrt(_) -> Sqrt(argANF)
                       | e -> failwith $"BUG: unexpected expression: %O{e}"
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = anfExpr})
@@ -330,6 +371,16 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
         ({node with Expr = Var(anfDef.Var)}, [anfDef])
     
+    | DoWhile(body, cond) -> 
+        /// Body of the 'do while' loop in ANF
+        let bodyANF = toANF (toANFDefs body)
+        /// Condition expression in ANF and related definitions
+        let condANF = toANF (toANFDefs cond)
+        /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = DoWhile(bodyANF, condANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, [anfDef])
+
     | Type(name, def, scope) ->
         /// Scope expression in ANF
         let scopeANF = toANF (toANFDefs scope)
