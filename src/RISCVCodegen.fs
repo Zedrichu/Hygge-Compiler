@@ -20,7 +20,7 @@ let assertExitCode = 42 // Must be non-zero
 /// Storage information for variables.
 [<RequireQualifiedAccess; StructuralComparison; StructuralEquality>]
 type internal Storage =
-    /// The variable is stored in an integerregister.
+    /// The variable is stored in an integer register.
     | Reg of reg: Reg
     /// The variable is stored in a floating-point register.
     | FPReg of fpreg: FPReg
@@ -548,24 +548,27 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// execution)
         let initCode = doCodegen {env with TopLevel = false} init
 
-        let topLevelLabelCode (regOffset: uint) (tpe: Type) =
-            let label = Util.genSymbol $"label_var_{name}"
+        /// Label for potential top-level variables stored in the data segment.
+        let label = Util.genSymbol $"label_var_{name}"
+
+        /// Code to save top-level variables to a generated label of the data segment.
+        let topLevelLabelCode (tpe: Type) =
             match env.TopLevel, tpe with
             | true, TFloat ->
                 Asm()
                     .AddText([
-                        RV.LA(Reg.r(env.Target + regOffset), label),
+                        RV.LA(Reg.r(env.Target), label),
                         "Load top-level variable label address"
-                        RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0), Reg.r(env.Target + regOffset)),
+                        RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0), Reg.r(env.Target)),
                         "Save top-level variable value to data segment"
                     ])
                     .AddData(label, Alloc.Word(1))
             | true, _ ->
                 Asm()
                     .AddText([
-                        RV.LA(Reg.r(env.Target + regOffset), label),
+                        RV.LA(Reg.r(env.Target + 1u), label),
                         "Load top-level variable label address"
-                        RV.SW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target + regOffset)),
+                        RV.SW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target + 1u)),
                         "Save top-level variable value to data segment"
                     ])
                     .AddData(label, Alloc.Word(1))
@@ -582,11 +585,14 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let scopeTarget = env.FPTarget + 1u
             /// Variable storage for compiling the 'let' scope
             let scopeVarStorage =
-                env.VarStorage.Add(name, Storage.FPReg(FPReg.r(env.FPTarget)))
+                match env.TopLevel with
+                | true -> env.VarStorage.Add(name, Storage.Label(label))
+                | false -> env.VarStorage.Add(name, Storage.FPReg(FPReg.r(env.FPTarget)))
+
             /// Environment for compiling the 'let' scope
             let scopeEnv = { env with FPTarget = scopeTarget
                                       VarStorage = scopeVarStorage }
-            initCode ++ (topLevelLabelCode 0u t)
+            initCode ++ (topLevelLabelCode t)
                 ++ (doCodegen scopeEnv scope)
                     .AddText(RV.FMV_S(FPReg.r(env.FPTarget),
                                       FPReg.r(scopeTarget)),
@@ -596,11 +602,13 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let scopeTarget = env.Target + 1u
             /// Variable storage for compiling the 'let' scope
             let scopeVarStorage =
-                env.VarStorage.Add(name, Storage.Reg(Reg.r(env.Target)))
+                match env.TopLevel with
+                | true -> env.VarStorage.Add(name, Storage.Label(label))
+                | false -> env.VarStorage.Add(name, Storage.Reg(Reg.r(env.Target)))
             /// Environment for compiling the 'let' scope
             let scopeEnv = { env with Target = scopeTarget
                                       VarStorage = scopeVarStorage }
-            initCode ++ (topLevelLabelCode 1u init.Type)
+            initCode ++ (topLevelLabelCode init.Type)
                 ++ (doCodegen scopeEnv scope)
                     .AddText(RV.MV(Reg.r(env.Target), Reg.r(scopeTarget)),
                              "Move 'let' scope result to 'let' target register")
