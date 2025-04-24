@@ -36,6 +36,9 @@ type ParserOptions = {
 
     [<Option('v', "verbose", HelpText="Enable verbose output. (Same effect of using option '--log-level debug')")>]
     Verbose: bool;
+
+    [<Option('a', "anf", HelpText="Transform the AST into Administrative Normal Form (ANF) after parsing")>]
+    ANF: bool;
 }
 
 
@@ -67,6 +70,9 @@ type InterpreterOptions = {
 
     [<Option('v', "verbose", HelpText="Enable verbose output. (Same effect of using option '--log-level debug')")>]
     Verbose: bool;
+
+    [<Option('a', "anf", HelpText="Transform the AST into Administrative Normal Form (ANF) before interpreting")>]
+    ANF: bool;
 }
 
 
@@ -84,6 +90,12 @@ type CompilerOptions = {
 
     [<Option('v', "verbose", HelpText="Enable verbose output. (Same effect of using option '--log-level debug')")>]
     Verbose: bool;
+
+    [<Option('a', "anf", HelpText="Transform the AST into Administrative Normal Form (ANF) before compiling")>]
+    ANF: bool;
+
+    [<Option('r', "registers", HelpText="Number of registers to use for ANF-based code generation (min 3, max 18; default: 18)")>]
+    Registers: uint;
 }
 
 
@@ -98,6 +110,12 @@ type RARSLaunchOptions = {
 
     [<Option('v', "verbose", HelpText="Enable verbose output. (Same effect of using option '--log-level debug')")>]
     Verbose: bool;
+
+    [<Option('a', "anf", HelpText="Transform the AST into Administrative Normal Form (ANF) before compiling")>]
+    ANF: bool;
+
+    [<Option('r', "registers", HelpText="Number of registers to use for ANF-based code generation (min 3, max 18; default: 18)")>]
+    Registers: uint;
 }
 
 
