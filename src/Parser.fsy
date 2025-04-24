@@ -232,7 +232,7 @@ simpleExpr:
                                                                    ))
                                                                )) }
   // Syntactic sugaring defining `for-each` loops based on arrays
-  | FOR LPAR variable IN simpleExpr RPAR simpleExpr          {  let iteratorVar = mkNode(parseState, 1, Expr.Var("~ite"))
+  | FOR LPAR variable IN simpleExpr RPAR simpleExpr          {  let iteratorVar = mkNode(parseState, 1, Expr.Var("_ite"))
                                                                 let iterationCond = mkNode(parseState, 1, Expr.Less(
                                                                                         iteratorVar,
                                                                                         mkNode(parseState, 1, Expr.ArrayLength($5))
@@ -250,7 +250,7 @@ simpleExpr:
                                                                                     ))
 
                                                                 mkNode(parseState, 1, Expr.LetMut(
-                                                                    "~ite",
+                                                                    "_ite",
                                                                     mkNode(parseState, 1, Expr.IntVal(0)),
                                                                     mkNode(parseState, 1, Expr.If(
                                                                         iterationCond,
