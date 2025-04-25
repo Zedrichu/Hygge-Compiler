@@ -112,22 +112,14 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | Some(Storage.Reg(reg)) ->
                 Asm(RV.MV(Reg.r(env.Target), reg), $"Load variable '%s{name}'")
             | Some(Storage.Label(lab)) ->
-                match (expandType node.Env node.Type) with
-                    | TFun(_,_) ->
-                        Asm([
-                            (RV.LA(Reg.r(env.Target), lab),
-                            $"Load variable '%s{name} address' (lambda term as closure struct)")
-                            (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
-                            $"Load function label address '%s{name}'")
-                        ])
-                    | _ ->
-                        Asm([ (RV.LA(Reg.r(env.Target), lab),
-                               $"Load address of variable '%s{name}'")
-                              (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
-                               $"Load value of variable '%s{name}'") ])
-                | Some(Storage.Frame(offset)) ->
-                    Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-                    $"Load variable '%s{name}' from stack at offset %d{offset}, with fp at %d{Reg.fp.Number}")
+                // No distinction between TFun and other vars as function objs are closure environment structs
+                Asm([ (RV.LA(Reg.r(env.Target), lab),
+                       $"Load label address of variable '%s{name}'")
+                      (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+                       $"Load value of variable '%s{name}'") ])
+            | Some(Storage.Frame(offset)) ->
+                Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+                $"Load variable '%s{name}' from stack at offset %d{offset}, with fp at %d{Reg.fp.Number}")
             | Some(Storage.FPReg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
@@ -534,7 +526,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // 'scope' code leaves its result in the 'let...' target register
         let scopeCode = doCodegen {env with VarStorage = varStorage2
                                             Target = env.Target + 1u } scope
-
+        Log.error($"{name}")
         /// Perform closure conversion on the lambda term, for immutable variable closures
         let closureConversionCode = closureConversion env funLabel node (Some(name)) args targs body
 
@@ -1420,18 +1412,23 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
                 | TStruct fields -> fields
                 | tpe -> failwith $"Bug: Unknown non-structured closure: {tpe}"
         | None -> []
+    Log.error($"{node.Type} - {node.Env}")
+    Log.error($"{body.Type} - {body.Env}")
+    Log.error($"{outerClosureFields}")
 
     /// Fields of the outer closure environment
     /// Placement in new closure env: before any captured variables at current level
     let outerClosureEnvV =
         List.map fst outerClosureFields |>
-        List.except ["~f"]
+        List.except ["~f"] // |>
+        // List.filter (fun k -> not (List.contains k cv))
 
     /// Define the closure environment type T_clos as a struct with a function pointer f and
     /// a named field for each of the captured variables in the closure + the outer closure env fields
     let closureEnvType = TStruct([("~f", node.Type)] @ (
         (outerClosureEnvV @ cv) |>
         List.map (fun k -> (k, body.Env.Vars[k]))))
+    Log.error($"{closureEnvType}")
 
     /// Mapper function for pairing environment fields from the surrounding (outer) closure with their values/types
     let outerClosureEnvMapping (name: string) =

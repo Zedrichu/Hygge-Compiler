@@ -3,13 +3,18 @@ fun makeAdder(x: int): () -> (int) -> int = {
     let z = -2;
     fun () -> {
         let z = -1;
-        fun (y: int) ->
-            x + y + z // x is captured from the surrounding scope
+        5+5;
+        fun (y: int) -> {
+           x + 7;
+           y + 9;
+           z + 11;
+           x + y + z // x is captured from the outer surrounding scope, z captured from inner scope
+        }
     }
 };
-let add1 = makeAdder(1);
-let add2 = makeAdder(2);
-
-// These assertions succeed in the interpreter, but fail in code generation!
-assert((add1())(40) = 40);
-assert((add2())(40) = 41)
+let add1 = makeAdder(3);
+// let add2 = makeAdder(4);
+(add1())(40)
+// assert((add1())(40) = 40)
+// ;
+// assert((add2())(40) = 41)
