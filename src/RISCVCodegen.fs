@@ -1505,7 +1505,8 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
     /// Placement in new closure env: before any captured variables at current level
     let outerClosureEnvV =
         List.map fst outerClosureFields |>
-        List.except ["~f"]
+        List.except ["~f"] |>
+        List.filter (fun k -> not (List.contains k cv))
 
     /// Define the closure environment type T_clos as a struct with a function pointer f and
     /// a named field for each of the captured variables in the closure + the outer closure env fields
@@ -1546,7 +1547,7 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
         let fieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureEnvType}, capturedVar)
         ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
     /// Compute the plain function body by folding over the captured variables (add the closure environment var)
-    let plainBody = List.fold nonCaptureFolder {body with Env.Vars = Map.add closureEnvVar closureEnvType body.Env.Vars } cv
+    let plainBody = List.fold nonCaptureFolder (addVarNode body closureEnvVar closureEnvType) cv
 
     let plainType = TFun(closureEnvType::List.map snd argNamesTypes, node.Type)
 
