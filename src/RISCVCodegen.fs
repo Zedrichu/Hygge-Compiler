@@ -114,8 +114,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | Some(Storage.Label(lab)) ->
                 match (expandType node.Env node.Type) with
                     | TFun(_,_) ->
-                        Asm(RV.LA(Reg.r(env.Target), lab),
-                            $"Load variable '%s{name}' (lambda term)")
+                        Asm([
+                            (RV.LA(Reg.r(env.Target), lab),
+                            $"Load variable '%s{name} address' (lambda term as closure struct)")
+                            (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+                            $"Load function label address '%s{name}'")
+                        ])
                     | _ ->
                         Asm([ (RV.LA(Reg.r(env.Target), lab),
                                $"Load address of variable '%s{name}'")
@@ -1398,8 +1402,14 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
     /// used to type-check the Lambda 'body'
     let argNamesTypes = List.zip argNames targs
 
-    /// Save all variables captured by the lambda term - the closure environment is not captured
-    let cv = Set.toList (Set.difference (ASTUtil.capturedVars node) (Set.singleton "~clos"))
+    /// Save all variables captured by the lambda term, excluding the top-level variables stored at data labels.
+    let topLevelFilter = fun (v: string) ->
+        match env.VarStorage.TryFind v with
+        | Some(Storage.Label _) -> false
+        | _ -> true
+    let filteredCv = ASTUtil.capturedVars node |> Set.filter topLevelFilter
+    /// Remove the env struct - the closure environment is not captured
+    let cv = Set.toList (Set.difference filteredCv (Set.singleton "~clos"))
 
     /// Outer closure environment fields
     /// ~clos is safely assumed to be the outer closure environment

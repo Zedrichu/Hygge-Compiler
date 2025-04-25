@@ -1,0 +1,13 @@
+let z = 3;
+// Take x, return a function that adds x to its argument
+fun makeAdder(x: int): (int) -> int = {
+    let z = -2;
+    fun (y: int) ->
+        x + y + z // x is captured from the surrounding scope
+};
+let add1 = makeAdder(1);
+let add2 = makeAdder(2);
+
+// These assertions succeed in the interpreter, but fail in code generation!
+assert(add1(40) = 39);
+assert(add2(40) = 40)
