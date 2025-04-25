@@ -2,6 +2,7 @@
 fun makeAdder(x: int): () -> (int) -> int = {
     let z = 2;
     fun () -> {
+        z + 3;
         let z = -1;
         fun (y: int) -> {
             x + y + z // x is captured from the surrounding scope
