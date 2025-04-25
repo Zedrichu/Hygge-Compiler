@@ -42,6 +42,130 @@ type internal CodegenEnv = {
     VarStorage: Map<string, Storage>
 }
 
+/// Function to add a variable into the environment of the node recursively.
+let rec internal addVarNode (node: Node<TypingEnv, Type>) (var: string) (tpe: Type) =
+    match node.Expr with
+    | UnitVal
+    | BoolVal _
+    | IntVal _
+    | FloatVal _
+    | StringVal _
+    | ReadInt
+    | ReadFloat
+    | Var _ -> {node with Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Sqrt arg -> {node with Expr = Sqrt (addVarNode arg var tpe)
+                             Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Add(lhs, rhs) -> {node with Expr = Add (addVarNode lhs var tpe,
+                                              addVarNode rhs var tpe)
+                                  Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Sub(lhs, rhs) -> {node with Expr = Sub (addVarNode lhs var tpe,
+                                              addVarNode rhs var tpe)
+                                  Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Mult(lhs, rhs) -> {node with Expr = Mult (addVarNode lhs var tpe,
+                                                addVarNode rhs var tpe)
+                                   Env.Vars = node.Env.Vars.Add (var, tpe)}
+
+    | Div(lhs, rhs) -> {node with Expr = Div (addVarNode lhs var tpe,
+                                              addVarNode rhs var tpe)
+                                  Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Mod(lhs, rhs) -> {node with Expr = Mod (addVarNode lhs var tpe,
+                                              addVarNode rhs var tpe)
+                                  Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Min(lhs, rhs) -> {node with Expr = Min (addVarNode lhs var tpe,
+                                              addVarNode rhs var tpe)
+                                  Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Max(lhs, rhs) -> {node with Expr = Max (addVarNode lhs var tpe,
+                                              addVarNode rhs var tpe)
+                                  Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | And(lhs, rhs) -> {node with Expr = And (addVarNode lhs var tpe,
+                                              addVarNode rhs var tpe)
+                                  Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Or(lhs, rhs) -> {node with Expr = Or (addVarNode lhs var tpe,
+                                            addVarNode rhs var tpe)
+                                 Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Not arg -> {node with Expr = Not (addVarNode arg var tpe)
+                            Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Eq(lhs, rhs) -> {node with Expr = Eq (addVarNode lhs var tpe,
+                                            addVarNode rhs var tpe)
+                                 Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Less(lhs, rhs) -> {node with Expr = Less (addVarNode lhs var tpe,
+                                                addVarNode rhs var tpe)
+                                   Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Greater(lhs, rhs) -> {node with Expr = Greater (addVarNode lhs var tpe,
+                                                      addVarNode rhs var tpe)
+                                      Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | LessEq(lhs, rhs) -> {node with Expr = LessEq (addVarNode lhs var tpe,
+                                                    addVarNode rhs var tpe)
+                                     Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | GreaterEq(lhs, rhs) -> {node with Expr = GreaterEq (addVarNode lhs var tpe,
+                                                          addVarNode rhs var tpe)
+                                        Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Print arg -> {node with Expr = Print (addVarNode arg var tpe)
+                              Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | PrintLn arg -> {node with Expr = PrintLn (addVarNode arg var tpe)
+                                Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | If(condition, ifTrue, ifFalse) -> {node with Expr = If (addVarNode condition var tpe,
+                                                              addVarNode ifTrue var tpe,
+                                                              addVarNode ifFalse var tpe)
+                                                   Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Seq nodes -> let newNodes = List.map (fun n -> addVarNode n var tpe) nodes
+                   {node with Expr = Seq newNodes
+                              Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Type(name, def, scope) -> {node with Expr = Type(name, def, addVarNode scope var tpe)
+                                           Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Ascription(tpea, node) -> {node with Expr = Ascription(tpea, addVarNode node var tpe)
+                                           Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Assertion arg -> {node with Expr = Assertion (addVarNode arg var tpe)
+                                  Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Let(name, init, scope) -> {node with Expr = Let(name, addVarNode init var tpe,
+                                                            addVarNode scope var tpe)
+                                           Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | LetT(name, tpen, init, scope) -> {node with Expr = LetT(name, tpen, addVarNode init var tpe,
+                                                                          addVarNode scope var tpe)
+                                                  Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | LetRec(name, tpen, init, scope) -> {node with Expr = LetRec(name, tpen, addVarNode init var tpe,
+                                                                              addVarNode scope var tpe)
+                                                    Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | LetMut(name, init, scope) -> {node with Expr = LetMut(name, addVarNode init var tpe,
+                                                                  addVarNode scope var tpe)
+                                              Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Assign(target, expr) -> {node with Expr = Assign(addVarNode target var tpe,
+                                                       addVarNode expr var tpe)
+                                         Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | While(cond, body) -> {node with Expr = While(addVarNode cond var tpe,
+                                                   addVarNode body var tpe)
+                                      Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | DoWhile(body, cond) -> {node with Expr = DoWhile(addVarNode body var tpe,
+                                                       addVarNode cond var tpe)
+                                        Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Lambda(args, body) -> {node with Expr = Lambda(args, addVarNode body var tpe)
+                                       Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Application(expr, args) -> {node with Expr = Application(addVarNode expr var tpe,
+                                                    List.map (fun arg -> addVarNode arg var tpe) args)
+                                            Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | StructCons fields -> {node with Expr = StructCons (List.map (fun (name, expr) -> name, addVarNode expr var tpe) fields)
+                                      Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | FieldSelect(target, field) -> {node with Expr = FieldSelect(addVarNode target var tpe, field)
+                                               Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Pointer addr -> {node with Expr = Pointer addr
+                                 Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | ArrayCons(length, init) -> {node with Expr = ArrayCons(length, addVarNode init var tpe)
+                                            Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | ArrayLength target -> {node with Expr = ArrayLength(addVarNode target var tpe)
+                                       Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | ArrayElem(target, index) -> {node with Expr = ArrayElem(addVarNode target var tpe,
+                                                              addVarNode index var tpe)
+                                             Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | ArraySlice(target, startIdx, endIdx) -> {node with Expr = ArraySlice(addVarNode target var tpe,
+                                                                           addVarNode startIdx var tpe,
+                                                                           addVarNode endIdx var tpe)
+                                                         Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | UnionCons(label, expr) -> {node with Expr = UnionCons(label, addVarNode expr var tpe)
+                                           Env.Vars = node.Env.Vars.Add (var, tpe)}
+    | Match(expr, cases) -> {node with Expr = Match(addVarNode expr var tpe,
+                                                List.map (fun (label, name, body) ->
+                                                    label, name, addVarNode body var tpe) cases)
+                                       Env.Vars = node.Env.Vars.Add (var, tpe)}
 
 /// Code generation function: compile the expression in the given AST node so
 /// that it writes its results on the 'Target' and 'FPTarget' generic register
