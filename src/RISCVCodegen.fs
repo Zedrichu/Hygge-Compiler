@@ -20,7 +20,7 @@ let assertExitCode = 42 // Must be non-zero
 /// Storage information for variables.
 [<RequireQualifiedAccess; StructuralComparison; StructuralEquality>]
 type internal Storage =
-    /// The variable is stored in an integerregister.
+    /// The variable is stored in an integer register.
     | Reg of reg: Reg
     /// The variable is stored in a floating-point register.
     | FPReg of fpreg: FPReg
@@ -40,6 +40,8 @@ type internal CodegenEnv = {
     FPTarget: uint
     /// Storage information about known variables.
     VarStorage: Map<string, Storage>
+    /// Binary flag indicating if active environment is at program top-level.
+    TopLevel: bool
 }
 
 /// Function to add a variable into the environment of the node recursively.
@@ -234,18 +236,14 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | Some(Storage.Reg(reg)) ->
                 Asm(RV.MV(Reg.r(env.Target), reg), $"Load variable '%s{name}'")
             | Some(Storage.Label(lab)) ->
-                match (expandType node.Env node.Type) with
-                    | TFun(_,_) ->
-                        Asm(RV.LA(Reg.r(env.Target), lab),
-                            $"Load variable '%s{name}' (lambda term)")
-                    | _ ->
-                        Asm([ (RV.LA(Reg.r(env.Target), lab),
-                               $"Load address of variable '%s{name}'")
-                              (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
-                               $"Load value of variable '%s{name}'") ])
-                | Some(Storage.Frame(offset)) ->
-                    Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
-                    $"Load variable '%s{name}' from stack at offset %d{offset}, with fp at %d{Reg.fp.Number}")
+                // No distinction between TFun and other vars as function objs are closure environment structs
+                Asm([ (RV.LA(Reg.r(env.Target), lab),
+                       $"Load label address of variable '%s{name}'")
+                      (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+                       $"Load value of variable '%s{name}'") ])
+            | Some(Storage.Frame(offset)) ->
+                Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+                $"Load variable '%s{name}' from stack at offset %d{offset}, with fp at %d{Reg.fp.Number}")
             | Some(Storage.FPReg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
@@ -652,7 +650,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // 'scope' code leaves its result in the 'let...' target register
         let scopeCode = doCodegen {env with VarStorage = varStorage2
                                             Target = env.Target + 1u } scope
-
         /// Perform closure conversion on the lambda term, for immutable variable closures
         let closureConversionCode = closureConversion env funLabel node (Some(name)) args targs body
 
@@ -671,7 +668,34 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// 'let...' initialisation code, which leaves its result in the
         /// 'target' register (which we overwrite at the end of the 'scope'
         /// execution)
-        let initCode = doCodegen env init
+        let initCode = doCodegen {env with TopLevel = false} init
+
+        /// Label for potential top-level variables stored in the data segment.
+        let label = Util.genSymbol $"label_var_{name}"
+
+        /// Code to save top-level variables to a generated label of the data segment.
+        let topLevelLabelCode (tpe: Type) =
+            match env.TopLevel, tpe with
+            | true, TFloat ->
+                Asm()
+                    .AddText([
+                        RV.LA(Reg.r(env.Target), label),
+                        "Load top-level variable label address"
+                        RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0), Reg.r(env.Target)),
+                        "Save top-level variable value to data segment"
+                    ])
+                    .AddData(label, Alloc.Word(1))
+            | true, _ ->
+                Asm()
+                    .AddText([
+                        RV.LA(Reg.r(env.Target + 1u), label),
+                        "Load top-level variable label address"
+                        RV.SW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target + 1u)),
+                        "Save top-level variable value to data segment"
+                    ])
+                    .AddData(label, Alloc.Word(1))
+            | false, _ -> Asm()
+
         match init.Type with
         | t when (isSubtypeOf init.Env t TUnit) ->
             // The 'init' produces a unit value, i.e. nothing: we can keep using
@@ -683,11 +707,14 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let scopeTarget = env.FPTarget + 1u
             /// Variable storage for compiling the 'let' scope
             let scopeVarStorage =
-                env.VarStorage.Add(name, Storage.FPReg(FPReg.r(env.FPTarget)))
+                match env.TopLevel with
+                | true -> env.VarStorage.Add(name, Storage.Label(label))
+                | false -> env.VarStorage.Add(name, Storage.FPReg(FPReg.r(env.FPTarget)))
+
             /// Environment for compiling the 'let' scope
             let scopeEnv = { env with FPTarget = scopeTarget
                                       VarStorage = scopeVarStorage }
-            initCode
+            initCode ++ (topLevelLabelCode t)
                 ++ (doCodegen scopeEnv scope)
                     .AddText(RV.FMV_S(FPReg.r(env.FPTarget),
                                       FPReg.r(scopeTarget)),
@@ -697,11 +724,13 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let scopeTarget = env.Target + 1u
             /// Variable storage for compiling the 'let' scope
             let scopeVarStorage =
-                env.VarStorage.Add(name, Storage.Reg(Reg.r(env.Target)))
+                match env.TopLevel with
+                | true -> env.VarStorage.Add(name, Storage.Label(label))
+                | false -> env.VarStorage.Add(name, Storage.Reg(Reg.r(env.Target)))
             /// Environment for compiling the 'let' scope
             let scopeEnv = { env with Target = scopeTarget
                                       VarStorage = scopeVarStorage }
-            initCode
+            initCode ++ (topLevelLabelCode init.Type)
                 ++ (doCodegen scopeEnv scope)
                     .AddText(RV.MV(Reg.r(env.Target), Reg.r(scopeTarget)),
                              "Move 'let' scope result to 'let' target register")
@@ -1448,7 +1477,7 @@ and internal compileFunction (args: List<string * Type>)
     /// ends, we need to move that result into the function return value
     /// register 'a0' or 'fa0'.
     let bodyCode =
-        let env = {Target = 0u; FPTarget = 0u; VarStorage = varStorage2}
+        let env = {Target = 0u; FPTarget = 0u; VarStorage = varStorage2; TopLevel = false}
         doCodegen env body
 
     /// Code to move the body result into the function return value register
@@ -1485,8 +1514,14 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
                 args (targs: Type list) (body: Node<TypingEnv, Type>) =
     let closureEnvVar = "~clos"
     //-----------------------------------Step1: Closure environment type `T_clos`----------------------------------
-    /// Save all variables captured by the lambda term - the closure environment is not captured
-    let cv = Set.toList (Set.difference (ASTUtil.capturedVars node) (Set.singleton closureEnvVar))
+    /// Save all variables captured by the lambda term, excluding the top-level variables stored at data labels.
+    let topLevelFilter = fun (v: string) ->
+        match env.VarStorage.TryFind v with
+        | Some(Storage.Label _) -> false
+        | _ -> true
+    let filteredCv = ASTUtil.capturedVars node |> Set.filter topLevelFilter
+    /// Remove the env struct - the closure environment is not captured
+    let cv = Set.toList (Set.difference filteredCv (Set.singleton closureEnvVar))
     let cvFields = cv |> List.map (fun v -> (v, body.Env.Vars[v]))
 
     /// Outer closure environment fields - ~clos is safely assumed to be the outer closure environment
@@ -1658,7 +1693,7 @@ and internal checkIndexOutOfBounds env target (indexL, indexR) node: Asm =
 let codegen (node: TypedAST): RISCV.Asm =
     /// Initial codegen environment, targeting generic registers 0 and without
     /// any variable in the storage map
-    let env = {Target = 0u; FPTarget = 0u; VarStorage =  Map[]}
+    let env = {Target = 0u; FPTarget = 0u; VarStorage =  Map[]; TopLevel = true}
     Asm(RV.MV(Reg.fp, Reg.sp), "Initialize frame pointer")
     ++ (doCodegen env node)
         .AddText([
