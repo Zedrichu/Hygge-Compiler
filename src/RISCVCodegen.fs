@@ -650,7 +650,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // 'scope' code leaves its result in the 'let...' target register
         let scopeCode = doCodegen {env with VarStorage = varStorage2
                                             Target = env.Target + 1u } scope
-        Log.error($"{name}")
         /// Perform closure conversion on the lambda term, for immutable variable closures
         let closureConversionCode = closureConversion env funLabel node (Some(name)) args targs body
 
