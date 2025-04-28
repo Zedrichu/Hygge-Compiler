@@ -1483,70 +1483,34 @@ and internal compileFunction (args: List<string * Type>)
 and internal closureConversion (env: CodegenEnv) (funLabel: string)
                 (node: TypedAST) (name: Option<string>)
                 args (targs: Type list) (body: Node<TypingEnv, Type>) =
-    /// Names of the Lambda arguments
-    let argNames, _ = List.unzip args
-
-    /// List of pairs associating each Lambda argument to its type.  We
-    /// retrieve the type of each argument by looking into the environment
-    /// used to type-check the Lambda 'body'
-    let argNamesTypes = List.zip argNames targs
-
     let closureEnvVar = "~clos"
-
+    //-----------------------------------Step1: Closure environment type `T_clos`----------------------------------
     /// Save all variables captured by the lambda term - the closure environment is not captured
     let cv = Set.toList (Set.difference (ASTUtil.capturedVars node) (Set.singleton closureEnvVar))
+    let cvFields = cv |> List.map (fun v -> (v, body.Env.Vars[v]))
 
-    /// Outer closure environment fields
-    /// ~clos is safely assumed to be the outer closure environment
+    /// Outer closure environment fields - ~clos is safely assumed to be the outer closure environment
+    /// Select fields of the outer closure environment - without shadowed captured fields and outer ~f
     let outerClosureFields =
-        match node.Env.Vars.TryFind closureEnvVar with
-        | Some closureType ->
-                match closureType with
-                | TStruct fields -> fields
-                | tpe -> failwith $"Bug: Unknown non-structured closure: {tpe}"
-        | None -> []
+        let outerFields =
+            match node.Env.Vars.TryFind closureEnvVar with
+            | Some closureType ->
+                    match closureType with
+                    | TStruct fields -> fields
+                    | tpe -> failwith $"Bug: Unknown non-structured closure: {tpe}"
+            | None -> []
+        List.filter (fun (v, _) -> not ((List.contains v cv) || v = "~f")) outerFields
 
-    /// Fields of the outer closure environment
-    /// Placement in new closure env: before any captured variables at current level
-    let outerClosureEnvV =
-        List.map fst outerClosureFields |>
-        List.except ["~f"] |>
-        List.filter (fun k -> not (List.contains k cv))
+    /// Define the closure environment type T_clos as a struct with a plain function pointer @f +
+    /// outer closure env fields + named fields for each captured variable in the current closure
+    let closureEnvType = TStruct([("~f", node.Type)] @ (outerClosureFields @ cvFields))
 
-    /// Define the closure environment type T_clos as a struct with a function pointer f and
-    /// a named field for each of the captured variables in the closure + the outer closure env fields
-    let closureEnvType = TStruct([("~f", node.Type)] @ (
-        (outerClosureEnvV @ cv) |>
-        List.map (fun k -> (k, body.Env.Vars[k]))))
+    //--------------------------Step2: Plain (non-capturing) Function `v'` from Lambda Term-------------------------
+    let argNames, _ = List.unzip args // lambda argument names
+    let argNamesTypes = List.zip argNames targs // mapping from argument names to their type from TypingEnv
+    let closureArgNamesTypes = (closureEnvVar, closureEnvType) :: argNamesTypes
 
-    /// Mapper function for pairing environment fields from the surrounding (outer) closure with their values/types
-    let outerClosureEnvMapping (name: string) =
-        /// ~clos is safely assumed to be the outer closure environment
-        let closureType = node.Env.Vars[closureEnvVar]
-        let capturedVarType =
-            match closureType with
-            | TStruct fields ->
-                match List.tryFind (fun (v, _) -> v = name) fields with
-                | Some(_, tpe) -> tpe
-                | None -> failwith $"unknown variable {name}"
-            | tpe -> failwith $"unknown closure not-a-struct {tpe}"
-        let closureFieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureType}, name)
-        (name, {node with Expr = closureFieldSelect; Type = capturedVarType})
-
-    /// Mapper function for pairing the captured variable name with its value and type from environment
-    let capturedEnvMapping (name: string) =
-        (name, {node with Expr = Var(name); Type = body.Env.Vars[name]})
-
-    /// Construct the list of closure environment fields covering captured variables
-    let closureEnvNamedFields =
-        (outerClosureEnvV |> List.map outerClosureEnvMapping) @
-        (cv |> List.map capturedEnvMapping)
-
-
-    let closureArgNamesTypes =
-       (closureEnvVar, closureEnvType) :: argNamesTypes
-
-    /// Compute "plain" function by applying closure-conversion through the argument environment fields (folding)
+    /// Compute "plain" function by substituting captures with field selections on the environment argument (folding)
     let nonCaptureFolder (fbody: TypedAST) (capturedVar: string) =
         let fieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureEnvType}, capturedVar)
         ASTUtil.subst fbody capturedVar {node with Expr = fieldSelect; Type = body.Env.Vars[capturedVar]}
@@ -1579,6 +1543,22 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
     let env' = {env with VarStorage = env.VarStorage.Add("~v'", Storage.Reg(Reg.r(env.Target)))
                          Target = env.Target + 1u }
 
+    //----------------------------------Step3: Closure Environment Structure `clos`---------------------------------
+    /// Mapper function for pairing environment fields from the surrounding (outer) closure with their values/types
+    let outerClosureEnvMapping (name: string, fieldType: Type) =
+        /// ~clos is safely assumed to be the outer closure environment - its type can be retrieved
+        let closureType = node.Env.Vars[closureEnvVar]
+        let closureFieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureType}, name)
+        (name, {node with Expr = closureFieldSelect; Type = fieldType})
+
+    /// Mapper function for pairing the captured variable name with its value and environment type
+    let capturedEnvMapping (name: string, varType: Type) =
+        (name, {node with Expr = Var(name); Type = varType})
+
+    /// Construct the list of closure environment fields covering captured variables
+    let closureEnvNamedFields =
+        (outerClosureFields |> List.map outerClosureEnvMapping) @
+        (cvFields |> List.map capturedEnvMapping)
     let clos = { node with
                     Expr = StructCons([("~f", {node with Expr = Var("~v'")
                                                          Type = plainType})]
