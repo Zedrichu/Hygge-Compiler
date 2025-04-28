@@ -1,0 +1,2 @@
+let arr1 = array(0,0);
+let arr2 = slice(arr1, 2, 6); ()

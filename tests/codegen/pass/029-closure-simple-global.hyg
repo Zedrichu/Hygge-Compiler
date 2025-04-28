@@ -1,0 +1,3 @@
+let x = 2;
+fun add(y: int): int = x + y;
+assert(add(40) = 42)

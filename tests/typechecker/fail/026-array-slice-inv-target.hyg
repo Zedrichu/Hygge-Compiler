@@ -1,0 +1,3 @@
+let x = 42;
+let arr2: array {int} = slice(x, 2, 6);
+()

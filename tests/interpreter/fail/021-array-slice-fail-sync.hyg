@@ -1,0 +1,7 @@
+let arr1: array {int} = array(5 + 5, 3);
+let x = 1;
+let arr2: array {int} = slice(arr1, x+1, (x+1)*3);
+arrayElem(arr2, 0) <- arrayElem(arr1, 2) + 5;
+arrayElem(arr2, 2) <- 10 - 4;
+assert(arrayElem(arr1, 0) = 3);
+assert(arrayElem(arr1, 4) = 3)
