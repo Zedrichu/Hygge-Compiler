@@ -656,7 +656,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Perform closure conversion on the lambda term, for immutable variable closures
         let closureConversionCode = closureConversion env funLabel node (Some(name)) args targs body
 
-        closureConversionCode ++ scopeCode
+        /// Move the result of the `let...` scope back to the target register
+        let moveScopeResultCode = Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)))
+
+        closureConversionCode ++ scopeCode ++ moveScopeResultCode
 
     // Typechecking should ensure that a LetRec expression is always initialised with a lambda expression (see notes Module 6).
     | LetRec _ ->
