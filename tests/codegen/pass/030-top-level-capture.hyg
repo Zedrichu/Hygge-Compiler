@@ -6,5 +6,4 @@ fun addXPlusOne(y: int): int = {
     x + y1  // x is captured from the surrounding scope
 };
 
-// This is compiled incorrectly!
 assert(addXPlusOne(40) = 59)
