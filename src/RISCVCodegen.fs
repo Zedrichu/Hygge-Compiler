@@ -1491,13 +1491,15 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
     /// used to type-check the Lambda 'body'
     let argNamesTypes = List.zip argNames targs
 
+    let closureEnvVar = "~clos"
+
     /// Save all variables captured by the lambda term - the closure environment is not captured
-    let cv = Set.toList (Set.difference (ASTUtil.capturedVars node) (Set.singleton "~clos"))
+    let cv = Set.toList (Set.difference (ASTUtil.capturedVars node) (Set.singleton closureEnvVar))
 
     /// Outer closure environment fields
     /// ~clos is safely assumed to be the outer closure environment
     let outerClosureFields =
-        match node.Env.Vars.TryFind "~clos" with
+        match node.Env.Vars.TryFind closureEnvVar with
         | Some closureType ->
                 match closureType with
                 | TStruct fields -> fields
@@ -1520,7 +1522,7 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
     /// Mapper function for pairing environment fields from the surrounding (outer) closure with their values/types
     let outerClosureEnvMapping (name: string) =
         /// ~clos is safely assumed to be the outer closure environment
-        let closureType = node.Env.Vars["~clos"]
+        let closureType = node.Env.Vars[closureEnvVar]
         let capturedVarType =
             match closureType with
             | TStruct fields ->
@@ -1528,7 +1530,7 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
                 | Some(_, tpe) -> tpe
                 | None -> failwith $"unknown variable {name}"
             | tpe -> failwith $"unknown closure not-a-struct {tpe}"
-        let closureFieldSelect = FieldSelect({node with Expr = Var("~clos"); Type = closureType}, name)
+        let closureFieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureType}, name)
         (name, {node with Expr = closureFieldSelect; Type = capturedVarType})
 
     /// Mapper function for pairing the captured variable name with its value and type from environment
@@ -1540,7 +1542,6 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
         (outerClosureEnvV |> List.map outerClosureEnvMapping) @
         (cv |> List.map capturedEnvMapping)
 
-    let closureEnvVar = "~clos"
 
     let closureArgNamesTypes =
        (closureEnvVar, closureEnvType) :: argNamesTypes
