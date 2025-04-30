@@ -86,6 +86,23 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
 
     | Div(lhs, rhs) -> 
          {node with Expr = Div((substVar lhs var var2), (substVar rhs var var2))}
+
+    | Mod(lhs, rhs) -> 
+         {node with Expr = Mod((substVar lhs var var2), (substVar rhs var var2))}
+    
+    | ArrayCons(length, init) ->
+         {node with Expr = ArrayCons((substVar length var var2), (substVar init var var2))}
+
+    | ArrayLength(target) ->
+         {node with Expr = ArrayLength((substVar target var var2))}
+
+    | ArrayElem(target, index) ->
+         {node with Expr = ArrayElem((substVar target var var2), (substVar index var var2))}
+
+    | ArraySlice(target, startIdx, endIdx) ->
+         {node with Expr = ArraySlice((substVar target var var2), 
+                                    (substVar startIdx var var2),
+                                    (substVar endIdx var var2))}
     //   
     | ReadInt
     | ReadFloat -> node // The substitution has no effect
@@ -223,7 +240,8 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
     | GreaterEq(lhs, rhs)
     | Min(lhs, rhs)
     | Max(lhs, rhs)
-    | Div(lhs, rhs) as expr ->
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs) as expr ->
         /// Left-hand-side argument in ANF and related definitions
         let (lhsANF, lhsDefs) = toANFDefs lhs
         /// Right-hand-side argument in ANF and related definitions
@@ -242,6 +260,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
                       | Min(_,_) -> Min(lhsANF, rhsANF)
                       | Max(_,_) -> Max(lhsANF, rhsANF)
                       | Div(_,_) -> Div(lhsANF, rhsANF)
+                      | Mod(_,_) -> Mod(lhsANF, rhsANF)
                       | e -> failwith $"BUG: unexpected expression: %O{e}"
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = anfExpr})
@@ -358,6 +377,17 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
             /// Definition binding this expression in ANF to its variable
             let anfDef = ANFDef(false, {node with Expr = anfAssign})
             ({node with Expr = Var(anfDef.Var)}, anfDef :: (ftargetExprDefs @ asgnExprDefs))
+        | ArrayElem(atarget, index) ->
+            /// We also require Assign to handle array elements.
+            /// Target array expression in ANF and related definitions
+            let (atargetANF, atargetDefs) = toANFDefs atarget
+            /// Index expression in ANF and related definitions
+            let (indexANF, indexDefs) = toANFDefs index
+            /// Assignment to array element in ANF form
+            let anfAssign = Assign({target with Expr = ArrayElem(atargetANF, indexANF)}, asgnExprANF)
+             /// Definition binding this expression in ANF to its variable
+            let anfDef = ANFDef(false, {node with Expr = anfAssign})
+            ({node with Expr = Var(anfDef.Var)}, anfDef :: (indexDefs @ atargetDefs @ asgnExprDefs))
         | _ ->
             failwith $"BUG: invalid assignment target: %O{target}"
 
@@ -449,6 +479,46 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
         ({node with Expr = Var(anfDef.Var)}, anfDef :: initDefs)
 
+    | ArrayCons(length, init) ->
+        /// Length expression in ANF and related definitions
+        let (lengthANF, lengthDefs) = toANFDefs length
+        /// Init expression in ANF and related definitions
+        let (initANF, initDefs) = toANFDefs init
+        /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = ArrayCons(lengthANF, initANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: (initDefs @ lengthDefs))
+
+    | ArrayElem(target, index) ->
+        /// Target expression in ANF and related definitions
+        let (targetANF, targetDefs) = toANFDefs target
+        /// Index expression in ANF and related definitions
+        /// We need to evaluate the index like an expression because it may be something complex and not simply an int
+        let (indexANF, indexDefs) = toANFDefs index
+        /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = ArrayElem(targetANF, indexANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: (indexDefs @ targetDefs))
+
+    | ArrayLength(target) ->
+        /// Target expression in ANF and related definitions
+        let (targetANF, targetDefs) = toANFDefs target
+        /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = ArrayLength(targetANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: targetDefs)
+
+    | ArraySlice(target, startIdx, endIdx) ->
+        /// Target expression in ANF and related definitions
+        let (targetANF, targetDefs) = toANFDefs target
+        /// startIdx expression in ANF and related definitions
+        let (startIdxANF, startIdxDefs) = toANFDefs startIdx
+        /// endIdx expression in ANF and related definitions
+        let (endIdxANF, endIdxDefs) = toANFDefs endIdx
+        /// Definition binding this expression in ANF to its variables
+        let anfDef = ANFDef(false, {node with Expr = ArraySlice(targetANF, startIdxANF, endIdxANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: (startIdxDefs @ endIdxDefs @ targetDefs))
     | Match(matchExpr, cases) ->
         /// Matched expression in ANF and related definitions
         let (matchExprANF, matchExprDefs) = toANFDefs matchExpr
