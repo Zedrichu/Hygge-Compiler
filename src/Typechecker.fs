@@ -205,9 +205,11 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
         if args1.Length <> args2.Length then false
         else
             // Check that the return type is a subtype of the other return type
+            // (the “smaller” function is more restrictive in the type of value it returns)
             let retSubtype = isSubtypeOf env ret1 ret2
-            // Check that the argument types are subtypes of the other argument types
-            let argsSubtype = List.forall2 (isSubtypeOf env) args1 args2
+            // All arguments of a supertype function must be subtypes of the subtype function
+            // (the “smaller” function is more permissive in the types of arguments it accepts)
+            let argsSubtype = List.forall2 (isSubtypeOf env) args2 args1
             retSubtype && argsSubtype
     | (_, _) -> false
 
