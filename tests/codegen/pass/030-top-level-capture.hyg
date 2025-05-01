@@ -1,0 +1,9 @@
+let x = 18; // This example can be adapted with x mutable
+
+// Take an argument y, return x + y + 1 (using x above)
+fun addXPlusOne(y: int): int = {
+    let y1 = y + 1;
+    x + y1  // x is captured from the surrounding scope
+};
+
+assert(addXPlusOne(40) = 59)
