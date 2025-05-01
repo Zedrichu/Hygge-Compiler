@@ -668,19 +668,32 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
     | ArrayElem _ -> None
     
     
-    //Shallow copy of struct
     | Copy(arg) ->
         match (reduce env arg) with
         | Some(env', arg') -> Some(env', { node with Expr = Copy(arg') })
         | None ->
             match arg.Expr with
-            | Pointer (addr) ->
+            | Pointer(addr) ->
                 match env.PtrInfo.TryFind addr with
-                 | Some (fields) ->
-                     let fieldValues = fields |> List.mapi (fun i field -> (field, env.Heap[addr + (uint i)]))
-                     let shallowCopy = StructCons(fieldValues)
-                     Some(env, {node with Expr = shallowCopy})
-                 | None -> None
+                | Some(fields) ->
+                    // Deep copy struct by recursively copying field values
+                    let fieldValues = fields |> List.mapi (fun i field ->
+                        let fieldValue = env.Heap[addr + uint i]
+                        // If a field is a pointer, recursively copy it
+                        match fieldValue.Expr with
+                        | Pointer(_) ->
+                            // Create a Copy expression for this field
+                            let copyField = {node with Expr = Copy(fieldValue)}
+                            // Recursively evaluate the Copy for this field
+                            match reduce env copyField with
+                            | Some(_, copyResult) -> (field, copyResult)
+                            | None -> failwith $"Failed to copy nested pointer at field: {field}"
+                        | _ ->
+                            (field, fieldValue)) // Non-pointer fields are copied as-is
+
+                    let deepCopy = StructCons(fieldValues)
+                    Some(env, {node with Expr = deepCopy})
+                | None -> None
             | _ -> None
    
              
