@@ -1,0 +1,25 @@
+fun ft(a1:int, a2:int, a3:int, a4:int,
+      a5:int, a6:int, a7:int, a8:int): int = {a1 + a8};
+let a = 3 + 2;
+let b = 4 + 5;
+let c = 6 + 7;
+let d = 8 + 9;
+let e = 0;
+let f = 1;
+let g = 2;
+let h = 3;
+let hh = 0;
+let gg = 0;
+let ii = 0;
+let jj = 0;
+let kk = 0;
+let ll = 0;
+let mm = 0;
+let nn = 0;
+let oo = 0;
+let x = 0;
+let y = 1;
+let result0: int = ft(a, b, c, d, e, f, g, h);
+let z = 2;
+let w = 3;
+3

@@ -1,0 +1,4 @@
+let n = 6;
+let arr: array {int} = array(n, 40 + 2);
+assert(arrayLength(arr) = 6);
+assert(arrayElem(arr, 10) = 42) // Error: array index out of bounds

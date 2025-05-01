@@ -1,0 +1,5 @@
+﻿let mutable x = 0;
+let y: int = do {
+   x <- x +1
+} while (x < 5);
+()
