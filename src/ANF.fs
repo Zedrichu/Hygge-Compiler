@@ -550,7 +550,7 @@ let verifyANF (node: Node<'E,'T>) =
         | Let(var, init, body)
         | LetMut(var, init, body) ->
             // ANF property check
-            let isSimpleInit = 
+            let check = 
                 match init.Expr with
                 | Var(_) | IntVal(_) | BoolVal(_) | FloatVal(_) | StringVal(_) | UnitVal -> true
                 | Add(a, b) 
@@ -576,7 +576,9 @@ let verifyANF (node: Node<'E,'T>) =
                 | Assertion(a) 
                 | Sqrt(a) 
                 | ArrayLength(a) ->
-                    match a.Expr with Var(_) -> true | _ -> false
+                    match a.Expr with 
+                    | Var(_) -> true 
+                    | _ -> false
                 | ArrayCons(length, init) ->
                     match length.Expr, init.Expr with
                     | Var(_), Var(_) -> true 
@@ -595,10 +597,13 @@ let verifyANF (node: Node<'E,'T>) =
                     | _ -> false
                 | Application(f, args) ->
                     match f.Expr with
-                    | Var(_) -> List.forall (fun (arg: Node<'E,'T>) -> match arg.Expr with Var(_) -> true | _ -> false) args
+                    | Var(_) -> List.forall (fun (arg: Node<'E,'T>) -> 
+                        match arg.Expr with Var(_) -> true | _ -> false) args
                     | _ -> false
                 | UnionCons(_, a) ->
-                    match a.Expr with Var(_) -> true | _ -> false
+                    match a.Expr with 
+                    Var(_) -> true 
+                    | _ -> false
                 | If(condition, ifTrue, ifFalse) ->
                     match condition.Expr with
                     | Var(_) -> 
@@ -644,7 +649,7 @@ let verifyANF (node: Node<'E,'T>) =
                     | _ -> false
                 | _ -> false
             
-            if not isSimpleInit then
+            if not check then
                 isValid <- false
                 // If we get false we append our failures list to read out later.
                 violations <- $"Variable {var} bound to complex expression" :: violations
