@@ -539,7 +539,136 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
         ({node with Expr = Var(anfDef.Var)}, anfDef :: matchExprDefs)
 
+/// Helper function to verify the generated ANF from AST is valid:
+/// 
+let verifyANF (node: Node<'E,'T>) =
+    let mutable isValid = true
+    let mutable violations = []
+
+    let rec visit (node: Node<'E,'T>) =
+        match node.Expr with
+        | Let(var, init, body)
+        | LetMut(var, init, body) ->
+            // ANF property check
+            let isSimpleInit = 
+                match init.Expr with
+                | Var(_) | IntVal(_) | BoolVal(_) | FloatVal(_) | StringVal(_) | UnitVal -> true
+                | Add(a, b) 
+                | Mult(a, b) 
+                | And(a, b) 
+                | Or(a, b) 
+                | Eq(a, b)
+                | Less(a, b) 
+                | LessEq(a, b) 
+                | Greater(a, b) 
+                | GreaterEq(a, b)
+                | Min(a, b) 
+                | Max(a, b) 
+                | Div(a, b) 
+                | Mod(a, b) 
+                | Eq(a, b) ->
+                    match a.Expr, b.Expr with
+                    | Var(_), Var(_) -> true
+                    | _ -> false
+                | Not(a) 
+                | Print(a) 
+                | PrintLn(a) 
+                | Assertion(a) 
+                | Sqrt(a) 
+                | ArrayLength(a) ->
+                    match a.Expr with Var(_) -> true | _ -> false
+                | ArrayCons(length, init) ->
+                    match length.Expr, init.Expr with
+                    | Var(_), Var(_) -> true 
+                    | _ -> false
+                | ArrayElem(a, idx) ->
+                    match a.Expr, idx.Expr with 
+                    | Var(_), Var(_) -> true 
+                    | _ -> false
+                | ArraySlice(a, s, e) ->
+                    match a.Expr, s.Expr, e.Expr with
+                    | Var(_), Var(_), Var(_) -> true
+                    | _ -> false
+                | FieldSelect(a, fieldName) ->
+                    match a.Expr with 
+                    | Var(_) -> true 
+                    | _ -> false
+                | Application(f, args) ->
+                    match f.Expr with
+                    | Var(_) -> List.forall (fun (arg: Node<'E,'T>) -> match arg.Expr with Var(_) -> true | _ -> false) args
+                    | _ -> false
+                | UnionCons(_, a) ->
+                    match a.Expr with Var(_) -> true | _ -> false
+                | If(condition, ifTrue, ifFalse) ->
+                    match condition.Expr with
+                    | Var(_) -> 
+                        // We also need to check the other branches for ANF expressions
+                        visit ifTrue
+                        visit ifFalse
+                        true
+                    | _ -> false
+                | While(condition, body) ->
+                    // Check that condition is in ANF
+                    visit condition  
+                    // Check that body is in ANF
+                    visit body
+                    true // Not sure if this is correct but we are concerned about checking the cond/body so we jump into those instead
+                | DoWhile(body, condition) ->
+                    // Check that body is in ANF
+                    visit body
+                    // Check that condition is in ANF
+                    visit condition
+                    true
+                | Assign(target, expr) ->
+                    match target.Expr, expr.Expr with
+                    | Var(_), Var(_) -> true  // Simple variable assignment
+                    | ArrayElem(a, idx), Var(_) ->
+                        // Array element assignment
+                        match a.Expr, idx.Expr with
+                        | Var(_), Var(_) -> true
+                        | _ -> false
+                    | FieldSelect(a, _), Var(_) ->
+                        // Field selection assignment
+                        match a.Expr with
+                        | Var(_) -> true
+                        | _ -> false
+                    | _ -> false
+                | Match(expr, cases) ->
+                    // First check that matched expression is a variable
+                    match expr.Expr with
+                    | Var(_) -> 
+                        // Then check that all branch continuations are in ANF ingnore the strings.
+                        let (_, _, continuations) = List.unzip3 cases
+                        List.iter visit continuations
+                        true
+                    | _ -> false
+                | _ -> false
+            
+            if not isSimpleInit then
+                isValid <- false
+                // If we get false we append our failures list to read out later.
+                violations <- $"Variable {var} bound to complex expression" :: violations
+            
+            visit body
+            
+        | _ -> 
+            match node.Expr with
+            | Var(_) -> () // If the final result is a variable
+            | _ -> 
+                isValid <- false
+                violations <- $"Final expression is not a variable" :: violations
+    
+    visit node
+    
+    if isValid then
+        printfn "ANF verification complete: Valid ANF"
+    else
+        printfn "ANF verification failed with %d violations:" violations.Length
+        List.iter (printfn "- %s") violations
+    
 
 /// Transform the given AST node into Administrative Normal Form.
 let transform (ast: Node<'E,'T>): Node<'E,'T> =
     toANF (toANFDefs ast)
+
+

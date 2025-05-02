@@ -36,6 +36,8 @@ let internal parse (opt: CmdLine.ParserOptions): int =
             Log.debug $"Parsed AST:%s{Util.nl}%s{PrettyPrinter.prettyPrint ast}"
             Log.debug $"Transforming AST into ANF"
             let anf = ANF.transform ast
+            // Function to verify ANF
+            ANF.verifyANF anf
             printf $"%s{PrettyPrinter.prettyPrint anf}"
         else
             printf $"%s{PrettyPrinter.prettyPrint ast}"
@@ -93,6 +95,8 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
                 Log.debug $"Parsed AST:%s{Util.nl}%s{PrettyPrinter.prettyPrint ast}"
                 Log.debug $"Transforming AST into ANF"
                 let anf = ANF.transform ast
+                // Function to verify ANF
+                ANF.verifyANF anf
                 doInterpret anf (opt.LogLevel = Log.LogLevel.debug || opt.Verbose)
             else
                 doInterpret ast (opt.LogLevel = Log.LogLevel.debug || opt.Verbose)
