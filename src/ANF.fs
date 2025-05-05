@@ -540,7 +540,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
         ({node with Expr = Var(anfDef.Var)}, anfDef :: matchExprDefs)
 
 /// Helper function to verify the generated ANF from AST is valid:
-/// 
+/// This function does NOT cover all possible ANF translations but verifies at the least all added functionality.
 let verifyANF (node: Node<'E,'T>) =
     let mutable isValid = true
     let mutable violations = []
@@ -612,6 +612,8 @@ let verifyANF (node: Node<'E,'T>) =
                         visit ifFalse
                         true
                     | _ -> false
+                
+                // For the While loops we recursively visit the body and condition to ensure all expressions within it follow ANF rules.
                 | While(condition, body) ->
                     // Check that condition is in ANF
                     visit condition  
@@ -624,6 +626,7 @@ let verifyANF (node: Node<'E,'T>) =
                     // Check that condition is in ANF
                     visit condition
                     true
+
                 | Assign(target, expr) ->
                     match target.Expr, expr.Expr with
                     | Var(_), Var(_) -> true  // Simple variable assignment
