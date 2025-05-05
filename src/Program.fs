@@ -88,6 +88,7 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
         Log.error $"%s{msg}"; 1 // Non-zero exit code
     | Ok(ast) ->
         Log.info "Lexing and parsing succeeded."
+        let ast = ASTUtil.decorateAssertions ast
         if (not opt.Typecheck) then
             Log.info "Skipping type checking."
             if (opt.ANF) then
@@ -129,6 +130,7 @@ let internal generateAsm (filename: string)
         Error()
     | Ok(ast) ->
         Log.info "Lexing and parsing succeeded."
+        let ast = ASTUtil.decorateAssertions ast
         match (Typechecker.typecheck ast) with
         | Error(typErrs) ->
             for posErr in typErrs do

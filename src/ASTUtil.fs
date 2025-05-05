@@ -358,3 +358,307 @@ and internal capturedVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
     let folder (acc: Set<string>) (node: Node<'E,'T> ) =
         Set.union acc (capturedVars node)
     List.fold folder Set[] nodes
+
+/// Compute the set of free variables in the given AST node.
+let rec freeVarsNode (node: Node<'E,'T>): Map<string, Expr<'E,'T>> =
+    match node.Expr with
+    | UnitVal
+    | IntVal(_)
+    | BoolVal(_)
+    | FloatVal(_)
+    | StringVal(_)
+    | Pointer(_) -> Map[]
+    | Var(name) -> Map [(name, node.Expr)]
+    | Sub(lhs, rhs)
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs)
+    | Add(lhs, rhs)
+    | Mult(lhs, rhs) ->
+        Set.union (freeVarsNode lhs) (freeVarsNode rhs)
+    | Not(arg)
+    | Sqrt(arg) -> freeVarsNode arg
+    | And(lhs, rhs)
+    | Or(lhs, rhs) ->
+        Set.union (freeVarsNode lhs) (freeVarsNode rhs)
+    | Eq(lhs, rhs)
+    | Min(lhs, rhs)
+    | Max(lhs, rhs)
+    | Greater(lhs, rhs)
+    | LessEq(lhs, rhs)
+    | GreaterEq(lhs, rhs)
+    | Less(lhs, rhs) ->
+        Set.union (freeVarsNode lhs) (freeVarsNode rhs)
+    | ReadInt
+    | ReadFloat -> Set[]
+    | Print(arg)
+    | PrintLn(arg) -> freeVarsNode arg
+    | If(condition, ifTrue, ifFalse) ->
+        Set.union (freeVarsNode condition)
+                  (Set.union (freeVarsNode ifTrue) (freeVarsNode ifFalse))
+    | Seq(nodes) -> freeVarsInListNode nodes
+    | Ascription(_, node) -> freeVarsNode node
+    | Let(name, init, scope)
+    | LetT(name, _, init, scope)
+    | LetMut(name, init, scope) ->
+        // All the free variables in the 'let' initialisation, together with all
+        // free variables in the scope --- minus the newly-bound variable
+        Set.union (freeVarsNode init) (Set.remove node (freeVarsNode scope))
+    | Assign(target, expr) ->
+        // Union of the free names of the lhs and the rhs of the assignment
+        Set.union (freeVarsNode target) (freeVarsNode expr)
+    | DoWhile(body, cond)
+    | While(cond, body) -> Set.union (freeVarsNode cond) (freeVarsNode body)
+    | Assertion(arg) -> freeVarsNode arg
+    | Type(_, _, scope) -> freeVarsNode scope
+    | Lambda(args, body) ->
+        let (argNames, _) = List.unzip args
+        // All the free variables in the lambda function body, minus the
+        // names of the arguments
+        Set.difference (freeVarsNode body) (Set.ofList argNames)
+    | Application(expr, args) ->
+        let fvArgs = List.map freeVarsNode args
+        // Union of free variables in the applied expr, plus all its arguments
+        Set.union (freeVarsNode expr) (freeVarsInListNode args)
+    | StructCons(fields) ->
+        let (_, nodes) = List.unzip fields
+        freeVarsInListNode nodes
+    | FieldSelect(expr, _) -> freeVarsNode expr
+    | LetRec(name, _, init, scope) ->
+        // Remove the newly-bound variable from the free variables of both
+        // init and scope since it might be recursively referenced in init
+        Set.remove name (Set.union (freeVarsNode init) (freeVarsNode scope))
+    | ArrayCons(length, init) ->
+        Set.union (freeVarsNode length) (freeVarsNode init)
+    | ArrayLength(target) -> freeVarsNode target
+    | ArrayElem(target, index) ->
+        Set.union (freeVarsNode target) (freeVarsNode index)
+    | ArraySlice(target, startIdx, endIdx) ->
+        Set.union (freeVarsNode target)
+                  (Set.union (freeVarsNode startIdx) (freeVarsNode endIdx))
+    | UnionCons(_, expr) -> freeVarsNode expr
+    | Match(expr, cases) ->
+        /// Compute the free variables in all match cases continuations, minus
+        /// the variable bound in the corresponding match case.  This 'folder'
+        /// is used to fold over all match cases.
+        let folder (acc: Set<string>) (_, var, cont: Node<'E,'T>): Set<string> =
+            Set.union acc ((freeVarsNode cont).Remove var)
+        /// Free variables in all match continuations
+        let fvConts = List.fold folder Set[] cases
+        Set.union (freeVarsNode expr) fvConts
+
+/// Compute the union of the free variables in a list of AST nodes.
+and internal freeVarsInListNode (nodes: List<Node<'E,'T>>): Set<Node<'E,'T>> =
+    /// Compute the free variables of 'node' and add them to the accumulator
+    let folder (acc: Set<Node<'E,'T>>) (node: Node<'E,'T> ) =
+        Set.union acc (freeVarsNode node)
+    List.fold folder Set[] nodes
+
+let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
+    match node.Expr with
+    | UnitVal
+    | IntVal(_)
+    | BoolVal(_)
+    | FloatVal(_)
+    | StringVal(_) -> node // The substitution has no effect
+
+    | Pointer(_) -> node // The substitution has no effect
+
+    | Var(_) -> node // The substitution has no effect
+
+    | Add(lhs, rhs) ->
+        {node with Expr = Add((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Sub(lhs, rhs) ->
+        {node with Expr = Sub((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Mult(lhs, rhs) ->
+        {node with Expr = Mult((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Div(lhs, rhs) ->
+        {node with Expr = Div((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Mod(lhs, rhs) ->
+        {node with Expr = Mod((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Sqrt(arg) ->
+        {node with Expr = Sqrt(decorateAssertions arg)}
+    | Min(lhs, rhs) ->
+        {node with Expr = Min((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Max(lhs, rhs) ->
+        {node with Expr = Max((decorateAssertions lhs), (decorateAssertions rhs))}
+
+    | And(lhs, rhs) ->
+        {node with Expr = And((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Or(lhs, rhs) ->
+        {node with Expr = Or((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Not(arg) ->
+        {node with Expr = Not(decorateAssertions arg)}
+
+    | Eq(lhs, rhs) ->
+        {node with Expr = Eq((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Less(lhs, rhs) ->
+        {node with Expr = Less((decorateAssertions lhs), (decorateAssertions rhs))}
+    | Greater(lhs, rhs) ->
+        {node with Expr = Greater((decorateAssertions lhs), (decorateAssertions rhs))}
+    | LessEq(lhs, rhs) ->
+        {node with Expr = LessEq((decorateAssertions lhs), (decorateAssertions rhs))}
+    | GreaterEq(lhs, rhs) ->
+        {node with Expr = GreaterEq((decorateAssertions lhs), (decorateAssertions rhs))}
+    | ReadInt
+    | ReadFloat -> node // The substitution has no effect
+
+    | Print(arg) ->
+        {node with Expr = Print(decorateAssertions arg)}
+    | PrintLn(arg) ->
+        {node with Expr = PrintLn(decorateAssertions arg)}
+
+    | If(cond, ifTrue, ifFalse) ->
+        {node with Expr = If((decorateAssertions cond), (decorateAssertions ifTrue),
+                                                   (decorateAssertions ifFalse))}
+
+    | Seq(nodes) ->
+        let substNodes = List.map (fun n -> (decorateAssertions n)) nodes
+        {node with Expr = Seq(substNodes)}
+
+    | Type(tname, def, scope) ->
+        {node with Expr = Type(tname, def, (decorateAssertions scope))}
+
+    | Ascription(tpe, node) ->
+        {node with Expr = Ascription(tpe, (decorateAssertions node))}
+
+    | Assertion(arg) ->
+        // Recursively decorate the argument
+        let decoratedArg = decorateAssertions arg
+        // Get free variables in the argument
+        let fvSet = freeVarsNode decoratedArg
+        let fvList = Set.toList fvSet
+
+        // Create print nodes for each free variable: Print("var = "); PrintLn(Var(var))
+        let printVarNodes =
+            List.collect (fun varName ->
+                let labelNode = { node with Expr = StringVal(" - " + varName + " = ") }
+                let printLabel = { node with Expr = Print(labelNode) }
+
+                let varNode = { node with Expr = Var(varName) }
+                let printValue = { node with Expr = PrintLn(varNode) }
+
+                [printLabel; printValue]
+            ) fvList
+
+        let snippet = SourceRepository.repository.GetSnippet(
+            node.Pos.FileName, 
+            node.Pos.LineStart, 
+            node.Pos.LineEnd, 
+            node.Pos.ColStart, 
+            true, 
+            true
+        )
+        let msgArr =
+            match snippet with
+            | Some strArr -> List.concat [
+                [""];
+                ["***********************"];
+                [$"Assertion error @ {node.Pos.FileName}:{node.Pos.LineStart}:{node.Pos.ColStart}"];
+                ["-----------------------"];
+                strArr;
+                ["-----------------------"];
+                ["Variables values:"]]
+            | None -> List.concat [
+                [""];
+                ["***********************"];
+                ["Assertion failed: <no source available>"];
+                ["-----------------------"];
+                ["Variables values:"]]
+
+        // Create the header node for the 
+        let msgArrAst = (List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr)
+        
+        let falseNode = { node with Expr = BoolVal false }
+        // Use Assertion(false) to ensure program termination consistent with original assertion behavior
+        let triggerFailureNode = { node with Expr = Assertion(falseNode) }
+
+        let failureSequence = 
+            // printFailureHeader
+            msgArrAst @
+            printVarNodes @
+            [{ node with Expr = PrintLn({ node with Expr = StringVal "***********************" }) }] @ 
+            [triggerFailureNode]
+        let failureBranch = { node with Expr = Seq(failureSequence) }
+
+        // Create the success case (Unit)
+        let successBranch = { node with Expr = UnitVal }
+
+        // Create the Not(decoratedArg) node
+        let condition = { node with Expr = Not(decoratedArg) }
+
+        // Create the final If expression
+        let ifExpr = If(condition, failureBranch, successBranch)
+
+        // Return the new If node, replacing the original Assertion node
+        { node with Expr = ifExpr } // The type of the whole construct is Unit
+
+    | Let(vname, init, scope) ->
+        // Propagate the substitution in the "let" scope
+        {node with Expr = Let(vname, (decorateAssertions init),
+                              (decorateAssertions scope))}
+
+    | LetT(vname, tpe, init, scope) ->
+        // Propagate the substitution in the "let" scope
+        {node with Expr = LetT(vname, tpe, (decorateAssertions init),
+                               (decorateAssertions scope))}
+
+    | LetRec(vname, tpe, init, scope) ->
+        // Propagate the substitution in the "let rec" scope and init safely
+        {node with Expr = LetRec(vname, tpe, (decorateAssertions init),
+                                 (decorateAssertions scope))}
+
+    | LetMut(vname, init, scope) ->
+        {node with Expr = LetMut(vname, (decorateAssertions init),
+                                 (decorateAssertions scope))}
+
+    | Assign(target, expr) ->
+        {node with Expr = Assign((decorateAssertions target), (decorateAssertions expr))}
+
+    | While(cond, body) ->
+        let substCond = decorateAssertions cond
+        let substBody = decorateAssertions body
+        {node with Expr = While(substCond, substBody)}
+
+    | DoWhile(body, cond) ->
+        let substBody = decorateAssertions body
+        let substCond = decorateAssertions cond
+        {node with Expr = DoWhile(substBody, substCond)}
+
+    | Lambda(args, body) ->
+        {node with Expr = Lambda(args, (decorateAssertions body))}
+
+    | Application(expr, args) ->
+        let substExpr = decorateAssertions expr
+        let substArgs = List.map (fun n -> (decorateAssertions n)) args
+        {node with Expr = Application(substExpr, substArgs)}
+
+    | StructCons(fields) ->
+        let (fieldNames, initNodes) = List.unzip fields
+        let substInitNodes = List.map (fun e -> (decorateAssertions e)) initNodes
+        {node with Expr = StructCons(List.zip fieldNames substInitNodes)}
+
+    | FieldSelect(target, field) ->
+        {node with Expr = FieldSelect((decorateAssertions target), field)}
+
+    | ArrayCons(length, init) ->
+        {node with Expr = ArrayCons((decorateAssertions length), (decorateAssertions init))}
+
+    | ArrayLength(target) ->
+        {node with Expr = ArrayLength(decorateAssertions target)}
+
+    | ArrayElem(target, index) ->
+        {node with Expr = ArrayElem((decorateAssertions target), (decorateAssertions index))}
+
+    | ArraySlice(target, startIdx, endIdx) ->
+        {node with Expr = ArraySlice((decorateAssertions target),
+                                     (decorateAssertions startIdx),
+                                     (decorateAssertions endIdx))}
+    | UnionCons(label, expr) ->
+        {node with Expr = UnionCons(label, (decorateAssertions expr))}
+
+    | Match(expr, cases) ->
+        /// Mapper function to propagate the substitution along a match case
+        let substCase(lab: string, v: string, cont: Node<'E,'T>) =
+            (lab, v, (decorateAssertions cont))
+        let cases2 = List.map substCase cases
+        {node with Expr = Match((decorateAssertions expr), cases2)}
