@@ -552,7 +552,7 @@ let verifyANF (node: Node<'E,'T>) =
             // ANF property check
             let check = 
                 match init.Expr with
-                | Var(_) | IntVal(_) | BoolVal(_) | FloatVal(_) | StringVal(_) | UnitVal | ReadInt | ReadFloat | Lambda(_, _) -> true
+                | Var(_) | IntVal(_) | BoolVal(_) | FloatVal(_) | StringVal(_) | UnitVal -> true
                 | Add(a, b) 
                 | Mult(a, b) 
                 | And(a, b) 
@@ -565,7 +565,8 @@ let verifyANF (node: Node<'E,'T>) =
                 | Min(a, b) 
                 | Max(a, b) 
                 | Div(a, b) 
-                | Mod(a, b)  ->
+                | Mod(a, b) 
+                | Eq(a, b) ->
                     match a.Expr, b.Expr with
                     | Var(_), Var(_) -> true
                     | _ -> false
@@ -597,9 +598,7 @@ let verifyANF (node: Node<'E,'T>) =
                 | Application(f, args) ->
                     match f.Expr with
                     | Var(_) -> List.forall (fun (arg: Node<'E,'T>) -> 
-                        match arg.Expr with 
-                        Var(_) -> true 
-                        | _ -> false) args
+                        match arg.Expr with Var(_) -> true | _ -> false) args
                     | _ -> false
                 | UnionCons(_, a) ->
                     match a.Expr with 
