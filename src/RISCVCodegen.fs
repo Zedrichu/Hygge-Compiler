@@ -1271,16 +1271,50 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // Accumulate all comparison instructions and all case body instructions
         let (allCmpInstrs, allBodyInstrs) = List.fold processCase (Asm(), Asm()) cases
 
+        let tempVarNameForActualTag = Util.genSymbol "internal_unmatched_tag_id"
+
+        // Error node in case nothing is matched 
+        let nonExhaustiveMatchErrorNode =
+            let errorMsgLiteralNode =
+                { node with 
+                    Expr = StringVal($"RUNTIME ERROR [{node.Pos.FileName}:{node.Pos.LineStart}:{node.Pos.ColStart}]: Non-exhaustive pattern match. Unmatched tag ID: ")
+                    Type = TString
+                }
+
+            let printErrorMsgLiteralNode =
+                { node with Expr = Print(errorMsgLiteralNode); Type = TUnit }
+
+            let actualTagVarNode =
+              { node with Expr = Var(tempVarNameForActualTag); Type = TInt}
+
+            let printActualTagNode =
+                { node with Expr = PrintLn(actualTagVarNode); Type = TUnit }
+
+            let falseBoolNode = { node with Expr = BoolVal(false); Type = TBool }
+
+            let assertionFailNode = { node with Expr = Assertion(falseBoolNode); Type = TUnit }
+            { node with
+                Expr = Seq([ printErrorMsgLiteralNode; printActualTagNode; assertionFailNode ])
+                Type = TUnit // The overall type of the error sequence
+            }
+
+        let envForErrorNode =
+            { env with 
+                VarStorage = env.VarStorage.Add(tempVarNameForActualTag, Storage.Reg(actualTagReg))
+            }
+
+        // Code for runtime error
+        let failOnErrorPathCode = doCodegen envForErrorNode nonExhaustiveMatchErrorNode
+
         let endLabelInstr =
             Asm(RV.LABEL(endLabelSym), "Label for common end of match statement")
 
-        // Final assembly sequence for the match expression
-        exprAddrCode // Evaluate address of the expression to be matched
-        ++ loadActualTagCode // Load its runtime tag into actualTagReg
-        ++ allCmpInstrs // Series of: (LI expectedTagReg, BEQ actualTagReg, expectedTagReg, case_entry_sym)
-        ++ jmpEndInstr // If no cases matched (all BEQs fall through), jump to the end
-        ++ allBodyInstrs // Concatenated code blocks for all case bodies
-        ++ endLabelInstr // The common exit point for all paths
+        exprAddrCode          // Evaluate the address of the expression to be matched
+        ++ loadActualTagCode   //  Load its runtime tag ID into actualTagReg
+        ++ allCmpInstrs        //  Perform all tag comparisons and conditional branches
+        ++ failOnErrorPathCode //  If all comparisons fail, execute this error handling code
+        ++ allBodyInstrs       //  The code blocks for each case (only reached by jumps from allCmpInstrs)
+        ++ endLabelInstr       //  The common exit label for successful cases (jumped to from caseCodeBlock)
       
 
 
