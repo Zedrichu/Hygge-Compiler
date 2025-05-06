@@ -1191,6 +1191,96 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
             unionAllocCode ++ labelIdCode ++ exprCompileAndStoreCode
 
+    | Match(expr, cases) ->
+        let exprAddrCode = doCodegen env expr // Code to get address of the expression to match
+
+        let unionAddrReg = Reg.r env.Target // Holds address of the union object
+        let actualTagReg = Reg.r (env.Target + 1u) // Holds the actual tag read from the union
+        let expectedTagReg = Reg.r (env.Target + 2u) // Holds the tag of the case being checked
+        let intValReg = Reg.r (env.Target + 2u) // Reuses expectedTagReg for the case's integer value after comparison
+        let fpValReg = FPReg.r (env.FPTarget + 1u) // Holds the case's float value
+
+        // Load the actual tag from the union instance (offset 0 for tag)
+        let loadActualTagCode =
+            Asm(RV.LW(actualTagReg, Imm12(0), unionAddrReg), $"Load union tag from memory")
+
+        let endLabelSym = Util.genSymbol "match_end"
+        let jmpEndInstr = Asm(RV.J(endLabelSym)) // Instruction to jump to the end of the match
+
+        // Fold over cases to generate comparison logic and case bodies
+        // We need to first generate all the comparisons, and then all the bodies
+        let processCase (cmpInstrsAcc, bodyInstrsAcc) (caseName, caseVar, caseBodyExpr) =
+            let caseTagId = Util.genSymbolId caseName // Numeric ID for the current case's tag
+
+            let loadCaseTagIdInstr =
+                Asm(RV.LI(expectedTagReg, caseTagId), $"Load ID for case '%s{caseName}' into reg")
+
+            let caseEntrySym = Util.genSymbol $"case_entry_{caseName}"
+            // If actual tag matches expected tag, branch to this case's body
+            let beqCaseEntryInstr =
+                Asm(RV.BEQ(actualTagReg, expectedTagReg, caseEntrySym), "Branch if tags equal")
+
+            let caseEntryLabelInstr =
+                Asm(RV.LABEL(caseEntrySym), $"Label for start of case '%s{caseName}' body")
+
+            // Determine the type of the value associated with this specific case
+            let valType =
+                match expandType expr.Env expr.Type with // Resolve the union type fully
+                | TUnion casesInfo ->
+                    match List.tryFind (fun (name, _) -> name = caseName) casesInfo with
+                    | Some(_, t) -> t // Type of the data payload for this case
+                    | None ->
+                        failwith
+                            $"Internal: Case '%s{caseName}' not found in resolved union %O{expr.Type} (expr: %A{expr})"
+                | resolvedType ->
+                    failwith
+                        $"Internal: Matching on non-union %O{resolvedType} (original: %O{expr.Type}, expr: %A{expr})"
+
+            // Load the case's value
+            let loadValInstr =
+                match valType with
+                | t when (isSubtypeOf expr.Env t TUnit) -> Asm() // Unit type has no runtime value to load
+                | t when (isSubtypeOf expr.Env t TFloat) ->
+                    Asm(RV.FLW_S(fpValReg, Imm12(4), unionAddrReg), $"Load float value for case '%s{caseName}'")
+                | _ -> // Integer-like types (includes pointers, bools, chars, etc.)
+                    Asm(RV.LW(intValReg, Imm12(4), unionAddrReg), $"Load int-like value for case '%s{caseName}'")
+
+            // Determine storage (register or placeholder) for the case variable, to be used in its body
+            let valStorage =
+                match valType with
+                | t when (isSubtypeOf expr.Env t TUnit) -> Storage.Label("unit_val_placeholder")
+                | t when (isSubtypeOf expr.Env t TFloat) -> Storage.FPReg(fpValReg)
+                | _ -> Storage.Reg(intValReg)
+
+            // Generate code for the case body, with the case variable set to the matched union
+            let bodyImplCode =
+                let caseLocalEnv =
+                    { Target = env.Target
+                      FPTarget = env.FPTarget
+                      VarStorage = env.VarStorage.Add(caseVar, valStorage) }
+
+                doCodegen caseLocalEnv caseBodyExpr
+
+            // Assemble the full code for this case: entry label, load value, execute body, then jump to match_end
+            let caseCodeBlock =
+                caseEntryLabelInstr ++ loadValInstr ++ bodyImplCode ++ jmpEndInstr
+
+            (cmpInstrsAcc ++ loadCaseTagIdInstr ++ beqCaseEntryInstr, // Append comparison logic
+             bodyInstrsAcc ++ caseCodeBlock) // Append case body code
+
+        // Accumulate all comparison instructions and all case body instructions
+        let (allCmpInstrs, allBodyInstrs) = List.fold processCase (Asm(), Asm()) cases
+
+        let endLabelInstr =
+            Asm(RV.LABEL(endLabelSym), "Label for common end of match statement")
+
+        // Final assembly sequence for the match expression
+        exprAddrCode // Evaluate address of the expression to be matched
+        ++ loadActualTagCode // Load its runtime tag into actualTagReg
+        ++ allCmpInstrs // Series of: (LI expectedTagReg, BEQ actualTagReg, expectedTagReg, case_entry_sym)
+        ++ jmpEndInstr // If no cases matched (all BEQs fall through), jump to the end
+        ++ allBodyInstrs // Concatenated code blocks for all case bodies
+        ++ endLabelInstr // The common exit point for all paths
       
 
 
