@@ -832,7 +832,7 @@ and internal numericalRelationTyper descr pos (env: TypingEnv)
 /// Otherwise, return type errors.
 and internal printArgTyper descr pos (env: TypingEnv) (arg: UntypedAST): Result<TypedAST, TypeErrors> =
     /// Types of values that can be printed.
-    let printables = [TBool; TInt; TFloat; TString]
+    let printables = [TBool; TInt; TFloat; TString; TStruct([])]
     match (typer env arg) with
     | Ok(targ) when List.exists (isSubtypeOf env targ.Type) printables ->
         Ok(targ)

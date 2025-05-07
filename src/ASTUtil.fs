@@ -8,7 +8,8 @@
 module ASTUtil
 
 open AST
-
+open Log
+open PrettyPrinter
 
 /// Given the AST 'node', return a new AST node where every free occurrence of
 /// the variable called 'var' is substituted by the AST node 'sub'.
@@ -359,8 +360,15 @@ and internal capturedVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
         Set.union acc (capturedVars node)
     List.fold folder Set[] nodes
 
-/// Compute the set of free variables in the given AST node.
-let rec freeVarsNode (node: Node<'E,'T>): Map<string, Expr<'E,'T>> =
+let mapUnion (map1: Map<'K, 'V>) (map2: Map<'K, 'V>) =
+    Map.fold (fun acc key value -> Map.add key value acc) map1 map2
+
+let mapDifference (map1: Map<'Key, 'T>) (map2: Map<'Key, 'U>) =
+    Map.filter (fun k _ -> not (Map.containsKey k map2)) map1
+
+/// Compute the set of free variables in the given AST node.  
+/// (parentExpr, node) -> Map[name, (parentExpr, node)]
+let rec freeVarsMap (parentNode: Node<'E,'T>) (node: Node<'E,'T>): Map<string,(Node<'E,'T> * Node<'E,'T>)> =
     match node.Expr with
     | UnitVal
     | IntVal(_)
@@ -368,18 +376,20 @@ let rec freeVarsNode (node: Node<'E,'T>): Map<string, Expr<'E,'T>> =
     | FloatVal(_)
     | StringVal(_)
     | Pointer(_) -> Map[]
-    | Var(name) -> Map [(name, node.Expr)]
+    | Var(name) -> Map [(name, (parentNode, node))]
     | Sub(lhs, rhs)
     | Div(lhs, rhs)
     | Mod(lhs, rhs)
     | Add(lhs, rhs)
     | Mult(lhs, rhs) ->
-        Set.union (freeVarsNode lhs) (freeVarsNode rhs)
+        mapUnion (freeVarsMap node lhs) (freeVarsMap node rhs)
+        // Set.union (freeVarsNode lhs) (freeVarsNode rhs)
     | Not(arg)
-    | Sqrt(arg) -> freeVarsNode arg
+    | Sqrt(arg) -> freeVarsMap node arg
     | And(lhs, rhs)
     | Or(lhs, rhs) ->
-        Set.union (freeVarsNode lhs) (freeVarsNode rhs)
+        mapUnion (freeVarsMap node lhs) (freeVarsMap node rhs)
+        // Set.union (freeVarsNode lhs) (freeVarsNode rhs)
     | Eq(lhs, rhs)
     | Min(lhs, rhs)
     | Max(lhs, rhs)
@@ -387,71 +397,79 @@ let rec freeVarsNode (node: Node<'E,'T>): Map<string, Expr<'E,'T>> =
     | LessEq(lhs, rhs)
     | GreaterEq(lhs, rhs)
     | Less(lhs, rhs) ->
-        Set.union (freeVarsNode lhs) (freeVarsNode rhs)
+        mapUnion (freeVarsMap node lhs) (freeVarsMap node rhs)
+        // Set.union (freeVarsNode lhs) (freeVarsNode rhs)
     | ReadInt
-    | ReadFloat -> Set[]
+    | ReadFloat -> Map[]
     | Print(arg)
-    | PrintLn(arg) -> freeVarsNode arg
+    | PrintLn(arg) -> freeVarsMap node arg
     | If(condition, ifTrue, ifFalse) ->
-        Set.union (freeVarsNode condition)
-                  (Set.union (freeVarsNode ifTrue) (freeVarsNode ifFalse))
-    | Seq(nodes) -> freeVarsInListNode nodes
-    | Ascription(_, node) -> freeVarsNode node
+        mapUnion (freeVarsMap node condition)
+                  (mapUnion (freeVarsMap node ifTrue) (freeVarsMap node ifFalse))
+    | Seq(nodes) -> freeVarsInListNode node nodes
+    | Ascription(_, node) -> freeVarsMap node node
     | Let(name, init, scope)
     | LetT(name, _, init, scope)
     | LetMut(name, init, scope) ->
         // All the free variables in the 'let' initialisation, together with all
         // free variables in the scope --- minus the newly-bound variable
-        Set.union (freeVarsNode init) (Set.remove node (freeVarsNode scope))
+        mapUnion (freeVarsMap node init) (Map.remove name (freeVarsMap node scope))
     | Assign(target, expr) ->
         // Union of the free names of the lhs and the rhs of the assignment
-        Set.union (freeVarsNode target) (freeVarsNode expr)
+        mapUnion (freeVarsMap node target) (freeVarsMap node expr)
     | DoWhile(body, cond)
-    | While(cond, body) -> Set.union (freeVarsNode cond) (freeVarsNode body)
-    | Assertion(arg) -> freeVarsNode arg
-    | Type(_, _, scope) -> freeVarsNode scope
+    | While(cond, body) -> mapUnion (freeVarsMap node cond) (freeVarsMap node body)
+    | Assertion(arg) -> freeVarsMap node arg
+    | Type(_, _, scope) -> freeVarsMap node scope
     | Lambda(args, body) ->
         let (argNames, _) = List.unzip args
+        let zipped = List.zip argNames (List.map (fun argName -> Var(argName)) argNames)
         // All the free variables in the lambda function body, minus the
         // names of the arguments
-        Set.difference (freeVarsNode body) (Set.ofList argNames)
+        mapDifference (freeVarsMap node body) (Map.ofList zipped)
     | Application(expr, args) ->
-        let fvArgs = List.map freeVarsNode args
         // Union of free variables in the applied expr, plus all its arguments
-        Set.union (freeVarsNode expr) (freeVarsInListNode args)
+
+        // Keep parent node the same for subsequent Application nodes
+        // such that a full "application" sequence is used when showing computed value
+        match parentNode.Expr with
+        | Application(_, _) ->
+            mapUnion (freeVarsMap parentNode expr) (freeVarsInListNode parentNode args)
+        | _ ->
+            mapUnion (freeVarsMap node expr) (freeVarsInListNode node args)
     | StructCons(fields) ->
         let (_, nodes) = List.unzip fields
-        freeVarsInListNode nodes
-    | FieldSelect(expr, _) -> freeVarsNode expr
+        freeVarsInListNode node nodes
+    | FieldSelect(expr, _) -> freeVarsMap node expr
     | LetRec(name, _, init, scope) ->
         // Remove the newly-bound variable from the free variables of both
         // init and scope since it might be recursively referenced in init
-        Set.remove name (Set.union (freeVarsNode init) (freeVarsNode scope))
+        Map.remove name (mapUnion (freeVarsMap node init) (freeVarsMap node scope))
     | ArrayCons(length, init) ->
-        Set.union (freeVarsNode length) (freeVarsNode init)
-    | ArrayLength(target) -> freeVarsNode target
+        mapUnion (freeVarsMap node length) (freeVarsMap node init)
+    | ArrayLength(target) -> freeVarsMap node target
     | ArrayElem(target, index) ->
-        Set.union (freeVarsNode target) (freeVarsNode index)
+        mapUnion (freeVarsMap node target) (freeVarsMap node index)
     | ArraySlice(target, startIdx, endIdx) ->
-        Set.union (freeVarsNode target)
-                  (Set.union (freeVarsNode startIdx) (freeVarsNode endIdx))
-    | UnionCons(_, expr) -> freeVarsNode expr
+        mapUnion (freeVarsMap node target)
+                  (mapUnion (freeVarsMap node startIdx) (freeVarsMap node endIdx))
+    | UnionCons(_, expr) -> freeVarsMap node expr
     | Match(expr, cases) ->
         /// Compute the free variables in all match cases continuations, minus
         /// the variable bound in the corresponding match case.  This 'folder'
         /// is used to fold over all match cases.
-        let folder (acc: Set<string>) (_, var, cont: Node<'E,'T>): Set<string> =
-            Set.union acc ((freeVarsNode cont).Remove var)
+        let folder (acc: Map<string, (Node<'E,'T> * Node<'E,'T>)>) (_, var, cont: Node<'E,'T>): Map<string, Node<'E,'T> * Node<'E,'T>> =
+            mapUnion acc ((freeVarsMap node cont).Remove var)
         /// Free variables in all match continuations
-        let fvConts = List.fold folder Set[] cases
-        Set.union (freeVarsNode expr) fvConts
+        let fvConts: Map<string,(Node<'E,'T> * Node<'E,'T>)> = List.fold folder Map[] cases
+        mapUnion (freeVarsMap node expr) fvConts
 
 /// Compute the union of the free variables in a list of AST nodes.
-and internal freeVarsInListNode (nodes: List<Node<'E,'T>>): Set<Node<'E,'T>> =
+and internal freeVarsInListNode (parentNode: Node<'E,'T>) (nodes: List<Node<'E,'T>>): Map<string,Node<'E,'T> * Node<'E,'T>> =
     /// Compute the free variables of 'node' and add them to the accumulator
-    let folder (acc: Set<Node<'E,'T>>) (node: Node<'E,'T> ) =
-        Set.union acc (freeVarsNode node)
-    List.fold folder Set[] nodes
+    let folder (acc: Map<string, Node<'E,'T> * Node<'E,'T>>) (node: Node<'E,'T> ) =
+        mapUnion acc (freeVarsMap parentNode node)
+    List.fold folder Map[] nodes
 
 let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
     match node.Expr with
@@ -522,30 +540,111 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
         {node with Expr = Ascription(tpe, (decorateAssertions node))}
 
     | Assertion(arg) ->
-        // Recursively decorate the argument
+        // Recursively decorate the argument to process nested assertions
         let decoratedArg = decorateAssertions arg
-        // Get free variables in the argument
-        let fvSet = freeVarsNode decoratedArg
-        let fvList = Set.toList fvSet
 
-        // Create print nodes for each free variable: Print("var = "); PrintLn(Var(var))
+        /// Get the last nested expression (last Seq or Let scope) 
+        /// since it is the expression which effectively decides on the assertion failure
+        let rec getKeyNodeFolder (node: Node<'E,'T>) =
+            match node.Expr with
+            | Seq(nodes) ->
+                getKeyNodeFolder nodes[nodes.Length - 1]
+            | Let(_, _, scope)
+            | LetT(_, _, _, scope)
+            | LetMut(_, _, scope)
+            | LetRec(_, _, _, scope) ->
+                getKeyNodeFolder scope
+            | _ -> node
+
+        let keyNode = getKeyNodeFolder arg
+
+        /// Get free variables in the keyNode
+        /// Having keyNode as an argument we ensure that the nested variable declarations
+        /// will be included in the printout if they were referenced in the key assertion calculation
+        let fvList = Map.toList (freeVarsMap node keyNode)
+
+        let constructSimpleVarPrint (node: Node<'E,'T>) (varName: string) (varExpr: Expr<'E,'T>) =
+            [{ node with Expr = Print({ node with Expr = StringVal($" - {varName} = ") }) };
+             { node with Expr = PrintLn({ node with Expr = varExpr }) }]
+
+        /// Create print nodes for each free variable
         let printVarNodes =
-            List.collect (fun varName ->
-                let labelNode = { node with Expr = StringVal(" - " + varName + " = ") }
-                let printLabel = { node with Expr = Print(labelNode) }
+            fvList |> List.collect (fun (record: string * (Node<'E,'T> * Node<'E,'T>)) ->
+                let (varName: string, (parentNode: Node<'E,'T>, varNode: Node<'E,'T>)) = record
+                Log.debug $"{varName}::{varNode}::{parentNode}"
 
-                let varNode = { node with Expr = Var(varName) }
-                let printValue = { node with Expr = PrintLn(varNode) }
+                // TODO: consider recursive processing for nested expressions or simplify reporting
 
-                [printLabel; printValue]
-            ) fvList
+                match parentNode.Expr with
+                // TODO: interpreter print struct
+                // | FieldSelect(node, field) (print whole struct instead)
+                | Application(node, args) ->
+                    match node.Expr with
+                    | Var(name) when name <> varName ->
+                        constructSimpleVarPrint node varName varNode.Expr
+                    | _ -> 
+                        constructSimpleVarPrint 
+                            node
+                            (
+                                let sourceCode = SourceRepository.repository.GetSnippet(
+                                    parentNode.Pos,
+                                    parentNode.Pos,
+                                    false,
+                                    false,
+                                    false )
+                                match sourceCode with
+                                | Some strArr ->
+                                    " - " + List.reduce (fun acc el -> acc + el.Trim()) strArr
+                                | None ->
+                                    match args.Length with
+                                    | 0 -> $" - {varName}()"
+                                    | _ -> $" - {varName}(...)" )
+                            parentNode.Expr
+                | ArrayLength(node) ->
+                    match node.Expr with
+                    | Var(name) -> 
+                        [
+                            { node with Expr = Print({ node with Expr = StringVal($" - arrayLength({name}) = ") }) };
+                            { node with Expr = PrintLn({ node with Expr = parentNode.Expr }) }
+                        ]
+                    | _ -> 
+                        [
+                            { node with Expr = Print({ node with Expr = StringVal($" - arrayLength({node.Pos.FileName}:({node.Pos.LineStart}:{node.Pos.ColStart}-{node.Pos.LineEnd}:{node.Pos.ColEnd})) = ") }) };
+                            { node with Expr = PrintLn({ node with Expr = parentNode.Expr }) }
+                        ]
+                | ArrayElem(node, index) when varNode.Expr = node.Expr ->
+                    match node.Expr with
+                    | Var(name) ->
+                        [
+                            { node with Expr = Print({ node with Expr = StringVal($" - arrayElem({name}, ") }) };
+                            { node with Expr = Print(index) };
+                            { node with Expr = Print({ node with Expr = StringVal(") = ") }) };
+                            { node with Expr = PrintLn({ node with Expr = parentNode.Expr }) }
+                        ]
+                    | _ -> 
+                        [
+                            { node with Expr = Print({ node with Expr = StringVal($" - arrayElem({node.Pos.FileName}:({node.Pos.LineStart}:{node.Pos.ColStart}-{node.Pos.LineEnd}:{node.Pos.ColEnd}), ") }) };
+                            { node with Expr = Print(index) };
+                            { node with Expr = Print({ node with Expr = StringVal(") = ") }) };
+                            { node with Expr = PrintLn({ node with Expr = parentNode.Expr }) }
+                        ]
+                | ArraySlice(node, startIdx, endIdx) ->
+                    // debug $"({node.Expr}[{startIdx}:{endIdx}])"
+                    // ($"({node.Expr}[{startIdx}:{endIdx}])", parentExpr)
+                    []
+                | UnionCons(label, node) ->
+                    // debug $"({node.Expr}::{label})"
+                    // Some ($"({node.Expr}::{label})", parentExpr)
+                    []
+                | _ -> constructSimpleVarPrint node varName varNode.Expr
+            )
 
+        /// Prepare code snippet to be shown
         let snippet = SourceRepository.repository.GetSnippet(
-            node.Pos.FileName, 
-            node.Pos.LineStart, 
-            node.Pos.LineEnd, 
-            node.Pos.ColStart, 
+            node.Pos, 
+            keyNode.Pos,
             true, 
+            true,
             true
         )
         let msgArr =
@@ -557,40 +656,49 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
                 ["-----------------------"];
                 strArr;
                 ["-----------------------"];
-                ["Variables values:"]]
+                ["Relevant Variables:"]]
             | None -> List.concat [
                 [""];
                 ["***********************"];
                 ["Assertion failed: <no source available>"];
                 ["-----------------------"];
-                ["Variables values:"]]
+                ["Relevant Variables:"]]
 
-        // Create the header node for the 
+        /// Create header node with source code and location information 
         let msgArrAst = (List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr)
-        
-        let falseNode = { node with Expr = BoolVal false }
-        // Use Assertion(false) to ensure program termination consistent with original assertion behavior
-        let triggerFailureNode = { node with Expr = Assertion(falseNode) }
 
-        let failureSequence = 
-            // printFailureHeader
-            msgArrAst @
-            printVarNodes @
-            [{ node with Expr = PrintLn({ node with Expr = StringVal "***********************" }) }] @ 
-            [triggerFailureNode]
-        let failureBranch = { node with Expr = Seq(failureSequence) }
+        /// Printing should be inserted just before the "key node" in the AST
+        /// such that the context is the same and the assertion result is not changed
+        let rec annotateKeyNode (node: Node<'E,'T>) =
+            match node.Expr with
+            | Seq(nodes) ->
+                { node with Expr = Seq(nodes[0..nodes.Length - 2] @ [annotateKeyNode nodes[nodes.Length - 1]]) }
+            | Let(name, init, scope)
+            | LetT(name, _, init, scope)
+            | LetMut(name, init, scope)
+            | LetRec(name, _, init, scope) ->
+                {node with Expr = Let(name, init, (annotateKeyNode scope))}
+            | _ -> 
+                { node with Expr = Seq(
+                                msgArrAst @
+                                printVarNodes @
+                                [{ node with Expr = PrintLn({ node with Expr = StringVal "***********************" }) }] @
+                                [node]) }
+
+        // Wrap annotated AST in Assertion expression
+        let failureBranch = { node with Expr = Assertion(annotateKeyNode arg) }
 
         // Create the success case (Unit)
         let successBranch = { node with Expr = UnitVal }
 
         // Create the Not(decoratedArg) node
+        // The decoratedArg should be used instead of arg 
+        // to ensure nested assertion error reporting
         let condition = { node with Expr = Not(decoratedArg) }
 
-        // Create the final If expression
-        let ifExpr = If(condition, failureBranch, successBranch)
-
-        // Return the new If node, replacing the original Assertion node
-        { node with Expr = ifExpr } // The type of the whole construct is Unit
+        let res = { node with Expr = If(condition, failureBranch, successBranch) }
+        Log.info (prettyPrint res)
+        res
 
     | Let(vname, init, scope) ->
         // Propagate the substitution in the "let" scope

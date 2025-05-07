@@ -19,9 +19,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="src/Log.fs" />
-    <Compile Include="src/SourceRepository.fs" />
     <Compile Include="src/AST.fs" />
-    <Compile Include="src/ASTUtil.fs" />
+    <Compile Include="src/SourceRepository.fs" />
     <!-- Lexer and parser generation -->
     <PackageReference Include="FsLexYacc" Version="11.3.0" />
     <FsYacc Include="src/Parser.fsy">
@@ -38,6 +37,7 @@
     <Compile Include="src/Type.fs" />
     <Compile Include="src/Typechecker.fs" />
     <Compile Include="src/PrettyPrinter.fs" />
+    <Compile Include="src/ASTUtil.fs" />
     <Compile Include="src/Interpreter.fs" />
     <Compile Include="src/RISCV.fs" />
     <Compile Include="src/RISCVCodegen.fs" />

@@ -545,7 +545,33 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 ])
                 ++ (afterSysCall [Reg.a0] [])
         | t ->
-            failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
+            match expandType arg.Env t with
+            | TStruct fields ->
+                let nodes = 
+                    [{ node with Expr = Print({ node with Expr = StringVal("{ "); Type = TString }) }] @
+                    (List.collect (fun (name, tpe) ->
+                        match tpe with
+                        | TString ->
+                            [
+                                { node with Expr = Print({ node with Expr = StringVal(name + @" = \"""); Type = TString }) }
+                                { node with Expr = Print({ node with Expr = FieldSelect(arg, name); Type = tpe }) }
+                                { node with Expr = Print({ node with Expr = StringVal(@"\""; "); Type = TString }) }
+                            ]
+                        | TFun (_, _) ->
+                            [
+                                { node with Expr = Print({ node with Expr = StringVal($"{name} = {tpe.ToString()}; "); Type = TString }) }
+                            ]
+                        | _ ->
+                            [
+                                { node with Expr = Print({ node with Expr = StringVal(name + " = "); Type = TString }) }
+                                { node with Expr = Print({ node with Expr = FieldSelect(arg, name); Type = tpe }) }
+                                { node with Expr = Print({ node with Expr = StringVal("; "); Type = TString }) }
+                            ]
+                    ) fields) @
+                    [{ node with Expr = Print({ node with Expr = StringVal("}"); Type = TString }) }]
+                doCodegen env { node with Expr = Seq(nodes) }
+            | exp_t ->
+                failwith $"BUG: Print codegen invoked on unsupported type %O{exp_t} (original: %O{t})"
 
     | PrintLn(arg) ->
         // Recycle codegen for Print above, then also output a newline
