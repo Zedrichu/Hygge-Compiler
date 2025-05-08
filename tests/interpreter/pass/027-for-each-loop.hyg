@@ -1,0 +1,9 @@
+let arr: array {int} = array(7, 1);
+arrayElem(arr, 1) <- 2;
+arrayElem(arr, 2) <- 3;
+let mutable sum = 0;
+for (x in arr) {
+    println(x);
+    sum <- sum + x
+};
+assert(sum = 10)

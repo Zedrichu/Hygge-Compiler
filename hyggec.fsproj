@@ -34,12 +34,14 @@
     <Compile Include="src/Parser.fs" />
     <Compile Include="src/Lexer.fs" />
     <Compile Include="src/Util.fs" />
+    <Compile Include="src/ANF.fs" />
     <Compile Include="src/Type.fs" />
     <Compile Include="src/Typechecker.fs" />
     <Compile Include="src/PrettyPrinter.fs" />
     <Compile Include="src/Interpreter.fs" />
     <Compile Include="src/RISCV.fs" />
     <Compile Include="src/RISCVCodegen.fs" />
+    <Compile Include="src/ANFRISCVCodegen.fs" />
     <!-- Command line parsing -->
     <PackageReference Include="CommandLineParser.FSharp" Version="2.9.1" />
     <Compile Include="src/CmdLine.fs" />
