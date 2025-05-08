@@ -75,22 +75,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
               (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)), $"Move float value %f{v} to FP register")
               (RV.LW(Reg.r(env.Target), Imm12(0), Reg.sp), "Restore env.Target register from stack")
               (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space") ])
-    // | FloatVal(v) ->
-    //     let bytes = System.BitConverter.GetBytes(v)
-    //     if not System.BitConverter.IsLittleEndian then
-    //         System.Array.Reverse(bytes)
-
-    //     let word = System.BitConverter.ToInt32(bytes, 0)
-
-    //     Asm([
-    //         (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space to save register")
-    //         (RV.SW(Reg.r(env.Target), Imm12(0), Reg.sp), "Save env.Target register to stack")
-    //         (RV.LI(Reg.r(env.Target), word), $"Float value %f{v}")
-    //         (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)), $"Move float value %f{v} to FP register")
-    //         (RV.FMV_S(FPReg.fs0, FPReg.r(env.FPTarget)), "Preserve float value in fs0")  // ✅ Preserve p
-    //         (RV.LW(Reg.r(env.Target), Imm12(0), Reg.sp), "Restore env.Target register from stack")
-    //         (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
-    //     ])
     
     | StringVal(v) ->
         let escapedV = v.Replace("\"", "\\\"")
@@ -793,15 +777,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             List.except [Reg.r(env.Target)]
                         (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
                          @ [for i in 0u..6u do yield Reg.t(i)])
-        // let saveFPRegs = 
-        //     List.except [FPReg.r(env.FPTarget)]
-        //                 [for i in 0u..7u do yield FPReg.fa(i)]
-        //                 @ [for i in 0u..11u do yield FPReg.ft(i)]
+        // Here we also create a list of FP registers to save as per callee and caller convention. For caller we save fa and ft registers. 
+        // We use filter and compare for the list because of a small bug/issue with .except that sometimes it wouldn't exclude the target register and hence overwrite it                
         let saveFPRegs = 
             List.filter (fun (e: FPReg) -> e.Number <> env.FPTarget)
                         ([for i in 0u..7u do yield FPReg.fa(i)]
                         @ [for i in 0u..11u do yield FPReg.ft(i)])
-        //saveFPRegs = List.filter (e => e.Number != env.FPTarget) saveFPRegs
 
         let closurePlainFAccessCode = Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
                                           "Load plain function address `~f` from closure")
@@ -891,6 +872,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                   .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
         
         /// Code that handles the function return value (if any)
+        /// We now check if it is a Function then we check the return type to target the correct output register, FPReg for float, Reg for int.
         let retCode =
             match expr.Type with
             | TFun (_, retType) -> 
@@ -1373,7 +1355,7 @@ and internal compileFunction (args: List<string * Type>)
     /// Note: the definition of 'saveRegs' uses list comprehension:
     /// https://en.wikibooks.org/wiki/F_Sharp_Programming/Lists#Using_List_Comprehensions
     let saveRegs = [for i in 0u..11u do yield Reg.s(i)]
-    let saveFPRegs = [for i in 0u..11u do yield FPReg.fs(i)]
+    let saveFPRegs = [for i in 0u..11u do yield FPReg.fs(i)] // Here in callee as per the RISCV guidelines we want to also save/track 'fs' registers.
 
     // Finally, we put together the full code for the function
     Asm(RV.COMMENT("Function prologue begins here"))
