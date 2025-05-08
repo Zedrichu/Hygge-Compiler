@@ -570,6 +570,13 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     ) fields) @
                     [{ node with Expr = Print({ node with Expr = StringVal("}"); Type = TString }) }]
                 doCodegen env { node with Expr = Seq(nodes) }
+            | TArray tpe ->
+                let nodes = [
+                    { node with Expr = Print({ node with Expr = StringVal($"Array{{ type: {tpe.ToString()}; length: "); Type = TString }) }
+                    { node with Expr = Print({ node with Expr = ArrayLength(arg); Type = TInt }) }
+                    { node with Expr = Print({ node with Expr = StringVal(" }"); Type = TString }) }
+                ]
+                doCodegen env { node with Expr = Seq(nodes) }
             | exp_t ->
                 failwith $"BUG: Print codegen invoked on unsupported type %O{exp_t} (original: %O{t})"
 
