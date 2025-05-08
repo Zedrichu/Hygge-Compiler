@@ -1476,12 +1476,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
             // Generate code for the case body, with the case variable set to the matched union
             let bodyImplCode =
-                let caseLocalEnv =
-                    { Target = env.Target
-                      FPTarget = env.FPTarget
-                      VarStorage = env.VarStorage.Add(caseVar, valStorage) }
-
-                doCodegen caseLocalEnv caseBodyExpr
+              doCodegen {env with VarStorage = env.VarStorage.Add(caseVar, valStorage)} caseBodyExpr
 
             // Assemble the full code for this case: entry label, load value, execute body, then jump to match_end
             let caseCodeBlock =
