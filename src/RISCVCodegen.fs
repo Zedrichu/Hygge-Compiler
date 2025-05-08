@@ -914,16 +914,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                        (RV.COMMENT("Restore caller-saved registers"),"")
                         ])
                   ++ (restoreRegisters saveRegs saveFPRegs)
-
-        // REVERESED CALLCODE ORDER
-        // callCode
-        //     .AddText(RV.COMMENT("After function call"))
-        //     ++ retCode
-        //     .AddText(RV.COMMENT("Restore caller-saved registers"))
-        //     ++ (restoreRegisters saveRegs saveFPRegs)
-        //     .AddText([
-        //         (RV.ADDI(Reg.sp, Reg.sp, Imm12(4 * (floatArgsOnStack + intArgsOnStack))), "Restore SP after stack-passed args")
-        //     ])
         
     | StructCons(fields) ->
         // To compile a structure constructor, we allocate heap space for the
@@ -1389,7 +1379,7 @@ and internal compileFunction (args: List<string * Type>)
     Asm(RV.COMMENT("Function prologue begins here"))
             .AddText(RV.COMMENT("Save callee-saved registers"))
         ++ (saveRegisters saveRegs saveFPRegs)
-            .AddText(RV.ADDI(Reg.fp, Reg.sp, Imm12(saveRegs.Length * 4)),
+            .AddText(RV.ADDI(Reg.fp, Reg.sp, Imm12((saveRegs.Length + saveFPRegs.Length) * 4)),
                      "Update frame pointer for the current function")
             .AddText(RV.COMMENT("End of function prologue.  Function body begins"))
         ++ bodyCode
