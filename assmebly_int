@@ -1,0 +1,515 @@
+.data:
+string_val:
+    .string "***********************"
+string_val_0:
+    .string "Assertion error @ .\tests\codegen\pass\025-more-than-8-args-int.hyg:33:1"
+string_val_1:
+    .string "-----------------------"
+string_val_2:
+    .string " 33: assert(nested_result = 300) // 200 + 100"
+string_val_3:
+    .string "...: ^"
+string_val_4:
+    .string "***********************"
+
+.text:
+    mv fp, sp  # Initialize frame pointer
+    la t0, fun_addLastTwo  # Load plain fun_addLastTwo function address
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    li a0, 4  # Amount of memory to allocate for a struct (in bytes)
+    li a7, 9  # RARS syscall: Sbrk
+    ecall
+    mv t1, a0  # Move syscall result (struct mem address) to target
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    mv t2, t0  # Load variable '~v''
+    sw t2, 0(t1)  # Initialize struct field '~f'
+    mv t0, t1  # Move closure result to target register
+    la t1, fun_nestedCall  # Load plain fun_nestedCall function address
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    li a0, 8  # Amount of memory to allocate for a struct (in bytes)
+    li a7, 9  # RARS syscall: Sbrk
+    ecall
+    mv t2, a0  # Move syscall result (struct mem address) to target
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    mv s1, t1  # Load variable '~v''
+    sw s1, 0(t2)  # Initialize struct field '~f'
+    mv s1, t0  # Load variable 'addLastTwo'
+    sw s1, 4(t2)  # Initialize struct field 'addLastTwo'
+    mv t1, t2  # Move closure result to target register
+    # Load expression to be applied as a function
+    mv t2, t1  # Load variable 'nestedCall'
+    lw t2, 0(t2)  # Load plain function address `~f` from closure
+    mv s1, t1  # Load variable 'nestedCall'
+    li s2, 100
+    li s3, 200
+    li s4, 300
+    li s5, 400
+    li s6, 500
+    li s7, 600
+    li s8, 700
+    li s9, 800
+    # Before function call: save caller-saved registers
+    addi sp, sp, -136  # Update stack pointer to make room for saved registers
+    sw ra, 0(sp)
+    sw a0, 4(sp)
+    sw a1, 8(sp)
+    sw a2, 12(sp)
+    sw a3, 16(sp)
+    sw a4, 20(sp)
+    sw a5, 24(sp)
+    sw a6, 28(sp)
+    sw a7, 32(sp)
+    sw t0, 36(sp)
+    sw t1, 40(sp)
+    sw t3, 44(sp)
+    sw t4, 48(sp)
+    sw t5, 52(sp)
+    sw t6, 56(sp)
+    fsw fa0, 60(sp)
+    fsw fa1, 64(sp)
+    fsw fa2, 68(sp)
+    fsw fa3, 72(sp)
+    fsw fa4, 76(sp)
+    fsw fa5, 80(sp)
+    fsw fa6, 84(sp)
+    fsw fa7, 88(sp)
+    fsw ft1, 92(sp)
+    fsw ft2, 96(sp)
+    fsw ft3, 100(sp)
+    fsw ft4, 104(sp)
+    fsw ft5, 108(sp)
+    fsw ft6, 112(sp)
+    fsw ft7, 116(sp)
+    fsw ft8, 120(sp)
+    fsw ft9, 124(sp)
+    fsw ft10, 128(sp)
+    fsw ft11, 132(sp)
+    addi sp, sp, -4  # Update stack pointer for the overflowing args with overflow of 1 units
+    mv a0, s1  # Load function call argument 1
+    mv a1, s2  # Load function call argument 2
+    mv a2, s3  # Load function call argument 3
+    mv a3, s4  # Load function call argument 4
+    mv a4, s5  # Load function call argument 5
+    mv a5, s6  # Load function call argument 6
+    mv a6, s7  # Load function call argument 7
+    mv a7, s8  # Load function call argument 8
+    sw s9, 0(sp)  # Store function call argument 9 to stack at offset 0
+    jalr ra, 0(t2)  # Function call
+    # After function call
+    mv t2, a0  # Copy function return value to target register
+    addi sp, sp, 4  # Restore SP by 1 function args after function call
+    # Restore caller-saved registers
+    lw ra, 0(sp)
+    lw a0, 4(sp)
+    lw a1, 8(sp)
+    lw a2, 12(sp)
+    lw a3, 16(sp)
+    lw a4, 20(sp)
+    lw a5, 24(sp)
+    lw a6, 28(sp)
+    lw a7, 32(sp)
+    lw t0, 36(sp)
+    lw t1, 40(sp)
+    lw t3, 44(sp)
+    lw t4, 48(sp)
+    lw t5, 52(sp)
+    lw t6, 56(sp)
+    flw fa0, 60(sp)
+    flw fa1, 64(sp)
+    flw fa2, 68(sp)
+    flw fa3, 72(sp)
+    flw fa4, 76(sp)
+    flw fa5, 80(sp)
+    flw fa6, 84(sp)
+    flw fa7, 88(sp)
+    flw ft1, 92(sp)
+    flw ft2, 96(sp)
+    flw ft3, 100(sp)
+    flw ft4, 104(sp)
+    flw ft5, 108(sp)
+    flw ft6, 112(sp)
+    flw ft7, 116(sp)
+    flw ft8, 120(sp)
+    flw ft9, 124(sp)
+    flw ft10, 128(sp)
+    flw ft11, 132(sp)
+    addi sp, sp, 136  # Restore stack pointer after register restoration
+    mv s1, t2  # Load variable 'nested_result'
+    li s2, 300
+    beq s1, s2, eq_true
+    li s1, 0  # Comparison result is false
+    j eq_end
+eq_true:
+    li s1, 1  # Comparison result is true
+eq_end:
+    bnez s1, if_true  # Jump when 'if' condition is true
+    la s1, if_false  # Load the address of the 'false' branch of the 'if' code
+    jr s1  # Jump to the 'false' branch of the 'if' code
+if_true:  # Beginning of the 'true' branch of the 'if' code
+    la s2, if_end  # Load the address of the end of the 'if' code
+    jr s2  # Jump to skip the 'false' branch of 'if' code
+if_false:  # Beginning of the 'false' branch of the 'if' code
+    la s1, string_val
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    mv a0, s1  # Copy to a0 for printing
+    li a7, 4  # RARS syscall: PrintString
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    li a7, 11  # RARS syscall: PrintChar
+    li a0, 10  # Character to print (newline)
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    la s1, string_val_0
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    mv a0, s1  # Copy to a0 for printing
+    li a7, 4  # RARS syscall: PrintString
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    li a7, 11  # RARS syscall: PrintChar
+    li a0, 10  # Character to print (newline)
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    la s1, string_val_1
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    mv a0, s1  # Copy to a0 for printing
+    li a7, 4  # RARS syscall: PrintString
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    li a7, 11  # RARS syscall: PrintChar
+    li a0, 10  # Character to print (newline)
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    la s1, string_val_2
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    mv a0, s1  # Copy to a0 for printing
+    li a7, 4  # RARS syscall: PrintString
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    li a7, 11  # RARS syscall: PrintChar
+    li a0, 10  # Character to print (newline)
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    la s1, string_val_3
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    mv a0, s1  # Copy to a0 for printing
+    li a7, 4  # RARS syscall: PrintString
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    li a7, 11  # RARS syscall: PrintChar
+    li a0, 10  # Character to print (newline)
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    la s1, string_val_4
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    mv a0, s1  # Copy to a0 for printing
+    li a7, 4  # RARS syscall: PrintString
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    # Before system call: save registers
+    addi sp, sp, -8  # Update stack pointer to make room for saved registers
+    sw a7, 0(sp)
+    sw a0, 4(sp)
+    li a7, 11  # RARS syscall: PrintChar
+    li a0, 10  # Character to print (newline)
+    ecall
+    # After system call: restore registers
+    lw a7, 0(sp)
+    lw a0, 4(sp)
+    addi sp, sp, 8  # Restore stack pointer after register restoration
+    li s1, 0  # Bool value 'False'
+    addi s1, s1, -1
+    beqz s1, assert_true  # Jump if assertion OK
+    li a7, 93  # RARS syscall: Exit2
+    li a0, 42  # Assertion violation exit code
+    ecall
+assert_true:
+if_end:  # End of the 'if' code
+    mv t2, s1  # Move 'let' scope result to 'let' target register
+    li a7, 10  # RARS syscall: Exit
+    ecall  # Successful exit with code 0
+
+
+fun_nestedCall:  # Plain lambda term (fun instance) or named function code
+    # Function prologue begins here
+    # Save callee-saved registers
+    addi sp, sp, -48  # Update stack pointer to make room for saved registers
+    sw fp, 0(sp)
+    sw s1, 4(sp)
+    sw s2, 8(sp)
+    sw s3, 12(sp)
+    sw s4, 16(sp)
+    sw s5, 20(sp)
+    sw s6, 24(sp)
+    sw s7, 28(sp)
+    sw s8, 32(sp)
+    sw s9, 36(sp)
+    sw s10, 40(sp)
+    sw s11, 44(sp)
+    addi fp, sp, 48  # Update frame pointer for the current function
+    # End of function prologue.  Function body begins
+    # Load expression to be applied as a function
+    mv t0, a0  # Load variable '~clos'
+    lw t0, 4(t0)  # Retrieve value of struct field 'addLastTwo'
+    lw t0, 0(t0)  # Load plain function address `~f` from closure
+    mv t1, a0  # Load variable '~clos'
+    lw t1, 4(t1)  # Retrieve value of struct field 'addLastTwo'
+    lw t2, 0(fp)  # Load variable 'b8' from stack at offset 0, with fp at 8
+    lw s1, 0(fp)  # Load variable 'b8' from stack at offset 0, with fp at 8
+    lw s2, 0(fp)  # Load variable 'b8' from stack at offset 0, with fp at 8
+    mv s3, a7  # Load variable 'b7'
+    mv s4, a6  # Load variable 'b6'
+    mv s5, a5  # Load variable 'b5'
+    mv s6, a4  # Load variable 'b4'
+    mv s7, a3  # Load variable 'b3'
+    mv s8, a2  # Load variable 'b2'
+    mv s9, a1  # Load variable 'b1'
+    # Before function call: save caller-saved registers
+    addi sp, sp, -136  # Update stack pointer to make room for saved registers
+    sw ra, 0(sp)
+    sw a0, 4(sp)
+    sw a1, 8(sp)
+    sw a2, 12(sp)
+    sw a3, 16(sp)
+    sw a4, 20(sp)
+    sw a5, 24(sp)
+    sw a6, 28(sp)
+    sw a7, 32(sp)
+    sw t1, 36(sp)
+    sw t2, 40(sp)
+    sw t3, 44(sp)
+    sw t4, 48(sp)
+    sw t5, 52(sp)
+    sw t6, 56(sp)
+    fsw fa0, 60(sp)
+    fsw fa1, 64(sp)
+    fsw fa2, 68(sp)
+    fsw fa3, 72(sp)
+    fsw fa4, 76(sp)
+    fsw fa5, 80(sp)
+    fsw fa6, 84(sp)
+    fsw fa7, 88(sp)
+    fsw ft1, 92(sp)
+    fsw ft2, 96(sp)
+    fsw ft3, 100(sp)
+    fsw ft4, 104(sp)
+    fsw ft5, 108(sp)
+    fsw ft6, 112(sp)
+    fsw ft7, 116(sp)
+    fsw ft8, 120(sp)
+    fsw ft9, 124(sp)
+    fsw ft10, 128(sp)
+    fsw ft11, 132(sp)
+    addi sp, sp, -12  # Update stack pointer for the overflowing args with overflow of 3 units
+    mv a0, t1  # Load function call argument 1
+    mv a1, t2  # Load function call argument 2
+    mv a2, s1  # Load function call argument 3
+    mv a3, s2  # Load function call argument 4
+    mv a4, s3  # Load function call argument 5
+    mv a5, s4  # Load function call argument 6
+    mv a6, s5  # Load function call argument 7
+    mv a7, s6  # Load function call argument 8
+    sw s7, 0(sp)  # Store function call argument 9 to stack at offset 0
+    sw s8, 4(sp)  # Store function call argument 10 to stack at offset 4
+    sw s9, 8(sp)  # Store function call argument 11 to stack at offset 8
+    jalr ra, 0(t0)  # Function call
+    # After function call
+    mv t0, a0  # Copy function return value to target register
+    addi sp, sp, 12  # Restore SP by 3 function args after function call
+    # Restore caller-saved registers
+    lw ra, 0(sp)
+    lw a0, 4(sp)
+    lw a1, 8(sp)
+    lw a2, 12(sp)
+    lw a3, 16(sp)
+    lw a4, 20(sp)
+    lw a5, 24(sp)
+    lw a6, 28(sp)
+    lw a7, 32(sp)
+    lw t1, 36(sp)
+    lw t2, 40(sp)
+    lw t3, 44(sp)
+    lw t4, 48(sp)
+    lw t5, 52(sp)
+    lw t6, 56(sp)
+    flw fa0, 60(sp)
+    flw fa1, 64(sp)
+    flw fa2, 68(sp)
+    flw fa3, 72(sp)
+    flw fa4, 76(sp)
+    flw fa5, 80(sp)
+    flw fa6, 84(sp)
+    flw fa7, 88(sp)
+    flw ft1, 92(sp)
+    flw ft2, 96(sp)
+    flw ft3, 100(sp)
+    flw ft4, 104(sp)
+    flw ft5, 108(sp)
+    flw ft6, 112(sp)
+    flw ft7, 116(sp)
+    flw ft8, 120(sp)
+    flw ft9, 124(sp)
+    flw ft10, 128(sp)
+    flw ft11, 132(sp)
+    addi sp, sp, 136  # Restore stack pointer after register restoration
+    # End of function body.  Function epilogue begins
+    mv a0, t0  # Move result of function into return value register
+    # Restore callee-saved registers
+    lw fp, 0(sp)
+    lw s1, 4(sp)
+    lw s2, 8(sp)
+    lw s3, 12(sp)
+    lw s4, 16(sp)
+    lw s5, 20(sp)
+    lw s6, 24(sp)
+    lw s7, 28(sp)
+    lw s8, 32(sp)
+    lw s9, 36(sp)
+    lw s10, 40(sp)
+    lw s11, 44(sp)
+    flw fs0, 48(sp)
+    flw fs1, 52(sp)
+    flw fs2, 56(sp)
+    flw fs3, 60(sp)
+    flw fs4, 64(sp)
+    flw fs5, 68(sp)
+    flw fs6, 72(sp)
+    flw fs7, 76(sp)
+    flw fs8, 80(sp)
+    flw fs9, 84(sp)
+    flw fs10, 88(sp)
+    flw fs11, 92(sp)
+    addi sp, sp, 96  # Restore stack pointer after register restoration
+    jr ra  # End of function, return to caller
+fun_addLastTwo:  # Plain lambda term (fun instance) or named function code
+    # Function prologue begins here
+    # Save callee-saved registers
+    addi sp, sp, -48  # Update stack pointer to make room for saved registers
+    sw fp, 0(sp)
+    sw s1, 4(sp)
+    sw s2, 8(sp)
+    sw s3, 12(sp)
+    sw s4, 16(sp)
+    sw s5, 20(sp)
+    sw s6, 24(sp)
+    sw s7, 28(sp)
+    sw s8, 32(sp)
+    sw s9, 36(sp)
+    sw s10, 40(sp)
+    sw s11, 44(sp)
+    addi fp, sp, 48  # Update frame pointer for the current function
+    # End of function prologue.  Function body begins
+    lw t0, 4(fp)  # Load variable 'a9' from stack at offset 4, with fp at 8
+    lw t1, 8(fp)  # Load variable 'a10' from stack at offset 8, with fp at 8
+    add t0, t0, t1
+    # End of function body.  Function epilogue begins
+    mv a0, t0  # Move result of function into return value register
+    # Restore callee-saved registers
+    lw fp, 0(sp)
+    lw s1, 4(sp)
+    lw s2, 8(sp)
+    lw s3, 12(sp)
+    lw s4, 16(sp)
+    lw s5, 20(sp)
+    lw s6, 24(sp)
+    lw s7, 28(sp)
+    lw s8, 32(sp)
+    lw s9, 36(sp)
+    lw s10, 40(sp)
+    lw s11, 44(sp)
+    flw fs0, 48(sp)
+    flw fs1, 52(sp)
+    flw fs2, 56(sp)
+    flw fs3, 60(sp)
+    flw fs4, 64(sp)
+    flw fs5, 68(sp)
+    flw fs6, 72(sp)
+    flw fs7, 76(sp)
+    flw fs8, 80(sp)
+    flw fs9, 84(sp)
+    flw fs10, 88(sp)
+    flw fs11, 92(sp)
+    addi sp, sp, 96  # Restore stack pointer after register restoration
+    jr ra  # End of function, return to caller
