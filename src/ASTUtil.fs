@@ -817,7 +817,7 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
                 getKeyNodeFolder scope
             | _ -> ref node
 
-        let keyNodeRef = getKeyNodeFolder arg
+        let keyNodeRef = getKeyNodeFolder decoratedArg
         let mutable keyNode = keyNodeRef.Value
 
         /// Get free variables in the keyNode
@@ -998,32 +998,32 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
                 ["-----------------------"];
                 strArr;
                 ["-----------------------"];
-                ["Relevant Variables:"]]
+                ["Relevant variables values after fail:"]]
             | None -> List.concat [
                 [""];
                 ["***********************"];
                 ["Assertion failed: <no source available>"];
                 ["-----------------------"];
-                ["Relevant Variables:"]]
+                ["Relevant variables values after fail:"]]
 
         /// Create header node with source code and location information 
         let msgArrAst = (List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr)
 
-        let keyNodeResName = Util.genSymbol("$assertRes")
+        let assertRes = Util.genSymbol("$assertRes")
         // Annotate the key node with the printout and Application results temporary variables
         let decoration = (
             let mutable res = 
                 { node with Expr = 
-                            Let(keyNodeResName, keyNode,
+                            Let(assertRes, keyNode,
                                 { node with Expr = 
-                                            If({ keyNode with Expr = Var keyNodeResName },
+                                            If({ keyNode with Expr = Var assertRes },
                                                { keyNode with Expr = BoolVal true },
                                                { node with Expr = 
                                                             (Seq(
                                                                 msgArrAst @ 
                                                                 printVarNodes @ 
                                                                 [{ node with Expr = PrintLn({ node with Expr = StringVal "***********************" }) }] @ 
-                                                                [{ keyNode with Expr = Var keyNodeResName}])) }) }) }
+                                                                [{ keyNode with Expr = Var assertRes}])) }) }) }
             // Nest Let scopes of the Application expressions results
             Set.toList preambule
             |> List.iter (fun (sym, init) -> res <- { node with Expr = Let(sym, init, res) })
@@ -1031,7 +1031,7 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
         )
 
         // Wrap annotated AST in Assertion expression
-        let res = { node with Expr = Assertion(substExprByRef arg decoration keyNodeRef) }
+        let res = { node with Expr = Assertion(substExprByRef decoratedArg decoration keyNodeRef) }
         Log.info (PrettyPrinter.prettyPrint res)
         res
 
