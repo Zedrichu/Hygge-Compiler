@@ -801,7 +801,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             List.filter (fun (e: FPReg) -> e.Number <> env.FPTarget)
                         ([for i in 0u..7u do yield FPReg.fa(i)]
                         @ [for i in 0u..11u do yield FPReg.ft(i)])
-                        //@ [for i in 0u..11u -> FPReg.fs(i)])
         //saveFPRegs = List.filter (e => e.Number != env.FPTarget) saveFPRegs
 
         let closurePlainFAccessCode = Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
@@ -890,7 +889,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                ++ (saveRegisters saveRegs saveFPRegs)
                ++ argsLoadCode // Code to load arg values into arg registers
                   .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
-
+        
         /// Code that handles the function return value (if any)
         let retCode =
             match expr.Type with
@@ -916,6 +915,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         ])
                   ++ (restoreRegisters saveRegs saveFPRegs)
 
+        // REVERESED CALLCODE ORDER
+        // callCode
+        //     .AddText(RV.COMMENT("After function call"))
+        //     ++ retCode
+        //     .AddText(RV.COMMENT("Restore caller-saved registers"))
+        //     ++ (restoreRegisters saveRegs saveFPRegs)
+        //     .AddText([
+        //         (RV.ADDI(Reg.sp, Reg.sp, Imm12(4 * (floatArgsOnStack + intArgsOnStack))), "Restore SP after stack-passed args")
+        //     ])
+        
     | StructCons(fields) ->
         // To compile a structure constructor, we allocate heap space for the
         // whole struct instance, and then compile its field initialisations
@@ -1379,7 +1388,7 @@ and internal compileFunction (args: List<string * Type>)
     // Finally, we put together the full code for the function
     Asm(RV.COMMENT("Function prologue begins here"))
             .AddText(RV.COMMENT("Save callee-saved registers"))
-        ++ (saveRegisters saveRegs [])
+        ++ (saveRegisters saveRegs saveFPRegs)
             .AddText(RV.ADDI(Reg.fp, Reg.sp, Imm12(saveRegs.Length * 4)),
                      "Update frame pointer for the current function")
             .AddText(RV.COMMENT("End of function prologue.  Function body begins"))
