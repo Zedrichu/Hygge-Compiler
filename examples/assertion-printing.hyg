@@ -1,0 +1,125 @@
+/// Nested let/seq/assert (processes until end)
+// let mutable x = 0;
+
+// fun incX(): int = x <- x + 1;
+// assert({incX(); incX(); x = 3})
+// assert({assert(x=1); assert({assert(false); x = 2}); x = 1})
+// assert(
+//     {
+//         let y = {assert(x = 0);5};
+//         // let y = 1;
+//         assert(x=0); 
+//         assert(
+//             {
+//                 assert(true); 
+//                 x = 0
+//             });
+//         let y = 2;
+//         x + y = 1
+//     }
+// )
+// let y = 1;
+// let z = 3;
+// assert(if x = 0 then y = 2 else z = 4)
+
+// == Nested let/seq/assert 2 (quits before end)
+// let mutable y = 0;
+// assert({{let x = 1; let mutable y = 2; x=y};{ y <- 3; {assert(y = 0); assert(true); y = -1}}})
+
+
+// type Shape = struct { name: string;
+//                       area: int;
+//                       perimeter: int };
+
+// let c: Shape = struct { name = "Circle";
+//                          area = 1;
+//                          perimeter = 2 };
+
+// fun getStruct(): Shape = c;
+
+// assert({let c: Shape = struct { name = "Circle";
+//                          area = 1;
+//                          perimeter = 2 }; c.perimeter = c.area })
+
+// assert({{c.perimeter = 2; false}; false});
+// assert((getStruct()).perimeter = (getStruct()).area)
+
+
+// == Function application with a variable
+// let v = 5;
+// rec fun myFunc(x: int) : int = {
+//     if x = 0 then 0
+//     else if x = 1 then 1
+//     else myFunc(x - 1) + myFunc(x - 2)
+// };
+// assert(6 = myFunc(myFunc(myFunc(myFunc(v)))))
+
+
+// == Report Array
+// fun getArr(): array {int} = array(10, 40 + 2);
+// assert(arrayLength(getArr()) = 5)
+
+// == Functions nested in a struct
+// type funStruct = struct {
+//     f: (int) -> int;
+//     g: (int) -> int
+// };
+// let bifun: funStruct = struct {
+//     f = fun(x: int) -> x + 1;
+//     g = fun(x: int) -> x + 2
+// };
+// assert(bifun.f(bifun.g(bifun.f(bifun.g(5)))) = 0)
+// assert(bifun.f(5) = 0)
+
+// == Nested function application
+// let mutable v = 5;
+// fun f(x: int): int = v <- v + 1;
+// assert(f(f(f(f(v)))) = 7)
+
+// == A function that defines a nested function and returns it.
+// fun makeFun(): () -> int =
+// {
+//     fun inc(): int = 1;
+//     inc
+// };
+// assert((makeFun())() = 43)
+
+// == arrayElem + functions + structs
+type OthrStruct = struct { o: int };
+type IdxStruct = struct { idx: int; s: OthrStruct };
+fun getIdx(): int = 0;
+
+
+let mutable x = 0;
+let y = 1;
+
+fun getArr(dummy: int): array {int} = { x <- x + 1; array(10, 40 + 2) };
+
+// let idx: IdxStruct = struct { idx = 0; s = struct { o = 1 } };
+let arr: array {int} = array(10, 40 + 2);
+// assert(arrayElem(arr, getIdx()) = x)
+println(x);
+println(arrayElem(getArr(y), getIdx()) = x);
+// getArr(y);
+println(x)
+// assert(arrayLength(arr) = x)
+// assert(arrayLength(slice(arr, x, 2)) = x)
+// ===============
+
+// == No variables reported
+// fun f(x: int, y: array {int}): int = arrayElem(y, x);
+// assert(f(4, getArr()) = -1)
+
+// assert(arrayElem({let x = array(5, 10); x}, 0) = 0)
+
+// assert(arrayElem(slice(arr, 1, 2), 0) = 42)
+
+// let x = 0;
+// assert({let y = 1; x - y = 0})
+
+// let mutable x = 0;
+// let y: int = do {
+//    x <- x +1
+// //    {assert({x; assert(false); true}); x < 5}
+// } while ({assert({x; let z = 5; assert({z; let a = z / 5; x = 10 || a = 2}); true}); x < 5});
+// ()
