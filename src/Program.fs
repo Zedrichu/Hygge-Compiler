@@ -117,7 +117,8 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
 /// Auxiliary function that attempts to compile the assembly code in the fiven
 /// filename, and returns Ok (with the compiled assembly code) or Error.
 let internal generateAsm (filename: string)
-                         (anf: bool) (maxRegisters: uint): Result<RISCV.Asm, unit> =
+                         (anf: bool) (maxRegisters: uint)
+                         (optimize: uint): Result<RISCV.Asm, unit> =
     match (Util.parseFile filename) with
     | Error(msg) ->
         Log.error $"%s{msg}"
@@ -145,7 +146,11 @@ let internal generateAsm (filename: string)
                     ANFRISCVCodegen.codegen anf registers
                 else
                     RISCVCodegen.codegen tast
-            Ok(asm)
+            /// Assembly code after optimization (if enabled)
+            let asm2 = if (optimize >= 1u)
+                           then Peephole.optimize asm
+                           else asm
+            Ok(asm2)
 
 
 /// Run the Hygge compiler with the given options, and return the exit code
@@ -155,7 +160,7 @@ let internal compile (opt: CmdLine.CompilerOptions): int =
     if opt.Verbose then Log.setLogLevel Log.LogLevel.debug
     Log.debug $"Parsed command line options:%s{Util.nl}%O{opt}"
 
-    match (generateAsm opt.File opt.ANF opt.Registers) with
+    match (generateAsm opt.File opt.ANF opt.Registers opt.Optimize) with
     | Ok(asm) ->
         match opt.OutFile with
         | Some(f) ->
@@ -179,7 +184,7 @@ let internal launchRARS (opt: CmdLine.RARSLaunchOptions): int =
     if opt.Verbose then Log.setLogLevel Log.LogLevel.debug
     Log.debug $"Parsed command line options:%s{Util.nl}%O{opt}"
 
-    match (generateAsm opt.File opt.ANF opt.Registers) with
+    match (generateAsm opt.File opt.ANF opt.Registers opt.Optimize) with
     | Ok(asm) ->
         let exitCode = RARS.launch (asm.ToString()) true
         exitCode

@@ -42,6 +42,7 @@
     <Compile Include="src/RISCV.fs" />
     <Compile Include="src/RISCVCodegen.fs" />
     <Compile Include="src/ANFRISCVCodegen.fs" />
+    <Compile Include="src/Peephole.fs" />
     <!-- Command line parsing -->
     <PackageReference Include="CommandLineParser.FSharp" Version="2.9.1" />
     <Compile Include="src/CmdLine.fs" />
