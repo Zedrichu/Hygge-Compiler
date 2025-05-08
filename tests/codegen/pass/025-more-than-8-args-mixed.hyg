@@ -1,4 +1,5 @@
 ﻿fun addFirstAndLastInt(x1: int, x11: float, x2: int, x3: int, x4: int, x5: int, x6: int, x7: int, x8: int, x9: int, x10: int, x12: float, x13: float, x14: float, x15: float, x16: float, x17: float, x18: float, x19: float, x20: float): int = x1 + x10;
 
 let result_add = addFirstAndLastInt(1,1.0f,2,3,4,5,6,7,8,9,10,2.0f,3.0f,4.0f,5.0f,6.0f,7.0f,8.0f,9.0f,10.0f);
+
 assert(result_add = 11)
