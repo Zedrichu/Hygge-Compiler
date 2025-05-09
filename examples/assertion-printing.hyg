@@ -1,7 +1,7 @@
 //==============================================================================
 // HYGGE LANGUAGE ASSERTION TESTING EXAMPLES
 //
- // This file demonstrates how variables are reported when assertions fail.
+// This file demonstrates how variables are reported when assertions fail.
 // The compiler identifies and reports only variables that are directly
 // referenced in the key assertion expression (the final condition).
 //==============================================================================
@@ -148,11 +148,12 @@ fun test5_2(): unit = {
     assert((a && b) || (c && d))  // Reports a = true, b = false, c = false, d = true
 };
 
+
 //==============================================================================
 // MAIN TEST RUNNER - Uncomment only one test at a time
 //==============================================================================
 
-// Choose ONE test to run:
+// Basic tests
 test1_1();  // Basic variable reporting
 // test1_2();  // Variables in final condition
 // test2_1();  // Outer scope variables
@@ -163,4 +164,5 @@ test1_1();  // Basic variable reporting
 // test4_2();  // Array element access
 // test5_1();  // Function application results
 // test5_2();  // Logical combinations
+
 ()
