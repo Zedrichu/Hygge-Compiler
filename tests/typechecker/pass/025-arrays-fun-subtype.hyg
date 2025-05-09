@@ -1,5 +1,5 @@
 type myArr = array {int};
-fun getArr(): myArr = array(10, 40 + 2);
+fun getArr(): myArr = array(5, 40 + 2);
 let arr: myArr = array(10, 3);
 let i = 0;
 assert(arrayLength({false; getArr()}) = 5)
