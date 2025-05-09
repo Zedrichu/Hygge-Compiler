@@ -1,0 +1,5 @@
+let s1 = struct {f = struct {g = 0.0f}};
+let s2 = copy(s1);
+s1.f.g <- 1.0f;
+assert(s1.f.g = 1.0f);
+assert(s2.f.g = 1.0f)
