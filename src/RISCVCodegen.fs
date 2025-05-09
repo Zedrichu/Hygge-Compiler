@@ -1337,7 +1337,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// heap memory at `target` (the beginning of the array) to retrieve the length value.
         let targetCode = doCodegen env target
         let lengthAccessCode =
-            match (expandType target.Env target.Type) with
+            match target.Type with
             | TArray _ ->
                 Asm().AddText(
                     RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
