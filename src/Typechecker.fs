@@ -201,6 +201,16 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             let map1 = Map.ofList cases1
             let map2 = Map.ofList cases2
             List.forall (fun l -> isSubtypeOf env map1.[l] map2.[l]) labels1
+    | (TFun(args1, ret1), TFun(args2, ret2)) ->
+        if args1.Length <> args2.Length then false
+        else
+            // Check that the return type is a subtype of the other return type
+            // (the “smaller” function is more restrictive in the type of value it returns)
+            let retSubtype = isSubtypeOf env ret1 ret2
+            // All arguments of a supertype function must be subtypes of the subtype function
+            // (the “smaller” function is more permissive in the types of arguments it accepts)
+            let argsSubtype = List.forall2 (isSubtypeOf env) args2 args1
+            retSubtype && argsSubtype
     | (_, _) -> false
 
 
