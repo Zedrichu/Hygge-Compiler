@@ -157,6 +157,9 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 
     | ArrayElem(target, index) ->
         {node with Expr = ArrayElem((subst target var sub), (subst index var sub))}
+        
+    | Copy(arg) ->
+        {node with Expr = Copy(subst arg var sub)}
 
     | ArraySlice(target, startIdx, endIdx) ->
         {node with Expr = ArraySlice((subst target var sub),
@@ -259,6 +262,7 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
         /// Free variables in all match continuations
         let fvConts = List.fold folder Set[] cases
         Set.union (freeVars expr) fvConts
+    | Copy(arg) -> freeVars arg
 
 /// Compute the union of the free variables in a list of AST nodes.
 and internal freeVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
@@ -352,6 +356,7 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
         /// Captured variables in all match continuations
         let cvConts = List.fold folder Set[] cases
         Set.union (capturedVars expr) cvConts
+    | Copy(arg) -> capturedVars arg
 
 /// Compute the union of the captured variables in a list of AST nodes.
 and internal capturedVarsInList (nodes: List<Node<'E,'T>>): Set<string> =

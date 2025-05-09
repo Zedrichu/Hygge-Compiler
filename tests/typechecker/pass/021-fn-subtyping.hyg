@@ -1,0 +1,95 @@
+type MyInt = int;
+
+// ==== Example 41 ====
+
+fun f(x: MyInt): MyInt = x + 1;
+
+let fAlias: (int) -> int = f;
+
+assert(fAlias(42) = f(42));
+
+// ====================
+
+type Shape = struct { name: string;
+                      area: float };
+type Circle = struct { name: string;
+                       area: float;
+                       radius: float };
+type Square = struct { name: string;
+                       area: float;
+                       side: float };
+
+let sq: Square = struct { name = "Square";
+                         area = 2.0f * 2.0f;
+                         side = 2.0f };
+let ci: Circle = struct { name = "Circle";
+                         area = 10.0f * 10.0f * 3.14f;
+                         radius = 10.0f };
+
+fun getArea(shape: Shape): float = shape.area;
+
+assert(getArea(sq) = 4.0f);   // accepts subtype of Shape (Square)
+assert(getArea(ci) = 314.0f); // accepts subtype of Shape (Circle)
+
+// -- struct
+
+type ExtraCircle = struct { name: string;
+                            area: float;
+                            radius: float;
+                            extra: float };
+
+fun shapeToSquare(shape: Shape): Square = {
+    struct { name = shape.name;
+             area = shape.area;
+             side = shape.area / 10 }
+};
+
+fun morphCircleWrapper(fn: (Circle) -> Shape, circle: Circle): Shape = {
+    fn(circle)
+};
+
+let ec: ExtraCircle = struct { name = "Extra Circle";
+                               area = 10.0f * 10.0f * 3.14f;
+                               radius = 10.0f;
+                               extra = 42.0f };
+
+let res: Shape = morphCircleWrapper(shapeToSquare, ec);
+
+// -- union
+type ShapeUnion = union {
+    Circle: Circle;
+    Square: Square
+};
+
+type MoreShapeUnion = union {
+    Square: Square;
+    ExtraCircle: ExtraCircle;
+    Circle: Circle
+};
+
+type BiggerUnion = union {
+    A: int;
+    B: float;
+    C: string
+};
+
+type SmallerUnion = union {
+    B: float;
+    A: int
+};
+
+fun getAreaUnion(shape: MoreShapeUnion): SmallerUnion = {
+    match shape with {
+        Circle{c} -> A{1};
+        Square{s} -> A{1};
+        ExtraCircle{ec} -> A{1}
+    }
+};
+
+fun getAreaWrapper(f: (MoreShapeUnion) -> BiggerUnion, su: ShapeUnion): BiggerUnion = {
+    f(su)
+};
+
+// getAreaUnion(Circle{ci})
+getAreaWrapper(getAreaUnion, Circle{ci});
+getAreaWrapper(getAreaUnion, Square{sq})

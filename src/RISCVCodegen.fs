@@ -168,7 +168,9 @@ let rec internal addVarNode (node: Node<TypingEnv, Type>) (var: string) (tpe: Ty
                                                 List.map (fun (label, name, body) ->
                                                     label, name, addVarNode body var tpe) cases)
                                        Env.Vars = node.Env.Vars.Add (var, tpe)}
-
+    | Copy arg -> {node with Expr = Copy(addVarNode arg var tpe)
+                             Env.Vars = node.Env.Vars.Add (var, tpe)}
+    
 /// Code generation function: compile the expression in the given AST node so
 /// that it writes its results on the 'Target' and 'FPTarget' generic register
 /// numbers (specified in the given codegen 'env'ironment).  IMPORTANT: the
@@ -1419,6 +1421,123 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
     | Pointer(_) ->
         failwith "BUG: pointers cannot be compiled (by design!)"
+
+    | Copy(arg) ->
+        match arg.Type with
+        | TStruct(fields) ->
+
+            // Define registers used by this level of copy
+            let outerDestReg = Reg.r(env.Target)      // Holds new struct address
+            let outerSourceReg = Reg.r(env.Target + 1u) // Holds original struct address
+            let tempReg = Reg.r(env.Target + 2u) // Temporarily holds the results of copy
+            let fpTempReg = FPReg.r(env.FPTarget) // Floating Point register for copying floats
+
+            // Generate the code for the target struct
+            // Place the result (original address) into outerSourceReg
+            let targetCode = doCodegen { env with Target = env.Target + 1u } arg
+
+            // Allocate heap space for the new struct
+            // Place result (new address) into outerDestReg
+            let structAllocCode =
+                (beforeSysCall [ Reg.a0 ] []) // Syscall clobbers a0, a7
+                    .AddText(
+                        [ (RV.LI(Reg.a0, (fields.Length * 4)), "Amount of memory to allocate for a struct (in bytes)")
+                          (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                          (RV.ECALL, "")
+                          (RV.MV(outerDestReg, Reg.a0), "Move syscall result (new struct mem address) to outer Dest register") ]
+                    )
+                ++ (afterSysCall [ Reg.a0 ] []) // Restore registers potentially clobbered by syscall
+
+
+            // Folder function that generates the code for copying a struct field
+            let folder =
+                fun (acc: Asm) (fieldOffset: int, (fName, fType)) ->
+                    let fieldMemOffset = Imm12(fieldOffset * 4)
+                    let fieldCommentName = $"field '{fName}'"
+
+                    let fieldCopyCode: Asm =
+                        match expandType node.Env fType with
+                        | TStruct(fields') ->
+                            //Recursively copy the struct field by reusing registers, saving context in the stack
+                            
+                            let stackSpace = 8 // Space for 2 registers (4 bytes each)
+
+                            // 1. Save outer context
+                            let saveContextCode =
+                                Asm().AddText([
+                                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(-stackSpace)), "Make stack space to save registers")
+                                    (RV.SW(outerSourceReg, Imm12(0), Reg.sp),    "Save outer source addr")
+                                    (RV.SW(outerDestReg, Imm12(4), Reg.sp),      "Save outer dest addr")
+                                ])
+
+                            // 2. Recursively copy struct reusing registers
+                            let recursiveCopyCode =
+                                doCodegen
+                                     env // Do not recursively increment registers to avoid running out of registers
+                                    { node with
+                                        Expr =
+                                            Copy( 
+                                                { node with
+                                                    Expr = FieldSelect(arg, fName)
+                                                    Type = fType }
+                                            )
+                                        Type = fType }
+
+                            // 3. Move the result to tempReg before restoring context
+                            let moveResultToTempCode =
+                                Asm().AddText([
+                                    (RV.MV(tempReg, outerDestReg), "Move nested copy result to tempReg")
+                                ])
+
+                            // 4. Restore outer context from the stack
+                            let restoreContextCode =
+                                Asm().AddText([
+                                    (RV.LW(outerSourceReg, Imm12(0), Reg.sp),    "Restore outer source addr")
+                                    (RV.LW(outerDestReg, Imm12(4), Reg.sp),      "Restore outer dest addr")
+                                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(stackSpace)), "Release stack space")
+                                ])
+
+                            // 5. Store the nested struct pointer into the appropriate field
+                            let storeResultCode =
+                                Asm().AddText([
+                                    (RV.SW(tempReg, fieldMemOffset, outerDestReg),
+                                     $"Store recursively copied {fieldCommentName} addr into outer dest")
+                                ])
+
+                            // Combine the steps for the recursive case
+                            saveContextCode ++ recursiveCopyCode ++ moveResultToTempCode  ++ restoreContextCode ++ storeResultCode
+
+                        | TFloat ->
+                            // For float fields, use floating-point registers
+                            Asm(
+                                [ (RV.FLW_S(fpTempReg, fieldMemOffset, outerSourceReg),
+                                   $"Load float {fieldCommentName} from source")
+                                  (RV.FSW_S(fpTempReg, fieldMemOffset, outerDestReg),
+                                   $"Store float {fieldCommentName} to dest") ]
+                            )
+                        | _ ->
+                            // For other field types (int, bool), use standard registers
+                            Asm(
+                                [ (RV.LW(tempReg, fieldMemOffset, outerSourceReg),
+                                   $"Load field {fieldCommentName} from source")
+                                  (RV.SW(tempReg, fieldMemOffset, outerDestReg),
+                                   $"Store field {fieldCommentName} to dest") ]
+                            )
+
+                    acc ++ fieldCopyCode // Accumulate code for this field
+
+            // Generate the code for copying all the fields using the folder function
+            let copyCode =
+                 fields
+                 |> List.mapi (fun i (fName, fType) -> (i, (fName, fType))) // Add index as offset
+                 |> List.fold folder (Asm()) // Apply folder to generate copy code for all fields
+
+            
+            targetCode ++ structAllocCode ++ copyCode
+
+        | _ -> failwith "BUG: Copy expression on non-struct"
+             
+        
 
 /// Generate code to save the given registers on the stack, before a RARS system
 /// call. Register a7 (which holds the system call number) is backed-up by
