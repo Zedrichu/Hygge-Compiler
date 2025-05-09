@@ -558,10 +558,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                 { node with Expr = Print({ node with Expr = FieldSelect(arg, name); Type = tpe }) }
                                 { node with Expr = Print({ node with Expr = StringVal(@"\""; "); Type = TString }) }
                             ]
-                        | TFun (_, _) ->
-                            [
-                                { node with Expr = Print({ node with Expr = StringVal($"{name} = {tpe.ToString()}; "); Type = TString }) }
-                            ]
                         | _ ->
                             [
                                 { node with Expr = Print({ node with Expr = StringVal(name + " = "); Type = TString }) }
@@ -576,6 +572,13 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     { node with Expr = Print({ node with Expr = StringVal($"Array{{ type: {tpe.ToString()}; length: "); Type = TString }) }
                     { node with Expr = Print({ node with Expr = ArrayLength(arg); Type = TInt }) }
                     { node with Expr = Print({ node with Expr = StringVal(" }"); Type = TString }) }
+                ]
+                doCodegen env { node with Expr = Seq(nodes) }
+            | TFun (args, ret) ->
+                // let args' = List.map (fun (e: Type) -> e.ToString()) args |> String.concat ", "
+                let nodes = [
+                    { node with Expr = Print({ node with Expr = StringVal(t.ToString()); Type = TString }) }
+                    // { node with Expr = Print({ node with Expr = StringVal(ret.ToString() + " }"); Type = TString }) }
                 ]
                 doCodegen env { node with Expr = Seq(nodes) }
             | exp_t ->
@@ -1336,7 +1339,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// heap memory at `target` (the beginning of the array) to retrieve the length value.
         let targetCode = doCodegen env target
         let lengthAccessCode =
-            match target.Type with
+            match (expandType target.Env target.Type) with
             | TArray _ ->
                 Asm().AddText(
                     RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
