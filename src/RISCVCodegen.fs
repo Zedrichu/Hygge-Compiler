@@ -551,21 +551,17 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             match expandType arg.Env t with
             | TStruct fields ->
                 let nodes = 
-                    [{ node with Expr = Print({ node with Expr = StringVal("{ "); Type = TString }) }] @
+                    [{ node with Expr = Print({ node with Expr = StringVal("struct { "); Type = TString }) }] @
                     (List.collect (fun (name, tpe) ->
-                        match tpe with
-                        | TString ->
-                            [
-                                { node with Expr = Print({ node with Expr = StringVal(name + @" = \"""); Type = TString }) }
-                                { node with Expr = Print({ node with Expr = FieldSelect(arg, name); Type = tpe }) }
-                                { node with Expr = Print({ node with Expr = StringVal(@"\""; "); Type = TString }) }
-                            ]
-                        | _ ->
-                            [
-                                { node with Expr = Print({ node with Expr = StringVal(name + " = "); Type = TString }) }
-                                { node with Expr = Print({ node with Expr = FieldSelect(arg, name); Type = tpe }) }
-                                { node with Expr = Print({ node with Expr = StringVal("; "); Type = TString }) }
-                            ]
+                        let strVals = 
+                            match tpe with
+                            | TString -> (name + @" = \"""), @"\""; "
+                            | _ -> (name + " = "), "; "
+                        [
+                            { node with Expr = Print({ node with Expr = StringVal(fst strVals); Type = TString }) }
+                            { node with Expr = Print({ node with Expr = FieldSelect(arg, name); Type = tpe }) }
+                            { node with Expr = Print({ node with Expr = StringVal(snd strVals); Type = TString }) }
+                        ]
                     ) fields) @
                     [{ node with Expr = Print({ node with Expr = StringVal("}"); Type = TString }) }]
                 doCodegen env { node with Expr = Seq(nodes) }
