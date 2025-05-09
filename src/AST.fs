@@ -267,6 +267,9 @@ and Expr<'E,'T> =
     /// Access a specific element of an array (indexed).
     | ArrayElem of target: Node<'E,'T>
                  * index: Node<'E,'T>
+                 
+    /// Copy of a structure
+    | Copy of arg: Node<'E,'T>
 
     /// Constructor of an array slice from an array target pointer and
     /// indices defining the beginning and end of the subset range

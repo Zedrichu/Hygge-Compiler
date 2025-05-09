@@ -201,6 +201,16 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             let map1 = Map.ofList cases1
             let map2 = Map.ofList cases2
             List.forall (fun l -> isSubtypeOf env map1.[l] map2.[l]) labels1
+    | (TFun(args1, ret1), TFun(args2, ret2)) ->
+        if args1.Length <> args2.Length then false
+        else
+            // Check that the return type is a subtype of the other return type
+            // (the “smaller” function is more restrictive in the type of value it returns)
+            let retSubtype = isSubtypeOf env ret1 ret2
+            // All arguments of a supertype function must be subtypes of the subtype function
+            // (the “smaller” function is more permissive in the types of arguments it accepts)
+            let argsSubtype = List.forall2 (isSubtypeOf env) args2 args1
+            retSubtype && argsSubtype
     | (_, _) -> false
 
 
@@ -663,6 +673,18 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                      Expr = ArrayLength(ttarget) }
             | _ -> Error([(node.Pos, $"cannot access array length on expression of type %O{ttarget.Type}")])
         | Error(es) -> Error(es)
+        
+    //Copy of structures
+    //Arg needs to be of struct type
+    | Copy(arg) ->
+        match (typer env arg) with
+        | Ok(targ) ->
+            match (expandType env targ.Type) with
+            | TStruct _ ->
+                Ok{ Pos = node.Pos; Env = env; Type = targ.Type; Expr = Copy(targ) }
+            | _ -> Error([(node.Pos, $"Cannot copy expression of type %O{targ.Type}. Only struct types can be copied")])
+        | Error(es) -> Error(es)
+        
 
     | UnionCons(label, expr) ->
         match (typer env expr) with
