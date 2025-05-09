@@ -1,230 +1,166 @@
 //==============================================================================
 // HYGGE LANGUAGE ASSERTION TESTING EXAMPLES
 //
-// This file contains various examples to demonstrate the assertion error
-// reporting capabilities of the Hygge compiler. Each section is independent
-// and can be tested by uncommenting it while commenting out other sections.
+ // This file demonstrates how variables are reported when assertions fail.
+// The compiler identifies and reports only variables that are directly
+// referenced in the key assertion expression (the final condition).
 //==============================================================================
 
 //==============================================================================
-// SECTION 1: BASIC ASSERTIONS WITH MUTABLE VARIABLES
+// SECTION 1: BASIC VARIABLE REPORTING IN ASSERTIONS
 //==============================================================================
+
+// Test 1.1: Simple variable reporting - only x and y are reported
+fun test1_1(): unit = {
+    let x = 10;
+    let y = 20;
+    let unused = 30;  // This variable won't appear in the report
+    assert(x > y)  // Reports x = 10, y = 20 (but not unused)
+};
+
+// Test 1.2: Only variables used in the final condition are reported
+fun test1_2(): unit = {
+    let a = 5;
+    let b = 10;
+    let c = 15;
+    
+    assert({
+        let temp = a + b;  // Intermediate calculation
+        c < temp  // Only c and temp are reported, not a or b directly
+    })
+};
+
+//==============================================================================
+// SECTION 2: NESTED SCOPES AND VARIABLE CAPTURE
+//==============================================================================
+
+// Test 2.1: Variables from outer scopes are reported when used
+fun test2_1(): unit = {
+    let outer = 100;
+    
+    assert({
+        let inner = 50;
+        outer < inner  // Both outer and inner are reported
+    })
+};
+
+// Test 2.2: Only the variables in the final condition are reported
+fun test2_2(): unit = {
+    let x = 1;
+    let y = 2;
+    
+    assert({
+        let z = 3;
+        {
+            let w = 4;
+            z > w  // Only z and w are reported, not x or y
+        }
+    })
+};
+
+//==============================================================================
+// SECTION 3: MUTABLE VARIABLES AND STATE CHANGES
+//==============================================================================
+
+// Test 3.1: Current value of mutable variables is reported
+fun test3_1(): unit = {
+    let mutable counter = 0;
+    
+    for (let mutable i = 0; i < 5; i <- i + 1) {
+        counter <- counter + i
+    };
+    
+    assert(counter < 10)  // Reports current value of counter (10)
+};
+
+// Test 3.2: Complex expressions with mutated state
 let mutable x = 0;
+fun test3_2(): unit = {
+    let original = x;
+    
+    fun incX(): int = {println(x); x <- x + 1};
 
-fun incX(): int = x <- x + 1;
-assert({incX(); incX(); x = 3})
-
-// Example with nested assertions
-// assert({assert(x=1); assert({assert(false); x = 2}); x = 1})
-
-// Example with nested let bindings and assertions
-// assert(
-//     {
-//         let y = {assert(x = 0);5};
-//         // let y = 1;
-//         assert(x=0); 
-//         assert(
-//             {
-//                 assert(true); 
-//                 x = 0
-//             });
-//         let y = 2;
-//         x + y = 1
-//     }
-// )
-
-// Conditional assertion example
-// let y = 1;
-// let z = 3;
-// assert(if x = 0 then y = 2 else z = 4)
+    assert({
+        incX();
+        incX();
+        // Only reports x and original, not the function itself
+        x = original  // Reports x = 2, original = 0
+    })
+};
 
 //==============================================================================
-// SECTION 2: NESTED ASSERTIONS WITH MUTABLE STATE
+// SECTION 4: COMPOUND DATA STRUCTURES
 //==============================================================================
-// let mutable y = 0;
-// assert({{let x = 1; let mutable y = 2; x=y};{ y <- 3; {assert(y = 0); assert(true); y = -1}}})
+
+// Test 4.1: Struct fields in assertions
+fun test4_1(): unit = {
+    type Person = struct { 
+        name: string;
+        age: int
+    };
+    
+    let p = struct { 
+        name = "Alice"; 
+        age = 30
+    };
+    
+    let threshold = 25;
+    
+    assert(p.age < threshold)   // Reports p = struct { name = "Alice"; age = 30; }, 
+                                // threshold = 25
+};
+
+// Test 4.2: Array elements in assertions
+fun test4_2(): unit = {
+    let arr = array(3, 0);
+    arrayElem(arr, 0) <- 10;
+    arrayElem(arr, 1) <- 20;
+    arrayElem(arr, 2) <- 30;
+    
+    let idx = 1;
+    let value = 15;
+    
+    assert(arrayElem(arr, idx) < value) // Reports arr = Array{ type: int; length: 3 }, 
+                                        // idx = 1, value = 15
+};
 
 //==============================================================================
-// SECTION 3: STRUCT ASSERTIONS
+// SECTION 5: FUNCTION CALLS AND EXPRESSIONS
 //==============================================================================
-// type Shape = struct { name: string;
-//                       area: int;
-//                       perimeter: int };
 
-// let c: Shape = struct { name = "Circle";
-//                          area = 1;
-//                          perimeter = 2 };
+// Test 5.1: Function results in assertions
+fun test5_1(): unit = {
+    let base_val = 10;
+    
+    fun double(n: int): int = n * 2;
+    fun triple(n: int): int = n * 3;
+    
+    assert(double(base_val) > triple(base_val))  // Reports base_val = 10 and relevant functions
+};
 
-// fun getStruct(): Shape = c;
-
-// // Struct field comparison assertion
-// assert({let c: Shape = struct { name = "Circle";
-//                          area = 1;
-//                          perimeter = 2 }; c.perimeter = c.area })
-
-// // Function application with structs
-// assert({{c.perimeter = 2; false}; false})
-// assert((getStruct()).perimeter = (getStruct()).area)
-
-//==============================================================================
-// SECTION 4: FUNCTION APPLICATION ASSERTIONS
-//==============================================================================
-// let v = 5;
-// rec fun myFunc(x: int) : int = {
-//     if x = 0 then 0
-//     else if x = 1 then 1
-//     else myFunc(x - 1) + myFunc(x - 2)
-// };
-// assert(6 = myFunc(myFunc(myFunc(myFunc(v)))))
+// Test 5.2: Logical combinations with short-circuiting
+fun test5_2(): unit = {
+    let a = true;
+    let b = false;
+    let c = false;
+    let d = true;
+    
+    assert((a && b) || (c && d))  // Reports a = true, b = false, c = false, d = true
+};
 
 //==============================================================================
-// SECTION 5: ARRAY ASSERTIONS
+// MAIN TEST RUNNER - Uncomment only one test at a time
 //==============================================================================
-// type myArr = array {int};
-// fun getArr(): myArr = array(10, 40 + 2);
-// let arr: myArr = array(10, 3);
-// let i = 0;
-// assert(arrayLength({false; getArr()}) = 5)
 
-//==============================================================================
-// SECTION 6: FUNCTIONS IN STRUCTS
-//==============================================================================
-// type funStruct = struct {
-//     f: (int) -> int;
-//     g: (int) -> int
-// };
-// let bifun: funStruct = struct {
-//     f = fun(x: int) -> x + 1;
-//     g = fun(x: int) -> x + 2
-// };
-// assert(bifun.f(bifun.g(bifun.f(bifun.g(5)))) = 0)
-// assert(bifun.f(5) = 0)
-
-//==============================================================================
-// SECTION 7: NESTED FUNCTION APPLICATIONS WITH SIDE EFFECTS
-//==============================================================================
-// let mutable v = 5;
-// fun f(x: int): int = v <- v + 1;
-// assert(f(f(f(f(v)))) = 7)
-
-//==============================================================================
-// SECTION 8: HIGHER-ORDER FUNCTIONS
-//==============================================================================
-// fun makeFun(): () -> int =
-// {
-//     fun inc(): int = 1;
-//     inc
-// };
-// assert((makeFun())() = 43)
-
-//==============================================================================
-// SECTION 9: COMPLEX EXPRESSIONS WITH ARRAYS AND STRUCTS
-//==============================================================================
-// type OthrStruct = struct { o: int };
-// type IdxStruct = struct { idx: int; s: OthrStruct };
-// fun getIdx(): int = 0;
-// fun getIdx(dummy: (int) -> unit): int = 0;
-
-// let mutable x = 0;
-// let y = 1;
-
-// fun getArr(dummy: int): array {int} = { x <- x + 1; array(10, 40 + 2) };
-// fun d(a: int): unit = ();
-
-// let idx: IdxStruct = struct { idx = 0; s = struct { o = 1 } };
-// let arr: array {int} = array(10, 40 + 2);
-// assert(arrayElem(arr, getIdx(d)) = x)
-// assert(arrayLength(arr) = x)
-// assert(arrayLength(slice(arr, x, 2)) = x)
-
-//==============================================================================
-// SECTION 10: ARRAY SCOPING EXAMPLES
-//==============================================================================
-// fun getArr(): array {int} = { array(10, 40 + 2) };
-// fun f(x: int, y: array {int}): int = arrayElem(y, x);
-// let arr: array {int} = array(10, 42);
-// assert(arrayElem({let x = array(5, 10); x}, 0) = 0) // x is not reported as it falls out of scope during argument evaluation
-
-//==============================================================================
-// SECTION 11: UNION TYPES AND PATTERN MATCHING
-//==============================================================================
-// type OptionalInt = union {
-//     Some: int;
-//     None: unit
-// };
-
-// type NestedOptionalInt = union {
-//     Some: OptionalInt;
-//     None: unit
-// };
-
-// fun displayOption(o: NestedOptionalInt): unit =
-//     match o with {
-//         Some{x} -> 
-//             match x with {
-//                 Some{y} -> println(y);
-//                 None{_} -> println("None")
-//             }
-//             // println(x);
-//         None{_} -> println("None")
-//     };
-
-// fun getOption(o: NestedOptionalInt): int =
-//     match o with {
-//         Some{x} ->
-//             match x with {
-//                 Some{y} -> y;
-//                 None{_} -> -2
-//             };
-//         None{_} -> -1
-//     };
-// let a = 42;
-// assert(getOption(Some{Some{a}}) = 0)
-// displayOption(Some{42});
-// displayOption(None{()});
-
-//==============================================================================
-// SECTION 12: SHAPE UNION TYPE WITH AREA CALCULATION
-//==============================================================================
-// // A shape type.
-// type Shape = union {
-//     Circle: struct { radius: float };
-//     Rectangle: struct { width: float; height: float };
-//     Square: struct { side: float }
-// };
-
-// // Return the area of a shape.
-// fun area(s: Shape): float =
-//     match s with {
-//         Circle{c} -> c.radius * c.radius * 3.14f;
-//         Rectangle{r} -> r.width * r.height;
-//         Square{s} -> s.side * s.side
-//     };
-
-// assert(area(Circle{struct {radius = 2.0f}}) = 0.0f);
-// assert(area(Rectangle{struct {width = 2.0f; height = 3.0f}}) = 6.0f);
-// assert(area(Square{struct {side = 5.0f}}) = 25.0f)
-
-//==============================================================================
-// SECTION 13: SCOPE TESTING WITH ASSERTIONS
-//==============================================================================
-// let x = 0;
-// assert({let y = 1; x - y = 0})
-
-//==============================================================================
-// SECTION 14: DO-WHILE LOOP WITH NESTED ASSERTIONS
-//==============================================================================
-// let mutable x = 0;
-// let y: int = do {
-//    x <- x + 1
-//    // {assert({x; assert(false); true}); x < 5}
-// } while ({assert({x; let z = 5; assert({z; let a = z / 5; x = 10 || a = 2}); true}); x < 5});
-// ()
-
-//==============================================================================
-// SECTION 15: FUNCTION TYPE ASSERTIONS
-//==============================================================================
-// type myFunType = (int) -> unit;
-// let myFun: myFunType = fun(x: int) -> { x; () };
-// fun wrapper(f: myFunType): bool = false;
-// assert(wrapper(myFun))
+// Choose ONE test to run:
+test1_1();  // Basic variable reporting
+// test1_2();  // Variables in final condition
+// test2_1();  // Outer scope variables
+// test2_2();  // Nested scope variables
+// test3_1();  // Mutable variable current state
+// test3_2();  // Mutation and state changes
+// test4_1();  // Struct field access
+// test4_2();  // Array element access
+// test5_1();  // Function application results
+// test5_2();  // Logical combinations
+()
