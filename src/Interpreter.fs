@@ -328,6 +328,43 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | IntVal(v) -> printer $"%d{v}"; reductum
             | FloatVal(v) -> printer $"%f{v}"; reductum
             | StringVal(v) -> printer $"%s{v}"; reductum
+            | Lambda(_,_) -> printer ($"`%s{prettyPrintValue arg}`"); reductum
+            | Pointer(addr) ->
+                match (env.PtrInfo.TryFind addr) with
+                | Some(fields) ->
+                    let nodes = match fields with
+                                | ["~length"; "~data"] ->
+                                    // Special case for arrays [print as 'Array{ length: 10 }']
+                                    [{ node with Expr = Print({ node with Expr = StringVal("Array{ length: ") }) }] @
+                                    [{ node with Expr = Print({ node with Expr = FieldSelect({ node with Expr = Pointer(addr) }, "~length") }) }] @
+                                    [{ node with Expr = Print({ node with Expr = StringVal(" }") }) }]
+                                | _ ->
+                                    // []
+                                    [{ node with Expr = Print({ node with Expr = StringVal("struct { ") }) }] @
+                                    (List.mapi (fun i field ->
+                                        // Add quotes around string values
+                                        let strVals = 
+                                            match (env.Heap.TryFind (addr + (uint i))) with
+                                            | Some(fieldNode) when (match fieldNode.Expr with StringVal(_) -> true | _ -> false) ->
+                                                $"{field} = \"", "\"; "
+                                            | _ ->
+                                                $"{field} = ", "; "
+                                        [
+                                            { node with Expr = Print({ node with Expr = StringVal(fst strVals) }) }
+                                            { node with Expr = Print({ node with Expr = FieldSelect({ node with Expr = Pointer(addr) }, field) }) }
+                                            { node with Expr = Print({ node with Expr = StringVal(snd strVals) }) }
+                                        ]
+                                        ) fields |> List.concat) @
+                                    [{ node with Expr = Print({ node with Expr = StringVal(" }") }) }]
+
+                    let rec reduceFullyWithEnv (env: RuntimeEnv<'E,'T>) (node: Node<'E,'T>): RuntimeEnv<'E,'T>*Node<'E,'T> =
+                        match (reduce env node) with
+                        | Some(env', node') -> reduceFullyWithEnv env' node'
+                        | None -> (env, node)
+                    // since this is just Print concatenation, we reduce it fully
+                    // such that externally it looks like a single Print and no other modification is needed
+                    Some (reduceFullyWithEnv env { node with Expr = Seq(nodes) })
+                | None -> None
             | _ when not (isValue node) ->
                 match (reduce env arg) with
                 | Some(env', arg2) ->
