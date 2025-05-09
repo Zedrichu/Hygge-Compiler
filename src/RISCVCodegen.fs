@@ -1279,7 +1279,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// current element address in memory. We load the element value from the
         /// heap location, with 0 offset from the computed element address.
         let elemAccessCode: Asm =
-            match array.Type, index.Type with
+            let arrType = expandType node.Env array.Type
+            let idxType = expandType node.Env index.Type
+            match arrType, idxType with
             | TArray elemType, TInt ->
                 match elemType with
                 | t when (isSubtypeOf array.Env t TUnit) ->
@@ -1304,7 +1306,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// heap memory at `target` (the beginning of the array) to retrieve the length value.
         let targetCode = doCodegen env target
         let lengthAccessCode =
-            match target.Type with
+            match expandType node.Env target.Type with
             | TArray _ ->
                 Asm().AddText(
                     RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
@@ -1329,7 +1331,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         /// Assembly code to compute the updated data pointer of the slice based on start offset
         let dataPointerCode =
-            match parent.Type, startIdx.Type with
+            let parentType = expandType node.Env parent.Type
+            let startIdxType = expandType node.Env startIdx.Type
+            match parentType, startIdxType with
             | TArray _, TInt ->
                 Asm().AddText([
                     (RV.LW(Reg.r(env.Target + 1u), Imm12(4), Reg.r(env.Target)),
