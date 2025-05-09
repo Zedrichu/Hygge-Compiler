@@ -829,151 +829,23 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
             [{ node with Expr = Print({ node with Expr = StringVal($"{varName} = ") }) };
              { node with Expr = PrintLn({ node with Expr = varExpr }) }]
 
-        // TODO: do not evaluate keyNode twice
-        
-        let mutable preambule: Set<string * Node<'E,'T>> = Set[]
+        // let mutable preambule: Set<string * Node<'E,'T>> = Set[]
 
-        let expandPreambule (node: Node<'E,'T>) =
-            let sym = Util.genSymbol("$assertApp")
-            preambule <- preambule.Add(sym, node)
-            keyNode <- { keyNode with Expr = (substExpr keyNode (Var sym) node).Expr }
-            sym
+        // let expandPreambule (node: Node<'E,'T>) =
+        //     let sym = Util.genSymbol("$assertApp")
+        //     preambule <- preambule.Add(sym, node)
+        //     keyNode <- { keyNode with Expr = (substExpr keyNode (Var sym) node).Expr }
+        //     sym
 
 
         /// Create print nodes for each free variable
         let printVarNodes =
             fvList |> List.collect (fun (record: string * (Node<'E,'T>*Node<'E,'T>*Node<'E,'T>)) ->
                 let (varName: string, (chainedNode: Node<'E,'T>, parentNode: Node<'E,'T>, varNode: Node<'E,'T>)) = record
-                // Log.debug $"{varName}::{varNode}::{parentNode}"
-
-                // TODO: consider recursive processing for nested expressions or simplify reporting
-                // let rec getDirectParent (parentNode: Node<'E,'T>) =
-                //     match parentNode.Expr with
-                //     | Application(node, args) ->
-                //         match List.tryFind (fun (n: Node<'E,'T>) -> n.Expr = varNode.Expr) (node :: args) with
-                //         | Some _ -> Some parentNode
-                //         | None -> 
-                //             let nodes = node :: args
-                //             let mutable pn: option<Node<'E,'T>> = None
-                //             let mutable i = 0
-                //             while i < nodes.Length && pn.IsNone do
-                //                 pn <- getDirectParent nodes[i]
-                //                 i <- i + 1
-                //             pn
-                //     | _ -> Some parentNode
-
-                // let sym = Util.genSymbol("$assertApp")
-                // preambule <- preambule.Add(sym, parentNode)
-                // keyNode <- { keyNode with Expr = (substExpr keyNode (Var sym) parentNode).Expr }
 
                 match parentNode.Expr with
                 // TODO: interpreter print struct; interpreter print Array
                 // | FieldSelect(node, field) (print whole struct instead)
-                | Application(node, args) ->
-                    match node.Expr with
-                    | Var(name) when name <> varName ->
-                        // report Application args
-                        constructSimpleVarPrint node varName varNode.Expr
-                    | _ -> []
-                    // === Ditched - generates a lot of complexity for nested applications
-                    //     chained: losing arguments of Application expression type
-                    //     parent:  potentially unsage since freeVars yield unordered collection,
-                    //              hence we cannot ensure proper application order
-                    //     Additionally, it is necessary to preevaluate the Application,
-                    //     which means, that the reported values could potentially be altered
-                    // | _ ->
-                    //     // report Application target
-                    //     let nameStr = (
-                    //         let sourceCode = SourceRepository.repository.GetSnippet(
-                    //             parentNode.Pos,
-                    //             parentNode.Pos,
-                    //             false,
-                    //             false,
-                    //             false )
-                    //         match sourceCode with
-                    //         | Some strArr ->
-                    //             List.reduce (fun (acc: string) (el: string) -> acc + el.Trim()) strArr
-                    //         | None ->
-                    //             match args.Length with
-                    //             | 0 -> $"{varName}()"
-                    //             | _ -> $"{varName}(...)" )
-                    //     let sym = Util.genSymbol("$assertApp")
-                    //     // We need to assign the Application results to a temporary variable
-                    //     // to avoid evaluating the expression twice, which can introduce side effects
-                    //     preambule <- preambule.Add(sym, parentNode)
-                    //     keyNode <- { keyNode with Expr = (substExpr keyNode (Var sym) parentNode).Expr }
-                    //     constructSimpleVarPrint 
-                    //         node
-                    //         nameStr
-                    //         (Var sym)
-                    // ^== Ditched - generates a lot of complexity for nested applications
-
-                | ArrayLength(node) ->
-                    let sym = expandPreambule node
-                    match node.Expr with
-                    | Var(name) -> 
-                        [
-                            { node with Expr = Print({ node with Expr = StringVal($"{varName} = ") }) }
-                            { node with Expr = PrintLn({ node with Expr = Var sym }) }
-                        ]
-                    | _ -> 
-                        [
-                            { node with Expr = Print({ node with Expr = StringVal($"arrayLength({node.Pos.FileName}:({node.Pos.LineStart}:{node.Pos.ColStart}-{node.Pos.LineEnd}:{node.Pos.ColEnd})) = ") }) };
-                            { node with Expr = PrintLn({ node with Expr = parentNode.Expr }) }
-                        ]
-                // If index is an Application, then it is served in different branch, since Application interfaces between ArrayElem and `Var index`
-                | ArrayElem(node, index) when varNode.Expr = node.Expr ->
-                    // if varNode.Expr = node.Expr then
-                    //     // report ArrayElem
-                    //     let sym = expandPreambule node
-                    //     [
-                    //         { node with Expr = Print({ node with Expr = StringVal($"{varName} = ") }) }
-                    //         { node with Expr = PrintLn({ node with Expr = Var sym }) }
-                    //     ]
-                    // else
-                    //     // report ArrayElem
-                    //     let sym = expandPreambule node
-                    //     [
-                    //         { node with Expr = Print({ node with Expr = StringVal($"{varName} = ") }) }
-                    //         { node with Expr = PrintLn({ node with Expr = Var sym }) }
-                    //     ]
-
-                    match node.Expr with
-                    | Var(name) ->
-                        let src = SourceRepository.repository.GetSnippet(
-                            parentNode.Pos,
-                            parentNode.Pos,
-                            false,
-                            false,
-                            false )
-                        match src with
-                        | Some strArr ->
-                            let src = List.reduce (fun (acc: string) (el: string) -> acc + el.Trim()) strArr
-                            [
-                                { node with Expr = Print({ node with Expr = StringVal($"{src} = ")}) }
-                                { node with Expr = PrintLn({ node with Expr = parentNode.Expr }) }
-                                { node with Expr = Print({ node with Expr = StringVal($"{varName} = ")})}
-                                { node with Expr = PrintLn({ node with Expr = node.Expr }) }
-                            ]
-                        | None ->
-                            [
-                                { node with Expr = Print({ node with Expr = StringVal($"arrayElem({name}, ") }) }
-                                { node with Expr = Print(index) }
-                                { node with Expr = Print({ node with Expr = StringVal(") = ") }) }
-                                { node with Expr = PrintLn({ node with Expr = parentNode.Expr }) }
-                            ]
-                    | _ -> 
-                        [
-                            { node with Expr = Print({ node with Expr = StringVal($"arrayElem({node.Pos.FileName}:({node.Pos.LineStart}:{node.Pos.ColStart}-{node.Pos.LineEnd}:{node.Pos.ColEnd}), ") }) }
-                            { node with Expr = Print(index) }
-                            { node with Expr = Print({ node with Expr = StringVal(") = ") }) }
-                            { node with Expr = PrintLn({ node with Expr = parentNode.Expr }) }
-                        ]
-                | ArraySlice(node, startIdx, endIdx) ->
-                    // match node.Expr with
-                    // | Var(name) when name <> varName ->
-
-                    []
                 | UnionCons(label, node) ->
                     // debug $"({node.Expr}::{label})"
                     // Some ($"({node.Expr}::{label})", parentExpr)
@@ -1010,25 +882,18 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
         let msgArrAst = (List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr)
 
         let assertRes = Util.genSymbol("$assertRes")
-        // Annotate the key node with the printout and Application results temporary variables
-        let decoration = (
-            let mutable res = 
-                { node with Expr = 
-                            Let(assertRes, keyNode,
-                                { node with Expr = 
-                                            If({ keyNode with Expr = Var assertRes },
-                                               { keyNode with Expr = BoolVal true },
-                                               { node with Expr = 
-                                                            (Seq(
-                                                                msgArrAst @ 
-                                                                printVarNodes @ 
-                                                                [{ node with Expr = PrintLn({ node with Expr = StringVal "***********************" }) }] @ 
-                                                                [{ keyNode with Expr = Var assertRes}])) }) }) }
-            // Nest Let scopes of the Application expressions results
-            Set.toList preambule
-            |> List.iter (fun (sym, init) -> res <- { node with Expr = Let(sym, init, res) })
-            res.Expr
-        )
+        // Annotate the key node with the printout
+        let decoration = 
+            Let(assertRes, keyNode,
+                { node with Expr =
+                            If({ keyNode with Expr = Var assertRes },
+                               { keyNode with Expr = BoolVal true },
+                               { node with Expr = 
+                                            Seq(
+                                                msgArrAst @ 
+                                                printVarNodes @ 
+                                                [{ node with Expr = PrintLn({ node with Expr = StringVal "***********************" }) }] @ 
+                                                [{ keyNode with Expr = Var assertRes }]) }) })
 
         // Wrap annotated AST in Assertion expression
         let res = { node with Expr = Assertion(substExprByRef decoratedArg decoration keyNodeRef) }
