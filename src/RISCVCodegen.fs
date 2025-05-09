@@ -572,11 +572,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     { node with Expr = Print({ node with Expr = StringVal(" }"); Type = TString }) }
                 ]
                 doCodegen env { node with Expr = Seq(nodes) }
-            | TFun (args, ret) ->
-                // let args' = List.map (fun (e: Type) -> e.ToString()) args |> String.concat ", "
+            | TFun (_,_) ->
                 let nodes = [
                     { node with Expr = Print({ node with Expr = StringVal(t.ToString()); Type = TString }) }
-                    // { node with Expr = Print({ node with Expr = StringVal(ret.ToString() + " }"); Type = TString }) }
                 ]
                 doCodegen env { node with Expr = Seq(nodes) }
             | exp_t ->

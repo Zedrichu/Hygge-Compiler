@@ -2,8 +2,6 @@
 /// Module for storing and retrieving source code content for error reporting.
 module SourceRepository
 
-open AST
-
 /// Repository for storing source code of compiled files
 type SourceRepository() =
     let mutable files = Map.empty<string, string[]>

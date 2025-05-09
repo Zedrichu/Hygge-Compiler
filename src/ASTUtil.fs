@@ -742,7 +742,7 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
 
         // Wrap annotated AST in Assertion expression
         let res = { node with Expr = Assertion(substExprByRef decoratedArg decoration keyNodeRef) }
-        Log.info (PrettyPrinter.prettyPrint res)
+        Log.debug $"Assertion decoration result:{Util.nl}{(PrettyPrinter.prettyPrint res)}"
         res
 
     | Let(vname, init, scope) ->
