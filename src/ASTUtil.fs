@@ -8,8 +8,7 @@
 module ASTUtil
 
 open AST
-open Log
-open PrettyPrinter
+
 
 /// Given the AST 'node', return a new AST node where every free occurrence of
 /// the variable called 'var' is substituted by the AST node 'sub'.
@@ -373,7 +372,7 @@ let mapDifference (map1: Map<'Key, 'T>) (map2: Map<'Key, 'U>) =
 
 /// Compute the set of free variables in the given AST node.  
 /// (parentExpr, node) -> Map[name, (parentExpr, node)]
-let rec freeVarsMap (chainedNode: Node<'E,'T>) (parentNode: Node<'E,'T>) (node: Node<'E,'T>): Map<string,(Node<'E,'T>*Node<'E,'T>*Node<'E,'T>)> =
+let rec freeVarsMap (node: Node<'E,'T>): Map<string,Node<'E,'T>> =
     match node.Expr with
     | UnitVal
     | IntVal(_)
@@ -381,19 +380,19 @@ let rec freeVarsMap (chainedNode: Node<'E,'T>) (parentNode: Node<'E,'T>) (node: 
     | FloatVal(_)
     | StringVal(_)
     | Pointer(_) -> Map[]
-    | Var(name) -> Map [(name, (chainedNode, parentNode, node))]
+    | Var(name) -> Map [(name, node)]
     | Sub(lhs, rhs)
     | Div(lhs, rhs)
     | Mod(lhs, rhs)
     | Add(lhs, rhs)
     | Mult(lhs, rhs) ->
-        mapUnion (freeVarsMap node node lhs) (freeVarsMap node node rhs)
+        mapUnion (freeVarsMap  lhs) (freeVarsMap rhs)
         // Set.union (freeVarsNode lhs) (freeVarsNode rhs)
     | Not(arg)
-    | Sqrt(arg) -> freeVarsMap node node arg
+    | Sqrt(arg) -> freeVarsMap arg
     | And(lhs, rhs)
     | Or(lhs, rhs) ->
-        mapUnion (freeVarsMap node node lhs) (freeVarsMap node node rhs)
+        mapUnion (freeVarsMap lhs) (freeVarsMap rhs)
         // Set.union (freeVarsNode lhs) (freeVarsNode rhs)
     | Eq(lhs, rhs)
     | Min(lhs, rhs)
@@ -402,78 +401,72 @@ let rec freeVarsMap (chainedNode: Node<'E,'T>) (parentNode: Node<'E,'T>) (node: 
     | LessEq(lhs, rhs)
     | GreaterEq(lhs, rhs)
     | Less(lhs, rhs) ->
-        mapUnion (freeVarsMap node node lhs) (freeVarsMap node node rhs)
+        mapUnion (freeVarsMap lhs) (freeVarsMap rhs)
         // Set.union (freeVarsNode lhs) (freeVarsNode rhs)
     | ReadInt
     | ReadFloat -> Map[]
     | Print(arg)
-    | PrintLn(arg) -> freeVarsMap node node arg
+    | PrintLn(arg) -> freeVarsMap arg
     | If(condition, ifTrue, ifFalse) ->
-        mapUnion (freeVarsMap node node condition)
-                  (mapUnion (freeVarsMap node node ifTrue) (freeVarsMap node node ifFalse))
-    | Seq(nodes) -> freeVarsInListNode node node nodes
-    | Ascription(_, node) -> freeVarsMap node node node
+        mapUnion (freeVarsMap condition)
+                  (mapUnion (freeVarsMap ifTrue) (freeVarsMap ifFalse))
+    | Seq(nodes) -> freeVarsInListNode nodes
+    | Ascription(_, node) -> freeVarsMap node
     | Let(name, init, scope)
     | LetT(name, _, init, scope)
     | LetMut(name, init, scope) ->
         // All the free variables in the 'let' initialisation, together with all
         // free variables in the scope --- minus the newly-bound variable
-        mapUnion (freeVarsMap node node init) (Map.remove name (freeVarsMap node node scope))
+        mapUnion (freeVarsMap init) (Map.remove name (freeVarsMap scope))
     | Assign(target, expr) ->
         // Union of the free names of the lhs and the rhs of the assignment
-        mapUnion (freeVarsMap node node target) (freeVarsMap node node expr)
+        mapUnion (freeVarsMap target) (freeVarsMap expr)
     | DoWhile(body, cond)
-    | While(cond, body) -> mapUnion (freeVarsMap node node cond) (freeVarsMap node node body)
-    | Assertion(arg) -> freeVarsMap node node arg
-    | Type(_, _, scope) -> freeVarsMap node node scope
+    | While(cond, body) -> mapUnion (freeVarsMap cond) (freeVarsMap body)
+    | Assertion(arg) -> freeVarsMap arg
+    | Type(_, _, scope) -> freeVarsMap scope
     | Lambda(args, body) ->
         let (argNames, _) = List.unzip args
         let zipped = List.zip argNames (List.map (fun argName -> Var(argName)) argNames)
         // All the free variables in the lambda function body, minus the
         // names of the arguments
-        mapDifference (freeVarsMap node node body) (Map.ofList zipped)
+        mapDifference (freeVarsMap body) (Map.ofList zipped)
     | Application(expr, args) ->
         // Union of free variables in the applied expr, plus all its arguments
-
-        // Keep parent node the same for subsequent Application nodes
-        // such that a full "application" sequence is used when showing computed value
-        match parentNode.Expr with
-        | Application(_, _) ->
-            mapUnion (freeVarsMap chainedNode node expr) (freeVarsInListNode chainedNode node args)
-        | _ ->
-            mapUnion (freeVarsMap node node expr) (freeVarsInListNode node node args)
+        mapUnion (freeVarsMap expr) (freeVarsInListNode args)
     | StructCons(fields) ->
         let (_, nodes) = List.unzip fields
-        freeVarsInListNode node node nodes
-    | FieldSelect(expr, _) -> freeVarsMap node node expr
+        freeVarsInListNode nodes
+    | FieldSelect(expr, _) -> freeVarsMap expr
     | LetRec(name, _, init, scope) ->
         // Remove the newly-bound variable from the free variables of both
         // init and scope since it might be recursively referenced in init
-        Map.remove name (mapUnion (freeVarsMap node node init) (freeVarsMap node node scope))
+        Map.remove name (mapUnion (freeVarsMap init) (freeVarsMap scope))
     | ArrayCons(length, init) ->
-        mapUnion (freeVarsMap node node length) (freeVarsMap node node init)
-    | ArrayLength(target) -> freeVarsMap node node target
+        mapUnion (freeVarsMap length) (freeVarsMap init)
+    | ArrayLength(target) -> freeVarsMap target
     | ArrayElem(target, index) ->
-        mapUnion (freeVarsMap node node target) (freeVarsMap node node index)
+        mapUnion (freeVarsMap target) (freeVarsMap index)
     | ArraySlice(target, startIdx, endIdx) ->
-        mapUnion (freeVarsMap node node target)
-                  (mapUnion (freeVarsMap node node startIdx) (freeVarsMap node node endIdx))
-    | UnionCons(_, expr) -> freeVarsMap node node expr
+        mapUnion (freeVarsMap target)
+                  (mapUnion (freeVarsMap startIdx) (freeVarsMap endIdx))
+    | UnionCons(_, expr) -> freeVarsMap expr
     | Match(expr, cases) ->
         /// Compute the free variables in all match cases continuations, minus
         /// the variable bound in the corresponding match case.  This 'folder'
         /// is used to fold over all match cases.
-        let folder (acc: Map<string, (Node<'E,'T>*Node<'E,'T>*Node<'E,'T>)>) (_, var, cont: Node<'E,'T>): Map<string, Node<'E,'T>*Node<'E,'T>*Node<'E,'T>> =
-            mapUnion acc ((freeVarsMap node node cont).Remove var)
+        let folder (acc: Map<string, Node<'E,'T>>) (_, var, cont: Node<'E,'T>): Map<string, Node<'E,'T>> =
+            mapUnion acc ((freeVarsMap cont).Remove var)
         /// Free variables in all match continuations
-        let fvConts: Map<string,(Node<'E,'T>*Node<'E,'T>*Node<'E,'T>)> = List.fold folder Map[] cases
-        mapUnion (freeVarsMap node node expr) fvConts
+        let fvConts: Map<string,(Node<'E,'T>)> = List.fold folder Map[] cases
+        mapUnion (freeVarsMap expr) fvConts
+    | Copy(arg) -> freeVarsMap arg
 
 /// Compute the union of the free variables in a list of AST nodes.
-and internal freeVarsInListNode (chainedNode: Node<'E,'T>) (parentNode: Node<'E,'T>) (nodes: List<Node<'E,'T>>): Map<string,Node<'E,'T>*Node<'E,'T>*Node<'E,'T>> =
+and internal freeVarsInListNode (nodes: List<Node<'E,'T>>): Map<string,Node<'E,'T>> =
     /// Compute the free variables of 'node' and add them to the accumulator
-    let folder (acc: Map<string, Node<'E,'T>*Node<'E,'T>*Node<'E,'T>>) (node: Node<'E,'T> ) =
-        mapUnion acc (freeVarsMap chainedNode parentNode node)
+    let folder (acc: Map<string, Node<'E,'T>>) (node: Node<'E,'T> ) =
+        mapUnion acc (freeVarsMap node)
     List.fold folder Map[] nodes
 
 let rec substExprByRef (node: Node<'E,'T>) (expr: Expr<'E,'T>) (sub: ref<Node<'E,'T>>) : Node<'E,'T> =
@@ -606,6 +599,7 @@ let rec substExprByRef (node: Node<'E,'T>) (expr: Expr<'E,'T>) (sub: ref<Node<'E
             let substE = recurse e
             let substCases = List.map (fun (lab, v, cont) -> (lab, v, recurse cont)) cases
             {node with Expr = Match(substE, substCases)}
+        | Copy(arg) -> recurse arg
 
 let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
     match node.Expr with
@@ -698,19 +692,13 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
         /// Get free variables in the keyNode
         /// Having keyNode as an argument we ensure that the nested variable declarations
         /// will be included in the printout if they were referenced in the key assertion calculation
-        let fvList = Map.toList (freeVarsMap node node keyNode)
-
-        let constructSimpleVarPrint (node: Node<'E,'T>) (varName: string) (varExpr: Expr<'E,'T>) =
-            [{ node with Expr = Print({ node with Expr = StringVal($"{varName} = ") }) };
-             { node with Expr = PrintLn({ node with Expr = varExpr }) }]
-
+        let fvList = Map.toList (freeVarsMap keyNode)
 
         /// Create print nodes for each free variable
         let printVarNodes =
-            fvList |> List.collect (fun (record: string * (Node<'E,'T>*Node<'E,'T>*Node<'E,'T>)) ->
-                let (varName: string, (chainedNode: Node<'E,'T>, parentNode: Node<'E,'T>, varNode: Node<'E,'T>)) = record
-                constructSimpleVarPrint node varName varNode.Expr
-            )
+            fvList |> List.collect (fun (varName, varNode) ->
+            [{ node with Expr = Print({ node with Expr = StringVal($"{varName} = ") }) };
+            { node with Expr = PrintLn({ node with Expr = varNode.Expr }) }])
 
         /// Prepare code snippet to be shown
         let snippet = SourceRepository.repository.GetSnippet(
@@ -720,22 +708,20 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
             true,
             true)
 
-        let msgArr =
+        let posInfo =
             match snippet with
-            | Some strArr -> List.concat [
-                [""];
-                ["***********************"];
-                [$"Assertion error @ {node.Pos.FileName}:{node.Pos.LineStart}:{node.Pos.ColStart}"];
-                ["-----------------------"];
-                strArr;
-                ["-----------------------"];
-                ["Relevant variables:"]]
-            | None -> List.concat [
-                [""];
-                ["***********************"];
-                ["Assertion failed: <no source available>"];
-                ["-----------------------"];
-                ["Relevant variables:"]]
+            | Some strArr -> 
+                $"Assertion error @ {node.Pos.FileName}:{node.Pos.LineStart}:{node.Pos.ColStart}", strArr
+            | None ->
+                $"Assertion failed: <no source available>", []
+        let msgArr = List.concat [
+            [""]
+            ["***********************"]
+            [fst posInfo]
+            ["-----------------------"]
+            (snd posInfo)
+            ["-----------------------"]
+            ["Relevant variables:"]]
 
         /// Create header node with source code and location information 
         let msgArrAst = (List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr)
@@ -829,3 +815,4 @@ let rec decorateAssertions (node: Node<'E,'T>): Node<'E,'T> =
             (lab, v, (decorateAssertions cont))
         let cases2 = List.map substCase cases
         {node with Expr = Match((decorateAssertions expr), cases2)}
+    | Copy(arg) -> decorateAssertions arg

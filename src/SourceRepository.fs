@@ -43,14 +43,6 @@ type SourceRepository() =
         let lineStart = pos.LineStart
         let lineEnd = pos.LineEnd
 
-        // let includeMarkerLine = defaultArg includeMarkerLine false
-        // let includeLineNumbers = defaultArg includeLineNumbers false
-        // let colStart =
-        //     match includeMarkerLine, colStartArg with
-        //     | true, None -> failwith "colStart must be provided when includeMarkerLine is true"
-        //     | _, Some col -> col
-        //     | false, None -> 1 // Default value when not including marker line
-
         // let markerPosition = defaultArg markerPosition (lineStart, colStart)
         let markerPosition = markerPos.LineStart, markerPos.ColStart
 

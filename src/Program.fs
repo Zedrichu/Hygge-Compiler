@@ -107,7 +107,6 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
                 1 // Non-zero exit code
             | Ok(tast) ->
                 Log.info "Type checking succeeded."
-                // SourceRepository.repository.AddFileIntepreter(opt.File)
                 if (opt.ANF) then
                     Log.debug $"Parsed and typed AST:%s{Util.nl}%s{PrettyPrinter.prettyPrint tast}"
                     Log.debug $"Transforming AST into ANF"
@@ -122,9 +121,7 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
 let internal generateAsm (filename: string)
                          (anf: bool) (maxRegisters: uint)
                          (optimize: uint): Result<RISCV.Asm, unit> =
-    
     SourceRepository.repository.AddFileAsm(filename)
-
     match (Util.parseFile filename) with
     | Error(msg) ->
         Log.error $"%s{msg}"

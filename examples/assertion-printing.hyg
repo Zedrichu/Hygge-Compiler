@@ -1,8 +1,8 @@
 /// Nested let/seq/assert (processes until end)
-// let mutable x = 0;
+let mutable x = 0;
 
-// fun incX(): int = x <- x + 1;
-// assert({incX(); incX(); x = 3})
+fun incX(): int = x <- x + 1;
+assert({incX(); incX(); x = 3})
 // assert({assert(x=1); assert({assert(false); x = 2}); x = 1})
 // assert(
 //     {
@@ -27,6 +27,7 @@
 // assert({{let x = 1; let mutable y = 2; x=y};{ y <- 3; {assert(y = 0); assert(true); y = -1}}})
 
 
+// == Simple struct check
 // type Shape = struct { name: string;
 //                       area: int;
 //                       perimeter: int };
@@ -41,7 +42,8 @@
 //                          area = 1;
 //                          perimeter = 2 }; c.perimeter = c.area })
 
-// assert({{c.perimeter = 2; false}; false});
+// -- nothing reported for function Application
+// assert({{c.perimeter = 2; false}; false})
 // assert((getStruct()).perimeter = (getStruct()).area)
 
 
@@ -55,9 +57,12 @@
 // assert(6 = myFunc(myFunc(myFunc(myFunc(v)))))
 
 
-// == Report Array
-// fun getArr(): array {int} = array(10, 40 + 2);
-// assert(arrayLength(getArr()) = 5)
+// == Report Array (skipped as a function Application is used)
+// type myArr = array {int};
+// fun getArr(): myArr = array(10, 40 + 2);
+// let arr: myArr = array(10, 3);
+// let i = 0;
+// assert(arrayLength({false; getArr()}) = 5)
 
 // == Functions nested in a struct
 // type funStruct = struct {
@@ -85,34 +90,86 @@
 // assert((makeFun())() = 43)
 
 // == arrayElem + functions + structs
-type OthrStruct = struct { o: int };
-type IdxStruct = struct { idx: int; s: OthrStruct };
-fun getIdx(): int = 0;
+// type OthrStruct = struct { o: int };
+// type IdxStruct = struct { idx: int; s: OthrStruct };
+// fun getIdx(): int = 0;
+// fun getIdx(dummy: (int) -> unit): int = 0;
 
 
-let mutable x = 0;
-let y = 1;
+// let mutable x = 0;
+// let y = 1;
 
-fun getArr(dummy: int): array {int} = { x <- x + 1; array(10, 40 + 2) };
+// fun getArr(dummy: int): array {int} = { x <- x + 1; array(10, 40 + 2) };
+// fun d(a: int): unit = ();
 
 // let idx: IdxStruct = struct { idx = 0; s = struct { o = 1 } };
-let arr: array {int} = array(10, 40 + 2);
-// assert(arrayElem(arr, getIdx()) = x)
-println(x);
-println(arrayElem(getArr(y), getIdx()) = x);
-// getArr(y);
-println(x)
+// let arr: array {int} = array(10, 40 + 2);
+// assert(arrayElem(arr, getIdx(d)) = x)
 // assert(arrayLength(arr) = x)
 // assert(arrayLength(slice(arr, x, 2)) = x)
 // ===============
 
 // == No variables reported
+// fun getArr(): array {int} = { array(10, 40 + 2) };
 // fun f(x: int, y: array {int}): int = arrayElem(y, x);
-// assert(f(4, getArr()) = -1)
+// let arr: array {int} = array(10, 42);
+// assert(arrayElem({let x = array(5, 10); x}, 0) = 0) // x is not reported as it falls out of scope during argument evaluation
 
-// assert(arrayElem({let x = array(5, 10); x}, 0) = 0)
 
-// assert(arrayElem(slice(arr, 1, 2), 0) = 42)
+// type OptionalInt = union {
+//     Some: int;
+//     None: unit
+// };
+
+// type NestedOptionalInt = union {
+//     Some: OptionalInt;
+//     None: unit
+// };
+
+// fun displayOption(o: NestedOptionalInt): unit =
+//     match o with {
+//         Some{x} -> 
+//             match x with {
+//                 Some{y} -> println(y);
+//                 None{_} -> println("None")
+//             }
+//             // println(x);
+//         None{_} -> println("None")
+//     };
+
+// fun getOption(o: NestedOptionalInt): int =
+//     match o with {
+//         Some{x} ->
+//             match x with {
+//                 Some{y} -> y;
+//                 None{_} -> -2
+//             };
+//         None{_} -> -1
+//     };
+// let a = 42;
+// assert(getOption(Some{Some{a}}) = 0)
+// displayOption(Some{42});
+// displayOption(None{()});
+
+// // A shape type.
+// type Shape = union {
+//     Circle: struct { radius: float };
+//     Rectangle: struct { width: float; height: float };
+//     Square: struct { side: float }
+// };
+
+// // Return the area of a shape.
+// fun area(s: Shape): float =
+//     match s with {
+//         Circle{c} -> c.radius * c.radius * 3.14f;
+//         Rectangle{r} -> r.width * r.height;
+//         Square{s} -> s.side * s.side
+//     };
+
+// assert(area(Circle{struct {radius = 2.0f}}) = 0.0f);
+// assert(area(Rectangle{struct {width = 2.0f; height = 3.0f}}) = 6.0f);
+// assert(area(Square{struct {side = 5.0f}}) = 25.0f)
+
 
 // let x = 0;
 // assert({let y = 1; x - y = 0})
@@ -123,3 +180,8 @@ println(x)
 // //    {assert({x; assert(false); true}); x < 5}
 // } while ({assert({x; let z = 5; assert({z; let a = z / 5; x = 10 || a = 2}); true}); x < 5});
 // ()
+
+// type myFunType = (int) -> unit;
+// let myFun: myFunType = fun(x: int) -> { x; () };
+// fun wrapper(f: myFunType): bool = false;
+// assert(wrapper(myFun))
