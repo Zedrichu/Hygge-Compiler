@@ -371,7 +371,7 @@ let mapDifference (map1: Map<'Key, 'T>) (map2: Map<'Key, 'U>) =
     Map.filter (fun k _ -> not (Map.containsKey k map2)) map1
 
 /// Compute the set of free variables in the given AST node.  
-/// (parentExpr, node) -> Map[name, (parentExpr, node)]
+/// (node) -> Map[name, (node)]
 let rec freeVarsMap (node: Node<'E,'T>): Map<string,Node<'E,'T>> =
     match node.Expr with
     | UnitVal

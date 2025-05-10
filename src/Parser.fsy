@@ -317,7 +317,7 @@ unaryExpr:
                                                     Expr.If(
                                                         mkNode(parseState, 1, Expr.Greater($3, $5)),
                                                         $3, $5)) }
-  | ASSERT LPAR simpleExpr RPAR                 { mkNode(parseState, 1, Expr.Assertion($3))}
+  | ASSERT LPAR simpleExpr RPAR                 { mkNode(parseState, 1, Expr.Assertion($3)) }
   | ascriptionExpr                              { $1 }
   // Avoid ambiguity by higher precedence for the postfix operators
 
