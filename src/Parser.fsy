@@ -33,6 +33,76 @@ let applySelectors (lst: 'a list): (string * 'a) list =
   let indexedList = List.indexed lst
   List.map (fun (i, p) -> ($"_{i + 1}", p)) indexedList
 
+let decorateAssertion (node: Node<'E,'T>) =
+  match node.Expr with
+  | Assertion(arg) ->
+    /// Get the last nested expression (last Seq or Let scope)
+    /// since it is the expression which effectively decides on the assertion failure
+    let rec getKeyNodeFolder (node: Node<'E,'T>) =
+      match node.Expr with
+      | Seq(nodes) ->
+        getKeyNodeFolder nodes[nodes.Length - 1]
+      | Let(_, _, scope)
+      | LetT(_, _, _, scope)
+      | LetMut(_, _, scope)
+      | LetRec(_, _, _, scope) ->
+        getKeyNodeFolder scope
+      | _ -> ref node
+
+    let keyNodeRef = getKeyNodeFolder arg
+    let mutable keyNode = keyNodeRef.Value
+
+    /// Get free variables in the keyNode
+    /// Having keyNode as an argument we ensure that the nested variable declarations
+    /// will be included in the printout if they were referenced in the key assertion calculation
+    let fvList = Map.toList (ASTUtil.freeVarsMap keyNode)
+
+    /// Create print nodes for each free variable
+    let printVarNodes =
+      fvList |> List.collect (fun (varName, varNode) ->
+      [{ node with Expr = Print({ node with Expr = StringVal($"{varName} = ") }) };
+      { node with Expr = PrintLn({ node with Expr = varNode.Expr }) }])
+
+    /// Prepare code snippet to be shown
+    let snippet = SourceRepository.repository.GetSnippet(
+      node.Pos,
+      keyNode.Pos,
+      true,
+      true,
+      true)
+
+    let posInfo =
+      match snippet with
+      | Some strArr ->
+        $"Assertion error @ {node.Pos.FileName}:{node.Pos.LineStart}:{node.Pos.ColStart}", strArr
+      | None ->
+        $"Assertion failed: <no source available>", []
+    let msgArr = List.concat [
+      [""]
+      ["***********************"]
+      [fst posInfo]
+      ["-----------------------"]
+      (snd posInfo)
+      ["-----------------------"]
+      ["Relevant variables:"]]
+
+    /// Create header node with source code and location information
+    let msgArrAst = (List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr)
+
+    // Annotate the key node with the printout
+    let decoration =
+      If(keyNode,
+        { keyNode with Expr = UnitVal },
+        { node with Expr =
+                    Seq( msgArrAst @ printVarNodes @
+                      [{ node with Expr = PrintLn({ node with Expr = StringVal "***********************" }) }] @
+                      [{ keyNode with Expr = Assertion({ keyNode with Expr = BoolVal false }) }]) })
+
+    // Replace keyNode with the decorated one
+    ASTUtil.substExprByRef arg decoration keyNodeRef
+  | _ ->
+    invalidOp $"Fatal error: Assertion expected, but found {node.Expr}"
+
 %}
 
 // Name of the grammar rule (defined below) to parse first.
@@ -317,7 +387,7 @@ unaryExpr:
                                                     Expr.If(
                                                         mkNode(parseState, 1, Expr.Greater($3, $5)),
                                                         $3, $5)) }
-  | ASSERT LPAR simpleExpr RPAR                 { mkNode(parseState, 1, Expr.Assertion($3)) }
+  | ASSERT LPAR simpleExpr RPAR                 { decorateAssertion (mkNode(parseState, 1, Expr.Assertion($3))) }
   | ascriptionExpr                              { $1 }
   // Avoid ambiguity by higher precedence for the postfix operators
 
