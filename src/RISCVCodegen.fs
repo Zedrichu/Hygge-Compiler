@@ -832,7 +832,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                      Target = env.Target + 2u}
                 checkIndexOutOfBounds env' array' (index', index') node
 
-            match (expandType target.Env target.Type) with
+            match (expandType node.Env target.Type) with
             | TArray _ ->
                 /// Offset of the selected index from the beginning of the array container region on heap
                 let offsetCode = Asm([
@@ -850,7 +850,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                      "Add offset to the array container address")])
                 /// Assembly code that performs the field value assignment
                 let assignCode =
-                    match rhs.Type with
+                    match expandType node.Env rhs.Type with
                     | t when (isSubtypeOf rhs.Env t TUnit) ->
                         Asm() // Nothing to do
                     | t when (isSubtypeOf rhs.Env t TFloat) ->
@@ -1199,7 +1199,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         /// Code to store the length of the array at the beginning of the array struct memory
         let instanceFieldSetCode =
-            match length.Type with
+            match expandType node.Env length.Type with
             | TInt -> Asm().AddText([
                             (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
                             "Store array length at the beginning of the array memory (1st field)")
@@ -1214,7 +1214,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Assembly code that initialises a single array element by assigning the pre-computed init
         /// value stored in `target+3u` to the heap location of the next array element in `target+2u`
         let elemInitCode: Asm =
-            match init.Type with
+            match expandType node.Env init.Type with
             | t when (isSubtypeOf init.Env t TUnit) ->
                 Asm() // Nothing to do
             | t when (isSubtypeOf init.Env t TFloat) ->
