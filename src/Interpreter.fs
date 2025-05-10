@@ -328,7 +328,9 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | IntVal(v) -> printer $"%d{v}"; reductum
             | FloatVal(v) -> printer $"%f{v}"; reductum
             | StringVal(v) -> printer $"%s{v}"; reductum
-            | Lambda(_,_) -> printer ($"`%s{prettyPrintValue arg}`"); reductum
+            | Lambda(args, body) -> 
+                let argsStr = String.concat ", " (List.map (fun (argName, _) -> $"%s{argName}") args)
+                printer $"Lambda({argsStr})"; reductum
             | Pointer(addr) ->
                 match (env.PtrInfo.TryFind addr) with
                 | Some(fields) ->
