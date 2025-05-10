@@ -95,12 +95,12 @@ fun test6_6(): unit = {
 //==============================================================================
 
 // Edge cases
-// test6_1();  // Functions with side effects
+test6_1();  // Functions with side effects
 // test6_2();  // Division by zero
 // test6_3();  // Array out of bounds
 // test6_4();  // Variable scope issues
 // test6_5();  // Nested assertions
-test6_6();  // Multiple state updates
+// test6_6();  // Multiple state updates
 // test6_7();  // Unions and pattern matching
 
 ()

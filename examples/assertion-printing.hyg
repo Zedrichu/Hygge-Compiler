@@ -106,8 +106,7 @@ fun test4_1(): unit = {
     
     let threshold = 25;
     
-    assert(p.age < threshold)   // Reports p = struct { name = "Alice"; age = 30; }, 
-                                // threshold = 25
+    assert(p.age < threshold)   // Reports p = struct { name = "Alice"; age = 30; }, threshold = 25
 };
 
 // Test 4.2: Array elements in assertions
