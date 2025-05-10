@@ -87,7 +87,8 @@ let decorateAssertion (node: Node<'E,'T>) =
       ["Relevant variables:"]]
 
     /// Create header node with source code and location information
-    let msgArrAst = (List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr)
+    let msgArrAst = 
+      List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr
 
     // Annotate the key node with the printout
     let decoration =
@@ -95,7 +96,8 @@ let decorateAssertion (node: Node<'E,'T>) =
         { keyNode with Expr = UnitVal },
         { node with Expr =
                     Seq( msgArrAst @ printVarNodes @
-                      [{ node with Expr = PrintLn({ node with Expr = StringVal "***********************" }) }] @
+                      [{ node with Expr = PrintLn(
+                                   { node with Expr = StringVal "***********************" }) }] @
                       [{ keyNode with Expr = Assertion({ keyNode with Expr = BoolVal false }) }]) })
 
     // Replace keyNode with the decorated one
