@@ -1653,7 +1653,7 @@ and internal compileFunction (args: List<string * Type>)
 
     /// Code to move the body result into the function return value register
     let returnCode =
-        match body.Type with
+        match expandType body.Env body.Type with
         | t when (isSubtypeOf body.Env t TFloat) ->
             Asm(RV.FMV_S(FPReg.fa0, FPReg.r(0u)),
                 "Move float result of function into return value register")
