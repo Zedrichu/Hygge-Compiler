@@ -500,7 +500,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// generic register 'target' or 'fptarget' (depending on its type)
         let argCode = doCodegen env arg
         // The generated code depends on the 'print' argument type
-        match arg.Type with
+        match expandType arg.Env arg.Type with
         | t when (isSubtypeOf arg.Env t TBool) ->
             let strTrue = Util.genSymbol "true"
             let strFalse = Util.genSymbol "false"
@@ -548,7 +548,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 ])
                 ++ (afterSysCall [Reg.a0] [])
         | t ->
-            match expandType arg.Env t with
+            match t with
             | TStruct fields ->
                 let nodes = 
                     [{ node with Expr = Print({ node with Expr = StringVal("struct { "); Type = TString }) }] @
@@ -573,12 +573,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 ]
                 doCodegen env { node with Expr = Seq(nodes) }
             | TFun (_,_) ->
-                let nodes = [
-                    { node with Expr = Print({ node with Expr = StringVal(t.ToString()); Type = TString }) }
-                ]
-                doCodegen env { node with Expr = Seq(nodes) }
-            | exp_t ->
-                failwith $"BUG: Print codegen invoked on unsupported type %O{exp_t} (original: %O{t})"
+                doCodegen env { node with Expr = Print({ node with Expr = StringVal(t.ToString()); Type = TString }) }
+            | t ->
+                failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
 
     | PrintLn(arg) ->
         // Recycle codegen for Print above, then also output a newline
