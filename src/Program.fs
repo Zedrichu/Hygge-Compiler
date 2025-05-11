@@ -141,7 +141,7 @@ let internal generateAsm (filename: string)
             let asm =
                 if (anf) then
                     Log.debug $"Transforming AST into ANF"
-                    let anf = ANF.transform tast
+                    let anf = if(optimize >= 2u) then ANF.optTransform tast else ANF.transform tast
                     let registers =
                         if (maxRegisters >= 3u) && (maxRegisters <= 18u) then
                             maxRegisters
