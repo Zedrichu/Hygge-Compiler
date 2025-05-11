@@ -1,0 +1,35 @@
+type BigStruct = struct { name: string;
+                          value: int;
+                          extra: float };
+type MediumStruct = struct { name: string;
+                             value: int };
+type SmallStruct = struct { name: string };
+
+type BigUnion = union {
+    A: int;
+    B: float;
+    C: string;
+    D: bool
+};
+type MediumUnion = union {
+    A: int;
+    B: float;
+    C: string
+};
+type SmallUnion = union {
+    B: float;
+    A: int
+};
+
+// mixed struct and union with multiple function type arguments
+fun multiFun(
+        f: (SmallStruct) -> MediumUnion
+    ): SmallStruct = {
+    struct { name = "Nothing to see here"; 
+             dummy = "except this" }
+};
+
+// Some of BigUnion might not be handled in multiFun => typechecking error
+fun f(x: SmallStruct): BigUnion = {let x: SmallUnion = A{42}; x};
+
+multiFun(f)
