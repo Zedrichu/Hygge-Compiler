@@ -1,0 +1,4 @@
+type myInt = int;
+let x: myInt = 5;
+let arr: array {myInt} = array(5, x + 2);
+assert(arrayElem(arr, 0) = 7)

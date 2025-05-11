@@ -1,0 +1,168 @@
+//==============================================================================
+// HYGGE LANGUAGE ASSERTION TESTING EXAMPLES
+//
+// This file demonstrates how variables are reported when assertions fail.
+// The compiler identifies and reports only variables that are directly
+// referenced in the key assertion expression (the final condition).
+//==============================================================================
+
+//==============================================================================
+// SECTION 1: BASIC VARIABLE REPORTING IN ASSERTIONS
+//==============================================================================
+
+// Test 1.1: Simple variable reporting - only x and y are reported
+fun test1_1(): unit = {
+    let x = 10;
+    let y = 20;
+    let unused = 30;  // This variable won't appear in the report
+    assert(x > y)  // Reports x = 10, y = 20 (but not unused)
+};
+
+// Test 1.2: Only variables used in the final condition are reported
+fun test1_2(): unit = {
+    let a = 5;
+    let b = 10;
+    let c = 15;
+    
+    assert({
+        let temp = a + b;  // Intermediate calculation
+        c < temp  // Only c and temp are reported, not a or b directly
+    })
+};
+
+//==============================================================================
+// SECTION 2: NESTED SCOPES
+//==============================================================================
+
+// Test 2.1: Nested assertions
+fun test2_1(): unit = {
+    let outer = 100;
+    
+    assert({
+        assert(outer = 0); // Execution stops here
+        let inner = 50;
+        outer = 2 * inner  // Does not execute after previous assert
+    })
+};
+
+//==============================================================================
+// SECTION 3: MUTABLE VARIABLES AND STATE CHANGES
+//==============================================================================
+
+// Test 3.1: Complex expressions with mutated state
+let mutable x = 0;
+fun test3_1(): unit = {
+    let original = x;
+    
+    fun incX(): int = {println(x); x <- x + 1};
+
+    assert({
+        incX();
+        incX();
+        // Only reports x and original, not the function itself
+        x = original  // Reports x = 2, original = 0
+    })
+};
+
+//==============================================================================
+// SECTION 4: COMPOUND DATA STRUCTURES
+//==============================================================================
+
+// Test 4.1: Struct fields in assertions
+fun test4_1(): unit = {
+    type Person = struct { 
+        name: string;
+        age: int
+    };
+    
+    let p = struct { 
+        name = "Alice"; 
+        age = 30
+    };
+    fun dummy(x: int): int = x;
+    let s = struct { fn = dummy; val = 42 };
+    
+    let threshold = 25;
+    
+    assert(p.age < threshold || s.fn(10) = 0)   // Reports p = struct { name = "Alice"; age = 30; }, threshold = 25
+};
+
+// Test 4.2: Array elements in assertions
+fun test4_2(): unit = {
+    let arr = array(3, 0);
+    arrayElem(arr, 0) <- 10;
+    arrayElem(arr, 1) <- 20;
+    arrayElem(arr, 2) <- 30;
+    
+    let idx = 1;
+    let value = 15;
+    
+    assert(arrayElem(arr, idx) < value) // Reports arr = Array{ type: int; length: 3 }, 
+                                        // idx = 1, value = 15
+};
+
+// Test 4.3: Tuple
+fun test4_3(): unit = {
+    let tup = tuple {1, 2, 3};
+    assert(tup._1 = 5)
+};
+
+// Test 4.4: Union types in assertions
+// fun test4_4(): unit = {
+//     type OptionalInt = union {
+//         Some: int;
+//         None: unit
+//     };
+    
+//     let opt = Some{42};
+    
+//     assert({
+//         match opt with {
+//             Some{x} -> x = 0;  // Reports opt = Some{42}, x = 42
+//             None{_} -> false
+//         }
+//     })
+// };
+
+//==============================================================================
+// SECTION 5: FUNCTION CALLS AND EXPRESSIONS
+//==============================================================================
+
+// Test 5.1: Function results in assertions
+fun test5_1(): unit = {
+    let base_val = 10;
+    
+    fun double(n: int): int = n * 2;
+    fun triple(n: int): int = n * 3;
+    
+    assert(double(base_val) > triple(base_val))  // Reports base_val = 10 and relevant functions
+};
+
+// Test 5.2: Logical combinations with short-circuiting
+fun test5_2(): unit = {
+    let a = true;
+    let b = false;
+    let c = false;
+    let d = true;
+    
+    assert((a && b) || (c && d))  // Reports a = true, b = false, c = false, d = true
+};
+
+
+//==============================================================================
+// MAIN TEST RUNNER - Uncomment only one test at a time
+//==============================================================================
+
+// Basic tests
+// test1_1();  // Basic variable reporting
+test1_2();  // Variables in final condition
+// test2_1();  // Nested assertions
+// test3_1();  // Complex expressions with mutated state
+// test4_1();  // Struct field access
+// test4_2();  // Array element access
+// test4_3();  // Tuples
+// test4_4();  // Union types in assertions [currently ONLY INTERPRETER]
+// test5_1();  // Function application results
+// test5_2();  // Logical combinations
+
+()

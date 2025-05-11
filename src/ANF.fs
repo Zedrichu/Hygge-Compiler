@@ -65,6 +65,45 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
     | Less(lhs, rhs) ->
         {node with Expr = Less((substVar lhs var var2), (substVar rhs var var2))}
 
+    // New addition
+    | LessEq(lhs, rhs) ->
+        {node with Expr = LessEq((substVar lhs var var2), (substVar rhs var var2))}
+
+    | Greater(lhs, rhs) ->
+        {node with Expr = Greater((substVar lhs var var2), (substVar rhs var var2))}
+    
+    | GreaterEq(lhs, rhs) ->
+        {node with Expr = GreaterEq((substVar lhs var var2), (substVar rhs var var2))}
+
+    | Sqrt(arg) ->
+        {node with Expr = Sqrt(substVar arg var var2)}
+
+    | Min(lhs, rhs) -> 
+        {node with Expr = Min((substVar lhs var var2), (substVar rhs var var2))}
+    
+    | Max(lhs, rhs) -> 
+        {node with Expr = Max((substVar lhs var var2), (substVar rhs var var2))}
+
+    | Div(lhs, rhs) -> 
+         {node with Expr = Div((substVar lhs var var2), (substVar rhs var var2))}
+
+    | Mod(lhs, rhs) -> 
+         {node with Expr = Mod((substVar lhs var var2), (substVar rhs var var2))}
+    
+    | ArrayCons(length, init) ->
+         {node with Expr = ArrayCons((substVar length var var2), (substVar init var var2))}
+
+    | ArrayLength(target) ->
+         {node with Expr = ArrayLength((substVar target var var2))}
+
+    | ArrayElem(target, index) ->
+         {node with Expr = ArrayElem((substVar target var var2), (substVar index var var2))}
+
+    | ArraySlice(target, startIdx, endIdx) ->
+         {node with Expr = ArraySlice((substVar target var var2), 
+                                    (substVar startIdx var var2),
+                                    (substVar endIdx var var2))}
+    //   
     | ReadInt
     | ReadFloat -> node // The substitution has no effect
 
@@ -107,11 +146,16 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
 
     | Assign(target, expr) ->
         {node with Expr = Assign((substVar target var var2), (substVar expr var var2))}
-
+    
     | While(cond, body) ->
         let substCond = substVar cond var var2
         let substBody = substVar body var var2
         {node with Expr = While(substCond, substBody)}
+
+    | DoWhile(body, cond) ->
+        let substCond = substVar cond var var2
+        let substBody = substVar body var var2
+        {node with Expr = DoWhile(substBody, substCond)}
 
     | Assertion(arg) ->
         {node with Expr = Assertion(substVar arg var var2)}
@@ -190,7 +234,14 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
     | And(lhs, rhs)
     | Or(lhs, rhs)
     | Eq(lhs, rhs)
-    | Less(lhs, rhs) as expr ->
+    | Less(lhs, rhs)
+    | LessEq(lhs, rhs)
+    | Greater(lhs, rhs)
+    | GreaterEq(lhs, rhs)
+    | Min(lhs, rhs)
+    | Max(lhs, rhs)
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs) as expr ->
         /// Left-hand-side argument in ANF and related definitions
         let (lhsANF, lhsDefs) = toANFDefs lhs
         /// Right-hand-side argument in ANF and related definitions
@@ -203,6 +254,13 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
                       | Or(_,_) -> Or(lhsANF, rhsANF)
                       | Eq(_,_) -> Eq(lhsANF, rhsANF)
                       | Less(_,_) -> Less(lhsANF, rhsANF)
+                      | LessEq(_,_) -> LessEq(lhsANF, rhsANF)
+                      | Greater(_,_) -> Greater(lhsANF, rhsANF)
+                      | GreaterEq(_,_) -> GreaterEq(lhsANF, rhsANF)
+                      | Min(_,_) -> Min(lhsANF, rhsANF)
+                      | Max(_,_) -> Max(lhsANF, rhsANF)
+                      | Div(_,_) -> Div(lhsANF, rhsANF)
+                      | Mod(_,_) -> Mod(lhsANF, rhsANF)
                       | e -> failwith $"BUG: unexpected expression: %O{e}"
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = anfExpr})
@@ -218,7 +276,8 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
     | Not(arg)
     | Print(arg)
     | PrintLn(arg)
-    | Assertion(arg) as expr ->
+    | Assertion(arg)
+    | Sqrt(arg) as expr ->
         /// Argument in ANF and related definitions
         let (argANF, argDefs) = toANFDefs arg
         /// This expression in ANF
@@ -227,6 +286,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
                       | Print(_) -> Print(argANF)
                       | PrintLn(_) -> PrintLn(argANF)
                       | Assertion(_)  -> Assertion(argANF)
+                      | Sqrt(_) -> Sqrt(argANF)
                       | e -> failwith $"BUG: unexpected expression: %O{e}"
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = anfExpr})
@@ -317,6 +377,17 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
             /// Definition binding this expression in ANF to its variable
             let anfDef = ANFDef(false, {node with Expr = anfAssign})
             ({node with Expr = Var(anfDef.Var)}, anfDef :: (ftargetExprDefs @ asgnExprDefs))
+        | ArrayElem(atarget, index) ->
+            /// We also require Assign to handle array elements.
+            /// Target array expression in ANF and related definitions
+            let (atargetANF, atargetDefs) = toANFDefs atarget
+            /// Index expression in ANF and related definitions
+            let (indexANF, indexDefs) = toANFDefs index
+            /// Assignment to array element in ANF form
+            let anfAssign = Assign({target with Expr = ArrayElem(atargetANF, indexANF)}, asgnExprANF)
+             /// Definition binding this expression in ANF to its variable
+            let anfDef = ANFDef(false, {node with Expr = anfAssign})
+            ({node with Expr = Var(anfDef.Var)}, anfDef :: (indexDefs @ atargetDefs @ asgnExprDefs))
         | _ ->
             failwith $"BUG: invalid assignment target: %O{target}"
 
@@ -330,6 +401,16 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
         ({node with Expr = Var(anfDef.Var)}, [anfDef])
     
+    | DoWhile(body, cond) -> 
+        /// Body of the 'do while' loop in ANF
+        let bodyANF = toANF (toANFDefs body)
+        /// Condition expression in ANF and related definitions
+        let condANF = toANF (toANFDefs cond)
+        /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = DoWhile(bodyANF, condANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, [anfDef])
+
     | Type(name, def, scope) ->
         /// Scope expression in ANF
         let scopeANF = toANF (toANFDefs scope)
@@ -398,6 +479,46 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
         ({node with Expr = Var(anfDef.Var)}, anfDef :: initDefs)
 
+    | ArrayCons(length, init) ->
+        /// Length expression in ANF and related definitions
+        let (lengthANF, lengthDefs) = toANFDefs length
+        /// Init expression in ANF and related definitions
+        let (initANF, initDefs) = toANFDefs init
+        /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = ArrayCons(lengthANF, initANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: (initDefs @ lengthDefs))
+
+    | ArrayElem(target, index) ->
+        /// Target expression in ANF and related definitions
+        let (targetANF, targetDefs) = toANFDefs target
+        /// Index expression in ANF and related definitions
+        /// We need to evaluate the index like an expression because it may be something complex and not simply an int
+        let (indexANF, indexDefs) = toANFDefs index
+        /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = ArrayElem(targetANF, indexANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: (indexDefs @ targetDefs))
+
+    | ArrayLength(target) ->
+        /// Target expression in ANF and related definitions
+        let (targetANF, targetDefs) = toANFDefs target
+        /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = ArrayLength(targetANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: targetDefs)
+
+    | ArraySlice(target, startIdx, endIdx) ->
+        /// Target expression in ANF and related definitions
+        let (targetANF, targetDefs) = toANFDefs target
+        /// startIdx expression in ANF and related definitions
+        let (startIdxANF, startIdxDefs) = toANFDefs startIdx
+        /// endIdx expression in ANF and related definitions
+        let (endIdxANF, endIdxDefs) = toANFDefs endIdx
+        /// Definition binding this expression in ANF to its variables
+        let anfDef = ANFDef(false, {node with Expr = ArraySlice(targetANF, startIdxANF, endIdxANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: (startIdxDefs @ endIdxDefs @ targetDefs))
     | Match(matchExpr, cases) ->
         /// Matched expression in ANF and related definitions
         let (matchExprANF, matchExprDefs) = toANFDefs matchExpr
@@ -417,6 +538,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
         let anfDef = ANFDef(false, {node with Expr = Match(matchExprANF, cases2)})
 
         ({node with Expr = Var(anfDef.Var)}, anfDef :: matchExprDefs)
+
 
 let internal isReassignedLater (varNameToSearch: string) (remainingDefs: ANFDefs<'E,'T>) : bool =
     List.exists (fun (defEntry: ANFDef<'E, 'T>) ->
@@ -496,9 +618,6 @@ let rec internal doCopyProp
             let (optDs, finalSubsts) = doCopyProp ds substs varMutabilityMap
             (currentDef :: optDs, finalSubsts)
 
-/// Transform the given AST node into Administrative Normal Form. (Basic version)
-let transform (ast: Node<'E, 'T>) : Node<'E, 'T> = toANF (toANFDefs ast)
-
 /// Transform the given AST node into Administrative Normal Form with copy propagation.
 let optTransform (ast: Node<'E, 'T>) : Node<'E, 'T> =
     let (node, defs) = toANFDefs ast
@@ -529,3 +648,144 @@ let optTransform (ast: Node<'E, 'T>) : Node<'E, 'T> =
     let optDefsForToANF = List.rev optDefsOldestFirst // toANF expects most recent definitions first
 
     toANF (finalNode, optDefsForToANF)
+    
+/// Helper function to verify the generated ANF from AST is valid:
+/// This function does NOT cover all possible ANF translations but verifies at the least all added functionality.
+let verifyANF (node: Node<'E,'T>) =
+    let mutable isValid = true
+    let mutable violations = []
+
+    let rec visit (node: Node<'E,'T>) =
+        match node.Expr with
+        | Let(var, init, body)
+        | LetMut(var, init, body) ->
+            // ANF property check
+            let check = 
+                match init.Expr with
+                | Var(_) | IntVal(_) | BoolVal(_) | FloatVal(_) | StringVal(_) | UnitVal | ReadInt | ReadFloat | Lambda(_, _) -> true
+                | Add(a, b) 
+                | Mult(a, b) 
+                | And(a, b) 
+                | Or(a, b) 
+                | Eq(a, b)
+                | Less(a, b) 
+                | LessEq(a, b) 
+                | Greater(a, b) 
+                | GreaterEq(a, b)
+                | Min(a, b) 
+                | Max(a, b) 
+                | Div(a, b) 
+                | Mod(a, b)  ->
+                    match a.Expr, b.Expr with
+                    | Var(_), Var(_) -> true
+                    | _ -> false
+                | Not(a) 
+                | Print(a) 
+                | PrintLn(a) 
+                | Assertion(a) 
+                | Sqrt(a) 
+                | ArrayLength(a) ->
+                    match a.Expr with 
+                    | Var(_) -> true 
+                    | _ -> false
+                | ArrayCons(length, init) ->
+                    match length.Expr, init.Expr with
+                    | Var(_), Var(_) -> true 
+                    | _ -> false
+                | ArrayElem(a, idx) ->
+                    match a.Expr, idx.Expr with 
+                    | Var(_), Var(_) -> true 
+                    | _ -> false
+                | ArraySlice(a, s, e) ->
+                    match a.Expr, s.Expr, e.Expr with
+                    | Var(_), Var(_), Var(_) -> true
+                    | _ -> false
+                | FieldSelect(a, fieldName) ->
+                    match a.Expr with 
+                    | Var(_) -> true 
+                    | _ -> false
+                | Application(f, args) ->
+                    match f.Expr with
+                    | Var(_) -> List.forall (fun (arg: Node<'E,'T>) -> 
+                        match arg.Expr with 
+                        Var(_) -> true 
+                        | _ -> false) args
+                    | _ -> false
+                | UnionCons(_, a) ->
+                    match a.Expr with 
+                    Var(_) -> true 
+                    | _ -> false
+                | If(condition, ifTrue, ifFalse) ->
+                    match condition.Expr with
+                    | Var(_) -> 
+                        // We also need to check the other branches for ANF expressions
+                        visit ifTrue
+                        visit ifFalse
+                        true
+                    | _ -> false
+                
+                // For the While loops we recursively visit the body and condition to ensure all expressions within it follow ANF rules.
+                | While(condition, body) ->
+                    // Check that condition is in ANF
+                    visit condition  
+                    // Check that body is in ANF
+                    visit body
+                    true // Not sure if this is correct but we are concerned about checking the cond/body so we jump into those instead
+                | DoWhile(body, condition) ->
+                    // Check that body is in ANF
+                    visit body
+                    // Check that condition is in ANF
+                    visit condition
+                    true
+
+                | Assign(target, expr) ->
+                    match target.Expr, expr.Expr with
+                    | Var(_), Var(_) -> true  // Simple variable assignment
+                    | ArrayElem(a, idx), Var(_) ->
+                        // Array element assignment
+                        match a.Expr, idx.Expr with
+                        | Var(_), Var(_) -> true
+                        | _ -> false
+                    | FieldSelect(a, _), Var(_) ->
+                        // Field selection assignment
+                        match a.Expr with
+                        | Var(_) -> true
+                        | _ -> false
+                    | _ -> false
+                | Match(expr, cases) ->
+                    // First check that matched expression is a variable
+                    match expr.Expr with
+                    | Var(_) -> 
+                        // Then check that all branch continuations are in ANF ingnore the strings.
+                        let (_, _, continuations) = List.unzip3 cases
+                        List.iter visit continuations
+                        true
+                    | _ -> false
+                | _ -> false
+            
+            if not check then
+                isValid <- false
+                // If we get false we append our failures list to read out later.
+                violations <- $"Variable {var} bound to complex expression" :: violations
+            
+            visit body
+            
+        | _ -> 
+            match node.Expr with
+            | Var(_) -> () // If the final result is a variable
+            | _ -> 
+                isValid <- false
+                violations <- $"Final expression is not a variable" :: violations
+    
+    visit node
+    
+    if isValid then
+        printfn "ANF verification complete: Valid ANF"
+    else
+        printfn "ANF verification failed with %d violations:" violations.Length
+        List.iter (printfn "- %s") violations
+    
+
+/// Transform the given AST node into Administrative Normal Form.
+let transform (ast: Node<'E,'T>): Node<'E,'T> =
+    toANF (toANFDefs ast)

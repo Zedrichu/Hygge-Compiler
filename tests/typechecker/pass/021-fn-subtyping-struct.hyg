@@ -1,0 +1,18 @@
+type SmallStruct = struct { name: string };
+type MediumStruct = struct { name: string;
+                             value: int };
+type BigStruct = struct { name: string;
+                          value: int;
+                          extra: float };
+
+fun myFun(x: SmallStruct): BigStruct = {
+    struct { name = x.name; 
+             value = 42; 
+             extra = 3.14f }
+};
+
+fun myFunWrapper(f: (MediumStruct) -> MediumStruct, s: BigStruct): SmallStruct = {
+    f(s)
+};
+
+myFunWrapper(myFun, struct { name = "Hello"; value = 42; extra = 3.14f; extra2 = 42.0f })

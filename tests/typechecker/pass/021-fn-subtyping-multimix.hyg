@@ -1,0 +1,42 @@
+type BigStruct = struct { name: string;
+                          value: int;
+                          extra: float };
+type MediumStruct = struct { name: string;
+                             value: int };
+type SmallStruct = struct { name: string };
+
+type BigUnion = union {
+    A: int;
+    B: float;
+    C: string;
+    D: bool
+};
+type MediumUnion = union {
+    A: int;
+    B: float;
+    C: string
+};
+type SmallUnion = union {
+    B: float;
+    A: int
+};
+
+// mixed struct and union with multiple function type arguments
+fun multiFun(
+        f: (SmallStruct) -> BigUnion,
+        g: (MediumStruct) -> MediumStruct,
+        h: (BigStruct) -> SmallUnion,
+        i: (MediumUnion) -> BigStruct,
+        j: (SmallUnion) -> SmallUnion
+    ): SmallStruct = {
+    struct { name = "Nothing to see here"; 
+             dummy = "except this" }
+};
+
+fun f(x: SmallStruct): SmallUnion = {let x: SmallUnion = A{42}; x};
+fun g(x: SmallStruct): BigStruct  = struct { name = x.name; value = 42; extra = 3.14f };
+fun h(x: BigStruct):   SmallUnion = {let x: SmallUnion = B{3.2f}; x};
+fun i(x: BigUnion):    BigStruct  = struct { name = "oh"; value = 42; extra = 3.14f };
+fun j(x: BigUnion):    SmallUnion = B{1.1f};
+
+multiFun(f, g, h, i, j)

@@ -1,0 +1,87 @@
+type Shape = struct { name: string;
+                      area: float };
+type Circle = struct { name: string;
+                       area: float;
+                       radius: int };
+type Square = struct { name: string;
+                       area: float;
+                       side: float };
+type ExtraCircle = struct { name: string;
+                            area: float;
+                            radius: float;
+                            extra: float };
+type ExtraCircleAlias = ExtraCircle;
+let sq: Square = struct { name = "Square";
+                         area = 2.0f * 2.0f;
+                         side = 2.0f };
+let ci: Circle = struct { name = "Circle";
+                         area = 10.0f * 10.0f * 3.14f;
+                         radius = 10 };
+
+fun getArea(shape: Shape): float = shape.area;
+
+// -- union
+type ShapeUnion = union {
+    Circle: Circle;
+    Square: Square
+};
+
+type MoreShapeUnion = union {
+    Square: Square;
+    ExtraCircle: ExtraCircleAlias; // subtyping still works for alias
+    Circle: Circle
+};
+
+type ExtraMoreShapeUnion = union {
+    Square: Square;
+    ExtraCircle: ExtraCircle;
+    Circle: Circle;
+    extra: float
+};
+// Type(ShapeUnion) < Type(MoreShapeUnion) < Type(ExtraMoreShapeUnion)
+
+type BigUnion = union {
+    A: int;
+    B: float;
+    C: string;
+    D: bool
+};
+
+type MediumUnion = union {
+    A: int;
+    B: float;
+    C: string
+};
+
+type SmallUnion = union {
+    B: float;
+    A: int
+};
+// Type(SmallUnion) < Type(MediumUnion) < Type(BigUnion)
+
+fun getAreaUnion(shape: ExtraMoreShapeUnion): SmallUnion = {
+    match shape with {
+        Circle{c} -> { let x: SmallUnion = A{c.radius}; x };
+        Square{s} -> { let x: SmallUnion = B{getArea(s)}; x };
+        ExtraCircle{ec} -> { let x: SmallUnion = B{ec.extra}; x }
+    }
+};
+
+fun getAreaWrapper(f: (MoreShapeUnion) -> MediumUnion, su: ShapeUnion): BigUnion = {
+    f(su)
+};
+
+getAreaWrapper(getAreaUnion, Circle{ci});
+getAreaWrapper(getAreaUnion, Square{sq})
+// getAreaWrapper expects: 
+//  - f =    (MoreShapeUnion)      -> MediumUnion  (accept this or subtype)
+//    given: (ExtraMoreShapeUnion) -> SmallUnion
+//     given < f:                                f                given
+//      (args of f are subtypes of given)        MoreShapeUnion < ExtraMoreShapeUnion 
+//      (ret. type of f is a supertype of given) MediumUnion    > SmallUnion
+//  - su = ShapeUnion or subtype
+//    given: Circle{...}/Square{...} - single field union instances
+//    => given < su
+//  return type: caller should expect BigUnion at the worst,
+//  f returns SmallUnion
+//  SmallUnion < BigUnion

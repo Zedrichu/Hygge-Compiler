@@ -1,0 +1,33 @@
+// Lambda printing
+fun f(y: int): int = 1;
+println(f);
+
+// Struct printing
+let s1 = struct {f = 0; g = true};
+println(s1);
+// + inplace
+println(struct {f = 1; g = false});
+
+// Array printing
+let a: array {int} = array(10, 42);
+println(a);
+// + inplace
+println(array(10, 42));
+// + array slice
+println(slice(a, 2, 6));
+
+// Tuple printing
+let t: tuple {string, int, bool} = tuple {"Hello", 40 + 2, true};
+println(t);
+// + inplace
+println(tuple {"Hello", 40 + 2, true});
+
+// Union printing
+fun f(): int = 1;
+fun g(): int = 2;
+let mutable u = U1{U2{f}};
+// println((match u with {Some{x} -> x; None{_} -> -1 }));
+println(u);
+// u <- Some{42};
+u <- U1{U2{g}};
+println(u)

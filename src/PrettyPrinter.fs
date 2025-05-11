@@ -241,6 +241,8 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
         mkTree "ArraySlice" node [("target", formatASTRec target)
                                   ("startIdx", formatASTRec startIdx)
                                   ("endIdx", formatASTRec endIdx)]
+    | Copy(arg) ->
+        mkTree "Copy" node [("arg", formatASTRec arg)]
 
 /// Return a description of an AST node, and possibly some subtrees (that are
 /// added to the overall tree structure).

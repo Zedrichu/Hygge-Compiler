@@ -119,6 +119,7 @@ rule tokenize = parse
 | "array"       { Parser.ARRAY }
 | "arrayLength" { Parser.ARRAY_LENGTH }
 | "arrayElem"   { Parser.ARRAY_ELEM }
+| "copy"        { Parser.COPY }
 | "slice"       { Parser.SLICE }
 
 // Generic identifier
