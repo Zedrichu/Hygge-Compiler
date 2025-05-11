@@ -48,7 +48,7 @@ let internal testCodegen (file: string) (expected: int) =
         | Ok(tast) ->
             let asm = RISCVCodegen.codegen tast
             let explainExpected = RARS.explainExitCode expected
-            let exit = RARS.launch (asm.ToString()) false
+            let exit = RARS.launchOpt (asm.ToString()) false true
             let explainExit = RARS.explainExitCode exit
             Expect.equal exit expected ($"RARS should have exited with code %d{expected} (%s{explainExpected}), "
                                         + $"got %d{exit} (%s{explainExit})")

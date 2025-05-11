@@ -19,8 +19,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="src/Log.fs" />
-    <Compile Include="src/SourceRepository.fs" />
     <Compile Include="src/AST.fs" />
+    <Compile Include="src/SourceRepository.fs" />
     <Compile Include="src/ASTUtil.fs" />
     <!-- Lexer and parser generation -->
     <PackageReference Include="FsLexYacc" Version="11.3.0" />
@@ -42,6 +42,7 @@
     <Compile Include="src/RISCV.fs" />
     <Compile Include="src/RISCVCodegen.fs" />
     <Compile Include="src/ANFRISCVCodegen.fs" />
+    <Compile Include="src/Peephole.fs" />
     <!-- Command line parsing -->
     <PackageReference Include="CommandLineParser.FSharp" Version="2.9.1" />
     <Compile Include="src/CmdLine.fs" />

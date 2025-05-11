@@ -33,40 +33,78 @@ let applySelectors (lst: 'a list): (string * 'a) list =
   let indexedList = List.indexed lst
   List.map (fun (i, p) -> ($"_{i + 1}", p)) indexedList
 
-// Assertion failure message handler
-let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
-    let pos = pos(parseState, inputIdx)
+let decorateAssertion (node: Node<'E,'T>) =
+  match node.Expr with
+  | Assertion(arg) ->
+    /// Get the last nested expression (last Seq or Let scope)
+    /// since it is the expression which effectively decides on the assertion failure
+    let rec getKeyNodeFolder (node: Node<'E,'T>) =
+      match node.Expr with
+      | Seq(nodes) ->
+        getKeyNodeFolder nodes[nodes.Length - 1]
+      | Let(_, _, scope)
+      | LetT(_, _, _, scope)
+      | LetMut(_, _, scope)
+      | LetRec(_, _, _, scope) ->
+        getKeyNodeFolder scope
+      | _ -> ref node
+
+    let keyNodeRef = getKeyNodeFolder arg
+    let mutable keyNode = keyNodeRef.Value
+
+    /// Get free variables in the keyNode
+    /// Having keyNode as an argument we ensure that the nested variable declarations
+    /// will be included in the printout if they were referenced in the key assertion calculation
+    let fvList = Map.toList (ASTUtil.freeVarsMap keyNode)
+
+    /// Create print nodes for each free variable
+    let printVarNodes =
+      fvList |> List.collect (fun (varName, varNode) ->
+      [{ node with Expr = Print({ node with Expr = StringVal($"{varName} = ") }) };
+      { node with Expr = PrintLn({ node with Expr = varNode.Expr }) }])
+
+    /// Prepare code snippet to be shown
     let snippet = SourceRepository.repository.GetSnippet(
-      pos.FileName, pos.LineStart, pos.LineEnd, pos.ColStart, true, true
-    )
+      node.Pos,
+      keyNode.Pos,
+      true,
+      true,
+      true)
 
-    let msgArr =
-        match snippet with
-        | Some strArr -> List.concat [
-            ["***********************"];
-            [$"Assertion error @ {pos.FileName}:{pos.LineStart}:{pos.ColStart}"];
-            ["-----------------------"];
-            strArr;
-            ["***********************"]]
-        | None -> List.concat [
-            ["***********************"];
-            ["Assertion failed: <no source available>"];
-            ["***********************"]]
+    let posInfo =
+      match snippet with
+      | Some strArr ->
+        $"Assertion error @ {node.Pos.FileName}:{node.Pos.LineStart}:{node.Pos.ColStart}", strArr
+      | None ->
+        $"Assertion failed: <no source available>", []
+    let msgArr = List.concat [
+      [""]
+      ["***********************"]
+      [fst posInfo]
+      ["-----------------------"]
+      (snd posInfo)
+      ["-----------------------"]
+      ["Relevant variables:"]]
 
-    // Apply PrintLn(StringVal) structure to each element (line) of the message
-    let node = mkNode(parseState, inputIdx,
-        Expr.Seq(
-            (List.map
-                (fun el ->
-                    mkNode(parseState, inputIdx, Expr.PrintLn(
-                        mkNode(parseState, inputIdx, Expr.StringVal(el)))))
-                msgArr)
-            @ [mkNode(parseState, inputIdx, Expr.Assertion(
-                mkNode(parseState, inputIdx, Expr.BoolVal(false))
-                ))]
-        ))
+    /// Create header node with source code and location information
+    let msgArrAst = 
+      List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr
 
-    node
+    // Annotate the key node with the printout
+    let decoration =
+      If(keyNode,
+        { keyNode with Expr = UnitVal },
+        { node with Expr =
+                    Seq( msgArrAst @ printVarNodes @
+                      [{ node with Expr = PrintLn(
+                                   { node with Expr = StringVal "***********************" }) }] @
+                      [{ keyNode with Expr = Assertion({ keyNode with Expr = BoolVal false }) }]) })
+
+    // Replace keyNode with the decorated one
+    ASTUtil.substExprByRef arg decoration keyNodeRef
+  | _ ->
+    invalidOp $"Fatal error: Assertion expected, but found {node.Expr}"
+
 %}
 
 // Name of the grammar rule (defined below) to parse first.
@@ -127,6 +165,7 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 %token ARRAY ARRAY_LENGTH ARRAY_ELEM
 %token SLICE
 %token IN
+%token COPY
 
 // Generic identifier (might result in a variable, pretype, etc.)
 %token <string> IDENT
@@ -350,11 +389,7 @@ unaryExpr:
                                                     Expr.If(
                                                         mkNode(parseState, 1, Expr.Greater($3, $5)),
                                                         $3, $5)) }
-  | ASSERT LPAR simpleExpr RPAR                 { mkNode(parseState, 1, Expr.If(
-                                                            $3,
-                                                            mkNode(parseState, 1, Expr.UnitVal),
-                                                            assertionError(parseState, 1)
-                                                    ))}
+  | ASSERT LPAR simpleExpr RPAR                 { decorateAssertion (mkNode(parseState, 1, Expr.Assertion($3))) }
   | ascriptionExpr                              { $1 }
   // Avoid ambiguity by higher precedence for the postfix operators
 
@@ -408,6 +443,8 @@ primary:
   | ARRAY_ELEM LPAR simpleExpr COMMA simpleExpr RPAR             { mkNode(parseState, 1, Expr.ArrayElem($3, $5)) }
   | SLICE LPAR simpleExpr COMMA simpleExpr COMMA simpleExpr RPAR { mkNode(parseState, 1, Expr.ArraySlice($3, $5, $7)) }
   | label LCURLY expr RCURLY                                     { mkNode(parseState, 1, Expr.UnionCons($1, $3)) }
+  | COPY LPAR primary RPAR                                       { mkNode(parseState, 1, Expr.Copy($3)) }
+  
 // Variable name
 variable:
   | ident       { $1 }
