@@ -205,10 +205,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
               (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space") ])
     
     | StringVal(v) ->
-        let escapedV = v.Replace("\"", "\\\"")
         // Label marking the string constant in the data segment
         let label = Util.genSymbol "string_val"
-        Asm().AddData(label, Alloc.String(escapedV)) // instead of Alloc.String(v)
+        Asm().AddData(label, Alloc.String(v)) // instead of Alloc.String(v)
              .AddText(RV.LA(Reg.r(env.Target), label))
 
     | Var(name) ->
@@ -501,7 +500,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// generic register 'target' or 'fptarget' (depending on its type)
         let argCode = doCodegen env arg
         // The generated code depends on the 'print' argument type
-        match arg.Type with
+        match expandType arg.Env arg.Type with
         | t when (isSubtypeOf arg.Env t TBool) ->
             let strTrue = Util.genSymbol "true"
             let strFalse = Util.genSymbol "false"
@@ -549,7 +548,42 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 ])
                 ++ (afterSysCall [Reg.a0] [])
         | t ->
-            failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
+            match t with
+            | TStruct fields ->
+                let nodes = 
+                    [{ node with Expr = Print(
+                                { node with Expr = StringVal("struct { "); Type = TString }) }] @
+                    (List.collect (fun (name, tpe) ->
+                        let strVals = 
+                            match tpe with
+                            | TString -> (name + @" = \"""), @"\""; "
+                            | _ -> (name + " = "), "; "
+                        [
+                            { node with Expr = Print(
+                                    { node with Expr = StringVal(fst strVals); Type = TString }) }
+                            { node with Expr = Print(
+                                    { node with Expr = FieldSelect(arg, name); Type = tpe }) }
+                            { node with Expr = Print(
+                                    { node with Expr = StringVal(snd strVals); Type = TString }) }
+                        ]
+                    ) fields) @
+                    [{ node with Expr = Print({ node with Expr = StringVal("}"); Type = TString }) }]
+                doCodegen env { node with Expr = Seq(nodes) }
+            | TArray tpe ->
+                let nodes = [
+                    { node with Expr = Print(
+                            { node with Expr = StringVal(
+                                    $"Array{{ type: {tpe.ToString()}; length: "); Type = TString }) }
+                    { node with Expr = Print({ node with Expr = ArrayLength(arg); Type = TInt }) }
+                    { node with Expr = Print({ node with Expr = StringVal(" }"); Type = TString }) }
+                ]
+                doCodegen env { node with Expr = Seq(nodes) }
+            | TFun (_,_) ->
+                doCodegen env 
+                    { node with Expr = Print(
+                            { node with Expr = StringVal(t.ToString()); Type = TString }) }
+            | t ->
+                failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
 
     | PrintLn(arg) ->
         // Recycle codegen for Print above, then also output a newline

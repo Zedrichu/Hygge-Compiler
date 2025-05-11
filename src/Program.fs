@@ -82,6 +82,7 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
     Log.setLogLevel opt.LogLevel
     if opt.Verbose then Log.setLogLevel Log.LogLevel.debug
     Log.debug $"Parsed command line options:%s{Util.nl}%O{opt}"
+    SourceRepository.repository.AddFileIntepreter(opt.File)
     match (Util.parseFile opt.File) with
     | Error(msg) ->
         Log.error $"%s{msg}"; 1 // Non-zero exit code
@@ -119,6 +120,7 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
 let internal generateAsm (filename: string)
                          (anf: bool) (maxRegisters: uint)
                          (optimize: uint): Result<RISCV.Asm, unit> =
+    SourceRepository.repository.AddFileAsm(filename)
     match (Util.parseFile filename) with
     | Error(msg) ->
         Log.error $"%s{msg}"

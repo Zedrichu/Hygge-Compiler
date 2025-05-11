@@ -31,7 +31,7 @@ let explainExitCode (exit: int): string =
 /// Launch RARS on the given assembly code.  If 'warnOnAssertFailure' is true,
 /// then log a warning if the RARS exit code denotes an assertion failure.
 /// Return the RARS exit code: 0 on success, non-zero in case of error.
-let launch (asm: string) (warnOnAssertFailure: bool): int =
+let launchOpt (asm: string) (warnOnAssertFailure: bool) (suppressStdOut: bool): int =
     let curDir = System.IO.Directory.GetCurrentDirectory()
     let rars = System.IO.Path.Combine [| curDir; "lib"; "rars.jar" |]
     try
@@ -53,7 +53,7 @@ let launch (asm: string) (warnOnAssertFailure: bool): int =
             for arg in rarsArgs do
                 p.StartInfo.ArgumentList.Add(arg)
 
-            p.StartInfo.RedirectStandardOutput <- false
+            p.StartInfo.RedirectStandardOutput <- suppressStdOut
             p.StartInfo.RedirectStandardError <- true
             p.StartInfo.RedirectStandardInput <- false
             p.StartInfo.UseShellExecute <- false
@@ -96,3 +96,6 @@ let launch (asm: string) (warnOnAssertFailure: bool): int =
     with e ->
         Log.error $"Error creating temporary directory: %s{e.Message}"
         1 // Non-zero exit code
+
+let launch (asm: string) (warnOnAssertFailure: bool): int =
+    launchOpt asm warnOnAssertFailure false
