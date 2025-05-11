@@ -319,6 +319,10 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                 Some(env, {node with Expr = UnitVal})
 
     | Print(arg) ->
+        let rec reduceFullyWithEnv (env: RuntimeEnv<'E,'T>) (node: Node<'E,'T>): RuntimeEnv<'E,'T>*Node<'E,'T> =
+            match (reduce env node) with
+            | Some(env', node') -> reduceFullyWithEnv env' node'
+            | None -> (env, node)
         match env.Printer with
         | None -> None
         | Some(printer) -> // Reductum when printing succeeds (a unit value)
@@ -328,6 +332,50 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | IntVal(v) -> printer $"%d{v}"; reductum
             | FloatVal(v) -> printer $"%f{v}"; reductum
             | StringVal(v) -> printer $"%s{v}"; reductum
+            | Lambda(args,_) -> 
+                let argsStr = String.concat ", " (List.map (fun (argName, _) -> $"%s{argName}") args)
+                printer $"Lambda({argsStr})"; reductum
+            | Pointer(addr) ->
+                match (env.PtrInfo.TryFind addr) with
+                | Some(fields) ->
+                    let nodes = 
+                        match fields with
+                        | ["~length"; "~data"] ->
+                            // Special case for arrays [print as 'Array{ length: 10 }']
+                            [{ node with Expr = Print({ node with Expr = StringVal("Array{ length: ") }) }] @
+                            [{ node with Expr = Print({ node with Expr = FieldSelect({ node with Expr = Pointer(addr) }, "~length") }) }] @
+                            [{ node with Expr = Print({ node with Expr = StringVal(" }") }) }]
+                        | _ ->
+                            [{ node with Expr = Print({ node with Expr = StringVal("struct { ") }) }] @
+                            (List.mapi (fun i field ->
+                                // Add quotes around string values
+                                let strVals = 
+                                    match (env.Heap.TryFind (addr + (uint i))) with
+                                    | Some(fieldNode) when (match fieldNode.Expr with StringVal(_) -> true | _ -> false) ->
+                                        $"{field} = \"", "\"; "
+                                    | _ ->
+                                        $"{field} = ", "; "
+                                [
+                                    { node with Expr = Print({ node with Expr = StringVal(fst strVals) }) }
+                                    { node with Expr = Print({ node with Expr = FieldSelect({ node with Expr = Pointer(addr) }, field) }) }
+                                    { node with Expr = Print({ node with Expr = StringVal(snd strVals) }) }
+                                ]
+                                ) fields |> List.concat) @
+                            [{ node with Expr = Print({ node with Expr = StringVal(" }") }) }]
+
+                    // since this is just Print concatenation, we reduce it fully
+                    // such that externally it looks like a single Print and no other modification is needed
+                    Some (reduceFullyWithEnv env { node with Expr = Seq(nodes) })
+                | None ->
+                    // with current implementation, this could be a Union
+                    match (env.Heap.TryFind addr) with
+                    | Some({Expr = StringVal(label)}) ->
+                        // Retrieve the value of the union instance from the heap
+                        match (env.Heap.TryFind (addr + 1u)) with
+                        | Some(v) ->
+                            Some (reduceFullyWithEnv env { node with Expr = Print({ node with Expr = StringVal(label + "{...}")})})
+                        | None -> None
+                    | _ -> None
             | _ when not (isValue node) ->
                 match (reduce env arg) with
                 | Some(env', arg2) ->
@@ -666,6 +714,39 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             Some(env', {node with Expr = ArrayElem(target', index)})
         | None -> None
     | ArrayElem _ -> None
+    
+    
+    | Copy(arg) ->
+        match (reduce env arg) with
+        | Some(env', arg') -> Some(env', { node with Expr = Copy(arg') })
+        | None ->
+            match arg.Expr with
+            | Pointer(addr) ->
+                match env.PtrInfo.TryFind addr with
+                | Some(fields) ->
+                    // Deep copy struct by recursively copying field values
+                    let fieldValues = fields |> List.mapi (fun i field ->
+                        let fieldValue = env.Heap[addr + uint i]
+                        // If a field is a pointer, recursively copy it
+                        match fieldValue.Expr with
+                        | Pointer(_) ->
+                            // Create a Copy expression for this field
+                            let copyField = {node with Expr = Copy(fieldValue)}
+                            // Recursively evaluate the Copy for this field
+                            match reduce env copyField with
+                            | Some(_, copyResult) -> (field, copyResult)
+                            | None -> failwith $"Failed to copy nested pointer at field: {field}"
+                        | _ ->
+                            (field, fieldValue)) // Non-pointer fields are copied as-is
+
+                    let deepCopy = StructCons(fieldValues)
+                    Some(env, {node with Expr = deepCopy})
+                | None -> None
+            | _ -> None
+   
+             
+                 
+             
 
     | ArraySlice({ Expr = Pointer(addr) },
                  { Expr = IntVal(start) },

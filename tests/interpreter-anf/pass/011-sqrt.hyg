@@ -1,0 +1,3 @@
+assert(sqrt(16) = 4.0f);
+assert(sqrt(25.0f) = 5.0f)
+

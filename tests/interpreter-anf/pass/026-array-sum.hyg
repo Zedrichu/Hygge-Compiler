@@ -1,0 +1,17 @@
+let n = 5;
+let arr: array {int} = array(n, 43);
+
+arrayElem(arr, 0) <- 1;
+arrayElem(arr, 4) <- 99;
+
+fun arrSum(arr: array {int}): int = {
+    let mutable i = 0;
+    let mutable sum = 0;
+    while (i < arrayLength(arr)) do {
+        sum <- sum + arrayElem(arr, i);
+        i <- i + 1
+    };
+    sum
+};
+
+assert(arrSum(arr) = 229)

@@ -96,6 +96,9 @@ type CompilerOptions = {
 
     [<Option('r', "registers", HelpText="Number of registers to use for ANF-based code generation (min 3, max 18; default: 18)")>]
     Registers: uint;
+
+    [<Option('O', "optimize", HelpText="Optimization level (default: 0, i.e. no optimizations)")>]
+    Optimize: uint
 }
 
 
@@ -116,6 +119,9 @@ type RARSLaunchOptions = {
 
     [<Option('r', "registers", HelpText="Number of registers to use for ANF-based code generation (min 3, max 18; default: 18)")>]
     Registers: uint;
+
+    [<Option('O', "optimize", HelpText="Optimization level (default: 0, i.e. no optimizations)")>]
+    Optimize: uint
 }
 
 

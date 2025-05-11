@@ -1,0 +1,16 @@
+type U = union {
+  foo: int; 
+  bar: string
+};
+
+let x: U = foo{42};
+let d: U = bar{"uwu"};
+
+fun testFun(t: U): int =
+  match t with {
+      bar{y} -> 2;
+      foo{y} -> y + 1
+  };
+
+assert(testFun(d) = 2);
+assert(testFun(x) = 43)

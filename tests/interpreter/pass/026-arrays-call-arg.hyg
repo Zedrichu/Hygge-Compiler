@@ -1,0 +1,8 @@
+let mutable x = 0;
+let y = 1;
+
+fun getArr(dummy: int): array {int} = { x <- x + 1; array(10, 40 + 2) };
+
+println(x);
+assert(arrayElem(getArr(y), 0) = 42);
+assert(x = 1)

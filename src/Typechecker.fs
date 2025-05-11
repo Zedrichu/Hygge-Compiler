@@ -673,6 +673,18 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                      Expr = ArrayLength(ttarget) }
             | _ -> Error([(node.Pos, $"cannot access array length on expression of type %O{ttarget.Type}")])
         | Error(es) -> Error(es)
+        
+    //Copy of structures
+    //Arg needs to be of struct type
+    | Copy(arg) ->
+        match (typer env arg) with
+        | Ok(targ) ->
+            match (expandType env targ.Type) with
+            | TStruct _ ->
+                Ok{ Pos = node.Pos; Env = env; Type = targ.Type; Expr = Copy(targ) }
+            | _ -> Error([(node.Pos, $"Cannot copy expression of type %O{targ.Type}. Only struct types can be copied")])
+        | Error(es) -> Error(es)
+        
 
     | UnionCons(label, expr) ->
         match (typer env expr) with
@@ -843,12 +855,26 @@ and internal numericalRelationTyper descr pos (env: TypingEnv)
 and internal printArgTyper descr pos (env: TypingEnv) (arg: UntypedAST): Result<TypedAST, TypeErrors> =
     /// Types of values that can be printed.
     let printables = [TBool; TInt; TFloat; TString]
+
+    let printableExpanded = List.map (fun t -> t.ToString()) printables @
+                                            ["TStruct"; "TArray"; "TFun"; "TUnion"]
+    let isPrintableType t =
+        if List.exists (isSubtypeOf env t) printables then true
+        else match t with
+             | TStruct(_) -> true
+             | TArray(_) -> true
+             | TFun(_, _) -> true
+             | TUnion(_) -> true
+             | _ -> false
+
     match (typer env arg) with
     | Ok(targ) when List.exists (isSubtypeOf env targ.Type) printables ->
         Ok(targ)
-    | Ok(targ)->
+    | Ok(targ) when (isPrintableType (expandType targ.Env targ.Type))-> 
+        Ok(targ)
+    | Ok(targ) ->
         Error([(pos, $"%s{descr}: expected argument of a type among "
-                        + $"%s{Util.formatAsSet printables}, found %O{targ}")])
+                        + $"%s{Util.formatAsSet printableExpanded}, found %O{targ.Type}")])
     | Error(es) -> Error(es)
 
 /// Perform the typing of a 'let...' binding (without type annotations).  The
