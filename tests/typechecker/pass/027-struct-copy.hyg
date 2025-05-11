@@ -1,0 +1,19 @@
+type Type = struct {
+    b: string;
+    c: struct {
+        f: int;
+        g: float;
+        h : bool
+    }
+};
+
+let a : Type = struct {
+    b = "Word";
+    c = struct {
+        f = 23;
+        g = 1.23f;
+        h = true
+    }
+};
+
+let another: Type = copy(a); ()
