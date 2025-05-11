@@ -1,0 +1,39 @@
+let data = struct {
+    a = struct {
+        x = struct {
+            i = 42;
+            f = 3.14f
+        };
+        y = struct {
+            b = true;
+            c = "A"
+        }
+    };
+    b = struct {
+        z = struct {
+            s = "hello"
+        };
+        other_val = 50
+    }
+};
+
+let copiedData = copy(data);
+
+//Modify values in the original struct
+data.a.x.i <- 99;
+data.a.x.f <- 2.718f;
+data.a.y.b <- false;
+data.b.other_val <- 123;
+
+
+//Assert modifications
+assert(data.a.x.i = 99);
+assert(data.a.x.f = 2.718f);
+assert(not data.a.y.b);
+assert(data.b.other_val = 123);
+
+//Assert values didnt change in copied struct
+assert(copiedData.a.x.i = 42);
+assert(copiedData.a.x.f = 3.14f);
+assert(copiedData.a.y.b);
+assert(copiedData.b.other_val = 50)
