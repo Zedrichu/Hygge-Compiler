@@ -582,6 +582,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 doCodegen env 
                     { node with Expr = Print(
                             { node with Expr = StringVal(t.ToString()); Type = TString }) }
+            | TUnion (valuePairs: List<string * Type>) ->
+                doCodegen env 
+                    { node with Expr = Print(
+                            { node with Expr = StringVal(t.ToString()); Type = TString }) }
             | t ->
                 failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
 
