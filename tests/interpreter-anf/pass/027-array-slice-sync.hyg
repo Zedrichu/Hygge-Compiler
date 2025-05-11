@@ -1,0 +1,5 @@
+let arr1: array {int} = array(10, 3);
+let arr2: array {int} = slice(arr1, 2, 6);
+arrayElem(arr2, 0) <- arrayElem(arr1, 2) + 5;
+assert(arrayElem(arr2, 0) = 8);
+assert(arrayElem(arr1, 2) = 8)
