@@ -857,15 +857,15 @@ and internal printArgTyper descr pos (env: TypingEnv) (arg: UntypedAST): Result<
     let printables = [TBool; TInt; TFloat; TString]
 
     let printableExpanded = List.map (fun t -> t.ToString()) printables @
-                                            ["TStruct"; "TArray"; "TFun"]
+                                            ["TStruct"; "TArray"; "TFun"; "TUnion"]
     let isPrintableType t =
         if List.exists (isSubtypeOf env t) printables then true
-        else
-            match t with
-            | TStruct(_) -> true
-            | TArray(_) -> true
-            | TFun(_, _) -> true
-            | _ -> false
+        else match t with
+             | TStruct(_) -> true
+             | TArray(_) -> true
+             | TFun(_, _) -> true
+             | TUnion(_) -> true
+             | _ -> false
 
     match (typer env arg) with
     | Ok(targ) when List.exists (isSubtypeOf env targ.Type) printables ->
@@ -874,7 +874,7 @@ and internal printArgTyper descr pos (env: TypingEnv) (arg: UntypedAST): Result<
         Ok(targ)
     | Ok(targ) ->
         Error([(pos, $"%s{descr}: expected argument of a type among "
-                        + $"%s{Util.formatAsSet printableExpanded}, found %O{targ}")])
+                        + $"%s{Util.formatAsSet printableExpanded}, found %O{targ.Type}")])
     | Error(es) -> Error(es)
 
 /// Perform the typing of a 'let...' binding (without type annotations).  The
