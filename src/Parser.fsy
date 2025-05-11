@@ -29,37 +29,82 @@ let mkPretypeNode (parseState: IParseState, inputIdx: int, t: Pretype): PretypeN
 let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST =
   { Pos = pos(parseState, inputIdx); Env = (); Type = (); Expr = e }
 
-// Assertion failure message handler
-let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
-    let pos = pos(parseState, inputIdx)
+let applySelectors (lst: 'a list): (string * 'a) list =
+  let indexedList = List.indexed lst
+  List.map (fun (i, p) -> ($"_{i + 1}", p)) indexedList
+
+let decorateAssertion (node: Node<'E,'T>) =
+  match node.Expr with
+  | Assertion(arg) ->
+    /// Get the last nested expression (last Seq or Let scope)
+    /// since it is the expression which effectively decides on the assertion failure
+    let rec getKeyNodeFolder (node: Node<'E,'T>) =
+      match node.Expr with
+      | Seq(nodes) ->
+        getKeyNodeFolder nodes[nodes.Length - 1]
+      | Let(_, _, scope)
+      | LetT(_, _, _, scope)
+      | LetMut(_, _, scope)
+      | LetRec(_, _, _, scope) ->
+        getKeyNodeFolder scope
+      | _ -> ref node
+
+    let keyNodeRef = getKeyNodeFolder arg
+    let mutable keyNode = keyNodeRef.Value
+
+    /// Get free variables in the keyNode
+    /// Having keyNode as an argument we ensure that the nested variable declarations
+    /// will be included in the printout if they were referenced in the key assertion calculation
+    let fvList = Map.toList (ASTUtil.freeVarsMap keyNode)
+
+    /// Create print nodes for each free variable
+    let printVarNodes =
+      fvList |> List.collect (fun (varName, varNode) ->
+      [{ node with Expr = Print({ node with Expr = StringVal($"{varName} = ") }) };
+      { node with Expr = PrintLn({ node with Expr = varNode.Expr }) }])
+
+    /// Prepare code snippet to be shown
     let snippet = SourceRepository.repository.GetSnippet(
-      pos.FileName, pos.LineStart, pos.LineEnd, pos.ColStart, true, true
-    )
+      node.Pos,
+      keyNode.Pos,
+      true,
+      true,
+      true)
 
-    let msgArr =
-        match snippet with
-        | Some strArr -> List.concat [
-            ["***********************"];
-            [$"Assertion error @ {pos.FileName}:{pos.LineStart}:{pos.ColStart}"];
-            ["-----------------------"];
-            strArr;
-            ["***********************"]]
-        | None -> List.concat [
-            ["***********************"];
-            ["Assertion failed: <no source available>"];
-            ["***********************"]]
+    let posInfo =
+      match snippet with
+      | Some strArr ->
+        $"Assertion error @ {node.Pos.FileName}:{node.Pos.LineStart}:{node.Pos.ColStart}", strArr
+      | None ->
+        $"Assertion failed: <no source available>", []
+    let msgArr = List.concat [
+      [""]
+      ["***********************"]
+      [fst posInfo]
+      ["-----------------------"]
+      (snd posInfo)
+      ["-----------------------"]
+      ["Relevant variables:"]]
 
-    // Apply PrintLn(StringVal) structure to each element (line) of the message
-    let node = mkNode(parseState, inputIdx,
-        Expr.Seq(
-            List.map
-                (fun el ->
-                    mkNode(parseState, inputIdx, Expr.PrintLn(
-                        mkNode(parseState, inputIdx, Expr.StringVal(el)))))
-                msgArr)
-        )
+    /// Create header node with source code and location information
+    let msgArrAst = 
+      List.map (fun el -> { node with Expr = PrintLn({ node with Expr = StringVal el }) }) msgArr
 
-    node
+    // Annotate the key node with the printout
+    let decoration =
+      If(keyNode,
+        { keyNode with Expr = UnitVal },
+        { node with Expr =
+                    Seq( msgArrAst @ printVarNodes @
+                      [{ node with Expr = PrintLn(
+                                   { node with Expr = StringVal "***********************" }) }] @
+                      [{ keyNode with Expr = Assertion({ keyNode with Expr = BoolVal false }) }]) })
+
+    // Replace keyNode with the decorated one
+    ASTUtil.substExprByRef arg decoration keyNodeRef
+  | _ ->
+    invalidOp $"Fatal error: Assertion expected, but found {node.Expr}"
+
 %}
 
 // Name of the grammar rule (defined below) to parse first.
@@ -114,7 +159,13 @@ let assertionError (parseState: IParseState, inputIdx: int): UntypedAST =
 %token FOR
 %token FUN REC
 %token STRUCT
+%token UNION MATCH WITH
 %token REF
+%token TUPLE
+%token ARRAY ARRAY_LENGTH ARRAY_ELEM
+%token SLICE
+%token IN
+%token COPY
 
 // Generic identifier (might result in a variable, pretype, etc.)
 %token <string> IDENT
@@ -212,7 +263,53 @@ simpleExpr:
                                                                        mkNode(parseState, 1, Expr.While($5,
                                                                           mkNode(parseState, 1, Expr.Seq([$9; $7]))))
                                                                        ]))}
+  // Syntactic sugaring for scoped variable `for`-loop
+  | FOR LPAR LET MUTABLE variable EQ simpleExpr
+        SEMI orExpr SEMI simpleExpr RPAR simpleExpr          { mkNode(parseState, 1, Expr.LetMut($5, $7,
+                                                                   mkNode(parseState, 1, Expr.While($9,
+                                                                       mkNode(parseState, 1, Expr.Seq([$13; $11]))
+                                                                   ))
+                                                               )) }
+  // Syntactic sugaring defining `for-each` loops based on arrays
+  | FOR LPAR variable IN simpleExpr RPAR simpleExpr          {  let iteratorVar = mkNode(parseState, 1, Expr.Var("_ite"))
+                                                                let iterationCond = mkNode(parseState, 1, Expr.Less(
+                                                                                        iteratorVar,
+                                                                                        mkNode(parseState, 1, Expr.ArrayLength($5))
+                                                                                    ))
+                                                                let scopedVar = mkNode(parseState, 1, Expr.Var($3))
+                                                                let updateIterator = mkNode(parseState, 1, Expr.Assign(
+                                                                                        iteratorVar,
+                                                                                        mkNode(parseState, 1, Expr.Add(iteratorVar,
+                                                                                            mkNode(parseState, 1, Expr.IntVal(1))
+                                                                                        ))
+                                                                                     ))
+                                                                let updateElement = mkNode(parseState, 1, Expr.Assign(
+                                                                                        scopedVar,
+                                                                                        mkNode(parseState, 1, Expr.ArrayElem($5, iteratorVar))
+                                                                                    ))
+
+                                                                mkNode(parseState, 1, Expr.LetMut(
+                                                                    "_ite",
+                                                                    mkNode(parseState, 1, Expr.IntVal(0)),
+                                                                    mkNode(parseState, 1, Expr.If(
+                                                                        iterationCond,
+                                                                        mkNode(parseState, 1, Expr.LetMut($3,
+                                                                            mkNode(parseState, 1, Expr.ArrayElem($5,
+                                                                                mkNode(parseState, 1, Expr.IntVal(0)))),
+                                                                            mkNode(parseState, 1, Expr.While(iterationCond,
+                                                                                mkNode(parseState, 1, Expr.Seq(
+                                                                                    [ updateElement; $7; updateIterator]
+                                                                                ))
+                                                                            ))
+                                                                        )),
+                                                                        mkNode(parseState, 1, Expr.UnitVal)
+                                                                    ))
+                                                                ))
+                                                              }
+
   | FUN parenArgTypesSeq RARROW simpleExpr                           { mkNode(parseState, 1, Expr.Lambda($2, $4)) }
+  | MATCH simpleExpr WITH LCURLY matchCases RCURLY  { mkNode(parseState, 1,
+                                                             Expr.Match($2, $5)) }
 
 // An 'if-then-else' expression
 ifExpr:
@@ -292,14 +389,7 @@ unaryExpr:
                                                     Expr.If(
                                                         mkNode(parseState, 1, Expr.Greater($3, $5)),
                                                         $3, $5)) }
-  | ASSERT LPAR simpleExpr RPAR                 { mkNode(parseState, 1,
-                                                    Expr.Seq([
-                                                        mkNode(parseState, 1, Expr.If(
-                                                            $3,
-                                                            mkNode(parseState, 1, Expr.UnitVal),
-                                                            assertionError(parseState, 1)));
-                                                        mkNode(parseState, 1, Expr.Assertion($3));
-                                                    ])) }
+  | ASSERT LPAR simpleExpr RPAR                 { decorateAssertion (mkNode(parseState, 1, Expr.Assertion($3))) }
   | ascriptionExpr                              { $1 }
   // Avoid ambiguity by higher precedence for the postfix operators
 
@@ -341,13 +431,20 @@ ascriptionExpr:
 
 // Primary expressions
 primary:
-  | LPAR simpleExpr RPAR                     { $2 }
-  | value                                    { $1 }
-  | variable                                 { mkNode(parseState, 1, Expr.Var($1)) }
-  | STRUCT LCURLY structFieldInitSeq RCURLY  { mkNode(parseState, 1, Expr.StructCons($3)) }
-  | REF LCURLY simpleExpr RCURLY             { mkNode(parseState, 1, Expr.StructCons([("value", $3)])) }
-  | primary DOT field                        { mkNode(parseState, 2, Expr.FieldSelect($1, $3)) }
-
+  | LPAR simpleExpr RPAR                                         { $2 }
+  | value                                                        { $1 }
+  | variable                                                     { mkNode(parseState, 1, Expr.Var($1)) }
+  | STRUCT LCURLY structFieldInitSeq RCURLY                      { mkNode(parseState, 1, Expr.StructCons($3)) }
+  | primary DOT field                                            { mkNode(parseState, 2, Expr.FieldSelect($1, $3)) }
+  | REF LCURLY simpleExpr RCURLY                                 { mkNode(parseState, 1, Expr.StructCons([("value", $3)])) }
+  | TUPLE LCURLY exprCommaSeq RCURLY                             { mkNode(parseState, 1, Expr.StructCons(applySelectors $3)) }
+  | ARRAY LPAR simpleExpr COMMA simpleExpr RPAR                  { mkNode(parseState, 1, Expr.ArrayCons($3, $5)) }
+  | ARRAY_LENGTH LPAR simpleExpr RPAR                            { mkNode(parseState, 1, Expr.ArrayLength($3)) }
+  | ARRAY_ELEM LPAR simpleExpr COMMA simpleExpr RPAR             { mkNode(parseState, 1, Expr.ArrayElem($3, $5)) }
+  | SLICE LPAR simpleExpr COMMA simpleExpr COMMA simpleExpr RPAR { mkNode(parseState, 1, Expr.ArraySlice($3, $5, $7)) }
+  | label LCURLY expr RCURLY                                     { mkNode(parseState, 1, Expr.UnionCons($1, $3)) }
+  | COPY LPAR primary RPAR                                       { mkNode(parseState, 1, Expr.Copy($3)) }
+  
 // Variable name
 variable:
   | ident       { $1 }
@@ -369,8 +466,14 @@ pretype:
                                                              Pretype.TFun($1, $3)) }
   | STRUCT LCURLY structFieldTypeSeq RCURLY  { mkPretypeNode(parseState, 1,
                                                              Pretype.TStruct($3)) }
+  | ARRAY LCURLY pretype RCURLY              { mkPretypeNode(parseState, 1,
+                                                             Pretype.TArray($3)) }
   | REF LCURLY pretype RCURLY                { mkPretypeNode(parseState, 1,
                                                              Pretype.TStruct([("value", $3)])) }
+  | TUPLE LCURLY typesSeq RCURLY             { mkPretypeNode(parseState, 1,
+                                                             Pretype.TStruct(applySelectors $3)) }
+  | UNION LCURLY unionLabelTypeSeq RCURLY    { mkPretypeNode(parseState, 1,
+                                                             Pretype.TUnion($3)) }
 
 // Generic identifier
 ident:
@@ -425,3 +528,19 @@ field:
 structFieldTypeSeq:
   | field COLON pretype SEMI structFieldTypeSeq  { ($1, $3) :: $5 }
   | field COLON pretype                          { [($1, $3)] }
+
+// Non-empty sequence of labels and types, separated by semicolons (used for
+// defining unions)
+unionLabelTypeSeq:
+  | label COLON pretype SEMI unionLabelTypeSeq  { ($1, $3) :: $5 }
+  | label COLON pretype                         { [($1, $3)] }
+
+// Label in a labelled union type
+label:
+  | ident       { $1 }
+
+// Non-empty sequence of pattern matching cases (with a label and variable) and
+// continuations (simple expressions to be executed upon a match).
+matchCases:
+  | label LCURLY variable RCURLY RARROW simpleExpr SEMI matchCases  { ($1, $3, $6) :: $8 }
+  | label LCURLY variable RCURLY RARROW simpleExpr                  { [($1, $3, $6)] }

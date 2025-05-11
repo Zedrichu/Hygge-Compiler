@@ -102,9 +102,10 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 
     | LetRec(vname, tpe, init, scope) when vname = var ->
         // The variable is shadowed, do not substitute it in the "let rec" scope
-        {node with Expr = LetRec(vname, tpe, (subst init var sub), scope)}
+        // and similarly in "let rec" initialisation as it might be recursively defined
+        node
     | LetRec(vname, tpe, init, scope) ->
-        // Propagate the substitution in the "let rec" scope and init
+        // Propagate the substitution in the "let rec" scope and init safely
         {node with Expr = LetRec(vname, tpe, (subst init var sub),
                                  (subst scope var sub))}
 
@@ -122,7 +123,7 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substCond = subst cond var sub
         let substBody = subst body var sub
         {node with Expr = While(substCond, substBody)}
-        
+
     | DoWhile(body, cond) ->
         let substBody = subst body var sub
         let substCond = subst cond var sub
@@ -146,3 +147,456 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 
     | FieldSelect(target, field) ->
         {node with Expr = FieldSelect((subst target var sub), field)}
+
+    | ArrayCons(length, init) ->
+        {node with Expr = ArrayCons((subst length var sub), (subst init var sub))}
+
+    | ArrayLength(target) ->
+        {node with Expr = ArrayLength(subst target var sub)}
+
+    | ArrayElem(target, index) ->
+        {node with Expr = ArrayElem((subst target var sub), (subst index var sub))}
+        
+    | Copy(arg) ->
+        {node with Expr = Copy(subst arg var sub)}
+
+    | ArraySlice(target, startIdx, endIdx) ->
+        {node with Expr = ArraySlice((subst target var sub),
+                                     (subst startIdx var sub),
+                                     (subst endIdx var sub))}
+    | UnionCons(label, expr) ->
+        {node with Expr = UnionCons(label, (subst expr var sub))}
+
+    | Match(expr, cases) ->
+        /// Mapper function to propagate the substitution along a match case
+        let substCase(lab: string, v: string, cont: Node<'E,'T>) =
+            if (v = var) then (lab, v, cont) // Variable bound, no substitution
+            else (lab, v, (subst cont var sub))
+        let cases2 = List.map substCase cases
+        {node with Expr = Match((subst expr var sub), cases2)}
+
+/// Compute the set of free variables in the given AST node.
+let rec freeVars (node: Node<'E,'T>): Set<string> =
+    match node.Expr with
+    | UnitVal
+    | IntVal(_)
+    | BoolVal(_)
+    | FloatVal(_)
+    | StringVal(_)
+    | Pointer(_) -> Set[]
+    | Var(name) -> Set[name]
+    | Sub(lhs, rhs)
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs)
+    | Add(lhs, rhs)
+    | Mult(lhs, rhs) ->
+        Set.union (freeVars lhs) (freeVars rhs)
+    | Not(arg)
+    | Sqrt(arg) -> freeVars arg
+    | And(lhs, rhs)
+    | Or(lhs, rhs) ->
+        Set.union (freeVars lhs) (freeVars rhs)
+    | Eq(lhs, rhs)
+    | Min(lhs, rhs)
+    | Max(lhs, rhs)
+    | Greater(lhs, rhs)
+    | LessEq(lhs, rhs)
+    | GreaterEq(lhs, rhs)
+    | Less(lhs, rhs) ->
+        Set.union (freeVars lhs) (freeVars rhs)
+    | ReadInt
+    | ReadFloat -> Set[]
+    | Print(arg)
+    | PrintLn(arg) -> freeVars arg
+    | If(condition, ifTrue, ifFalse) ->
+        Set.union (freeVars condition)
+                  (Set.union (freeVars ifTrue) (freeVars ifFalse))
+    | Seq(nodes) -> freeVarsInList nodes
+    | Ascription(_, node) -> freeVars node
+    | Let(name, init, scope)
+    | LetT(name, _, init, scope)
+    | LetMut(name, init, scope) ->
+        // All the free variables in the 'let' initialisation, together with all
+        // free variables in the scope --- minus the newly-bound variable
+        Set.union (freeVars init) (Set.remove name (freeVars scope))
+    | Assign(target, expr) ->
+        // Union of the free names of the lhs and the rhs of the assignment
+        Set.union (freeVars target) (freeVars expr)
+    | DoWhile(body, cond)
+    | While(cond, body) -> Set.union (freeVars cond) (freeVars body)
+    | Assertion(arg) -> freeVars arg
+    | Type(_, _, scope) -> freeVars scope
+    | Lambda(args, body) ->
+        let (argNames, _) = List.unzip args
+        // All the free variables in the lambda function body, minus the
+        // names of the arguments
+        Set.difference (freeVars body) (Set.ofList argNames)
+    | Application(expr, args) ->
+        let fvArgs = List.map freeVars args
+        // Union of free variables in the applied expr, plus all its arguments
+        Set.union (freeVars expr) (freeVarsInList args)
+    | StructCons(fields) ->
+        let (_, nodes) = List.unzip fields
+        freeVarsInList nodes
+    | FieldSelect(expr, _) -> freeVars expr
+    | LetRec(name, _, init, scope) ->
+        // Remove the newly-bound variable from the free variables of both
+        // init and scope since it might be recursively referenced in init
+        Set.remove name (Set.union (freeVars init) (freeVars scope))
+    | ArrayCons(length, init) ->
+        Set.union (freeVars length) (freeVars init)
+    | ArrayLength(target) -> freeVars target
+    | ArrayElem(target, index) ->
+        Set.union (freeVars target) (freeVars index)
+    | ArraySlice(target, startIdx, endIdx) ->
+        Set.union (freeVars target)
+                  (Set.union (freeVars startIdx) (freeVars endIdx))
+    | UnionCons(_, expr) -> freeVars expr
+    | Match(expr, cases) ->
+        /// Compute the free variables in all match cases continuations, minus
+        /// the variable bound in the corresponding match case.  This 'folder'
+        /// is used to fold over all match cases.
+        let folder (acc: Set<string>) (_, var, cont: Node<'E,'T>): Set<string> =
+            Set.union acc ((freeVars cont).Remove var)
+        /// Free variables in all match continuations
+        let fvConts = List.fold folder Set[] cases
+        Set.union (freeVars expr) fvConts
+    | Copy(arg) -> freeVars arg
+
+/// Compute the union of the free variables in a list of AST nodes.
+and internal freeVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
+    /// Compute the free variables of 'node' and add them to the accumulator
+    let folder (acc: Set<string>) (node: Node<'E,'T> ) =
+        Set.union acc (freeVars node)
+    List.fold folder Set[] nodes
+
+
+/// Compute the set of captured variables in the given AST node.
+let rec capturedVars (node: Node<'E,'T>): Set<string> =
+    match node.Expr with
+    | UnitVal
+    | IntVal(_)
+    | BoolVal(_)
+    | FloatVal(_)
+    | StringVal(_)
+    | Pointer(_)
+    | Lambda _ ->
+        // All free variables of a value are considered as captured
+        freeVars node
+    | Var(_) -> Set[]
+    | Add(lhs, rhs)
+    | Sub(lhs, rhs)
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs)
+    | Mult(lhs, rhs) ->
+        Set.union (capturedVars lhs) (capturedVars rhs)
+    | Not(arg)
+    | Sqrt(arg) -> capturedVars arg
+    | And(lhs, rhs)
+    | Or(lhs, rhs) ->
+        Set.union (capturedVars lhs) (capturedVars rhs)
+    | Min(lhs, rhs)
+    | Max(lhs, rhs)
+    | Greater(lhs, rhs)
+    | LessEq(lhs, rhs)
+    | GreaterEq(lhs, rhs)
+    | Eq(lhs, rhs)
+    | Less(lhs, rhs) ->
+        Set.union (capturedVars lhs) (capturedVars rhs)
+    | ReadInt
+    | ReadFloat -> Set[]
+    | Print(arg)
+    | PrintLn(arg) -> capturedVars arg
+    | If(condition, ifTrue, ifFalse) ->
+        Set.union (capturedVars condition)
+                  (Set.union (capturedVars ifTrue) (capturedVars ifFalse))
+    | Seq(nodes) -> capturedVarsInList nodes
+    | Ascription(_, node) -> capturedVars node
+    | Let(name, init, scope)
+    | LetT(name, _, init, scope)
+    | LetMut(name, init, scope) ->
+        // All the captured variables in the 'let' initialisation, together with
+        // all captured variables in the scope --- minus the newly-bound var
+        Set.union (capturedVars init) (Set.remove name (capturedVars scope))
+    | Assign(target, expr) ->
+        // Union of the captured vars of the lhs and the rhs of the assignment
+        Set.union (capturedVars target) (capturedVars expr)
+    | DoWhile(body, cond)
+    | While(cond, body) -> Set.union (capturedVars cond) (capturedVars body)
+    | Assertion(arg) -> capturedVars arg
+    | Type(_, _, scope) -> capturedVars scope
+    | Application(expr, args) ->
+        let fvArgs = List.map capturedVars args
+        // Union of captured variables in the applied expr, plus all arguments
+        Set.union (capturedVars expr) (capturedVarsInList args)
+    | StructCons(fields) ->
+        let (_, nodes) = List.unzip fields
+        capturedVarsInList nodes
+    | FieldSelect(expr, _) -> capturedVars expr
+    | LetRec(name, _, init, scope) ->
+        // Remove the newly-bound variable from the captured variables of both
+        // init and scope since it might be recursively referenced in init
+        Set.remove name (Set.union (capturedVars init) (capturedVars scope))
+    | ArrayCons(length, init) ->
+        Set.union (capturedVars length) (capturedVars init)
+    | ArrayLength(target) -> capturedVars target
+    | ArrayElem(target, index) ->
+        Set.union (capturedVars target) (capturedVars index)
+    | ArraySlice(target, startIdx, endIdx) ->
+        Set.union (capturedVars target)
+                  (Set.union (capturedVars startIdx) (capturedVars endIdx))
+    | UnionCons(_, expr) -> capturedVars expr
+    | Match(expr, cases) ->
+        /// Compute the captured variables in all match cases continuations,
+        /// minus the variable bound in the corresponding match case.  This
+        /// 'folder' is used to fold over all match cases.
+        let folder (acc: Set<string>) (_, var, cont: Node<'E,'T>): Set<string> =
+            Set.union acc ((capturedVars cont).Remove var)
+        /// Captured variables in all match continuations
+        let cvConts = List.fold folder Set[] cases
+        Set.union (capturedVars expr) cvConts
+    | Copy(arg) -> capturedVars arg
+
+/// Compute the union of the captured variables in a list of AST nodes.
+and internal capturedVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
+    /// Compute the free variables of 'node' and add them to the accumulator
+    let folder (acc: Set<string>) (node: Node<'E,'T> ) =
+        Set.union acc (capturedVars node)
+    List.fold folder Set[] nodes
+
+let mapUnion (map1: Map<'K, 'V>) (map2: Map<'K, 'V>) =
+    Map.fold (fun acc key value -> Map.add key value acc) map1 map2
+
+let mapDifference (map1: Map<'Key, 'T>) (map2: Map<'Key, 'U>) =
+    Map.filter (fun k _ -> not (Map.containsKey k map2)) map1
+
+/// Compute the set of free variables in the given AST node.  
+/// (node) -> Map[name, (node)]
+let rec freeVarsMap (node: Node<'E,'T>): Map<string,Node<'E,'T>> =
+    match node.Expr with
+    | UnitVal
+    | IntVal(_)
+    | BoolVal(_)
+    | FloatVal(_)
+    | StringVal(_)
+    | Pointer(_) -> Map[]
+    | Var(name) -> Map [(name, node)]
+    | Sub(lhs, rhs)
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs)
+    | Add(lhs, rhs)
+    | Mult(lhs, rhs) ->
+        mapUnion (freeVarsMap  lhs) (freeVarsMap rhs)
+        // Set.union (freeVarsNode lhs) (freeVarsNode rhs)
+    | Not(arg)
+    | Sqrt(arg) -> freeVarsMap arg
+    | And(lhs, rhs)
+    | Or(lhs, rhs) ->
+        mapUnion (freeVarsMap lhs) (freeVarsMap rhs)
+        // Set.union (freeVarsNode lhs) (freeVarsNode rhs)
+    | Eq(lhs, rhs)
+    | Min(lhs, rhs)
+    | Max(lhs, rhs)
+    | Greater(lhs, rhs)
+    | LessEq(lhs, rhs)
+    | GreaterEq(lhs, rhs)
+    | Less(lhs, rhs) ->
+        mapUnion (freeVarsMap lhs) (freeVarsMap rhs)
+        // Set.union (freeVarsNode lhs) (freeVarsNode rhs)
+    | ReadInt
+    | ReadFloat -> Map[]
+    | Print(arg)
+    | PrintLn(arg) -> freeVarsMap arg
+    | If(condition, ifTrue, ifFalse) ->
+        mapUnion (freeVarsMap condition)
+                  (mapUnion (freeVarsMap ifTrue) (freeVarsMap ifFalse))
+    | Seq(nodes) -> freeVarsInListNode nodes
+    | Ascription(_, node) -> freeVarsMap node
+    | Let(name, init, scope)
+    | LetT(name, _, init, scope)
+    | LetMut(name, init, scope) ->
+        // All the free variables in the 'let' initialisation, together with all
+        // free variables in the scope --- minus the newly-bound variable
+        mapUnion (freeVarsMap init) (Map.remove name (freeVarsMap scope))
+    | Assign(target, expr) ->
+        // Union of the free names of the lhs and the rhs of the assignment
+        mapUnion (freeVarsMap target) (freeVarsMap expr)
+    | DoWhile(body, cond)
+    | While(cond, body) -> mapUnion (freeVarsMap cond) (freeVarsMap body)
+    | Assertion(arg) -> freeVarsMap arg
+    | Type(_, _, scope) -> freeVarsMap scope
+    | Lambda(args, body) ->
+        let (argNames, _) = List.unzip args
+        let zipped = List.zip argNames (List.map (fun argName -> Var(argName)) argNames)
+        // All the free variables in the lambda function body, minus the
+        // names of the arguments
+        mapDifference (freeVarsMap body) (Map.ofList zipped)
+    | Application(expr, args) ->
+        // Union of free variables in the applied expr, plus all its arguments
+        mapUnion (freeVarsMap expr) (freeVarsInListNode args)
+    | StructCons(fields) ->
+        let (_, nodes) = List.unzip fields
+        freeVarsInListNode nodes
+    | FieldSelect(expr, _) -> freeVarsMap expr
+    | LetRec(name, _, init, scope) ->
+        // Remove the newly-bound variable from the free variables of both
+        // init and scope since it might be recursively referenced in init
+        Map.remove name (mapUnion (freeVarsMap init) (freeVarsMap scope))
+    | ArrayCons(length, init) ->
+        mapUnion (freeVarsMap length) (freeVarsMap init)
+    | ArrayLength(target) -> freeVarsMap target
+    | ArrayElem(target, index) ->
+        mapUnion (freeVarsMap target) (freeVarsMap index)
+    | ArraySlice(target, startIdx, endIdx) ->
+        mapUnion (freeVarsMap target)
+                  (mapUnion (freeVarsMap startIdx) (freeVarsMap endIdx))
+    | UnionCons(_, expr) -> freeVarsMap expr
+    | Match(expr, cases) ->
+        /// Compute the free variables in all match cases continuations, minus
+        /// the variable bound in the corresponding match case.  This 'folder'
+        /// is used to fold over all match cases.
+        let folder (acc: Map<string, Node<'E,'T>>) (_, var, cont: Node<'E,'T>): Map<string, Node<'E,'T>> =
+            mapUnion acc ((freeVarsMap cont).Remove var)
+        /// Free variables in all match continuations
+        let fvConts: Map<string,(Node<'E,'T>)> = List.fold folder Map[] cases
+        mapUnion (freeVarsMap expr) fvConts
+    | Copy(arg) -> freeVarsMap arg
+
+/// Compute the union of the free variables in a list of AST nodes.
+and internal freeVarsInListNode (nodes: List<Node<'E,'T>>): Map<string,Node<'E,'T>> =
+    /// Compute the free variables of 'node' and add them to the accumulator
+    let folder (acc: Map<string, Node<'E,'T>>) (node: Node<'E,'T> ) =
+        mapUnion acc (freeVarsMap node)
+    List.fold folder Map[] nodes
+
+let rec substExprByRef (node: Node<'E,'T>) (expr: Expr<'E,'T>) (sub: ref<Node<'E,'T>>) : Node<'E,'T> =
+    if System.Object.ReferenceEquals(node, sub.Value) then
+        { node with Expr = expr }
+    else
+        let recurse childNode = substExprByRef childNode expr sub // Helper for recursive calls
+        match node.Expr with
+        | UnitVal
+        | IntVal(_)
+        | BoolVal(_)
+        | FloatVal(_)
+        | StringVal(_) -> node // The substitution has no effect
+
+        | Pointer(_) -> node // The substitution has no effect
+
+        | Var(_) -> node // The substitution has no effect
+
+        | Add(lhs, rhs) ->
+            {node with Expr = Add(recurse lhs, recurse rhs)}
+        | Sub(lhs, rhs) ->
+            {node with Expr = Sub(recurse lhs, recurse rhs)}
+        | Mult(lhs, rhs) ->
+            {node with Expr = Mult(recurse lhs, recurse rhs)}
+        | Div(lhs, rhs) ->
+            {node with Expr = Div(recurse lhs, recurse rhs)}
+        | Mod(lhs, rhs) ->
+            {node with Expr = Mod(recurse lhs, recurse rhs)}
+        | Sqrt(arg) ->
+            {node with Expr = Sqrt(recurse arg)}
+        | Min(lhs, rhs) ->
+            {node with Expr = Min(recurse lhs, recurse rhs)}
+        | Max(lhs, rhs) ->
+            {node with Expr = Max(recurse lhs, recurse rhs)}
+
+        | And(lhs, rhs) ->
+            {node with Expr = And(recurse lhs, recurse rhs)}
+        | Or(lhs, rhs) ->
+            {node with Expr = Or(recurse lhs, recurse rhs)}
+        | Not(arg) ->
+            {node with Expr = Not(recurse arg)}
+
+        | Eq(lhs, rhs) ->
+            {node with Expr = Eq(recurse lhs, recurse rhs)}
+        | Less(lhs, rhs) ->
+            {node with Expr = Less(recurse lhs, recurse rhs)}
+        | Greater(lhs, rhs) ->
+            {node with Expr = Greater(recurse lhs, recurse rhs)}
+        | LessEq(lhs, rhs) ->
+            {node with Expr = LessEq(recurse lhs, recurse rhs)}
+        | GreaterEq(lhs, rhs) ->
+            {node with Expr = GreaterEq(recurse lhs, recurse rhs)}
+        | ReadInt
+        | ReadFloat -> node // The substitution has no effect
+
+        | Print(arg) ->
+            {node with Expr = Print(recurse arg)}
+        | PrintLn(arg) ->
+            {node with Expr = PrintLn(recurse arg)}
+
+        | If(cond, ifTrue, ifFalse) ->
+            {node with Expr = If(recurse cond, recurse ifTrue, recurse ifFalse)}
+
+        | Seq(nodes) ->
+            let substNodes = List.map recurse nodes
+            {node with Expr = Seq(substNodes)}
+
+        | Type(tname, def, scope) ->
+            {node with Expr = Type(tname, def, recurse scope)}
+
+        | Ascription(tpe, n) ->
+            {node with Expr = Ascription(tpe, recurse n)}
+
+        | Assertion(arg) ->
+            {node with Expr = Assertion(recurse arg)}
+
+        | Let(vname, init, scope) ->
+            {node with Expr = Let(vname, recurse init, recurse scope)}
+
+        | LetT(vname, tpe, init, scope) ->
+            {node with Expr = LetT(vname, tpe, recurse init, recurse scope)}
+
+        | LetRec(vname, tpe, init, scope) ->
+            {node with Expr = LetRec(vname, tpe, recurse init, recurse scope)}
+
+        | LetMut(vname, init, scope) ->
+            {node with Expr = LetMut(vname, recurse init, recurse scope)}
+
+        | Assign(target, e) ->
+            {node with Expr = Assign(recurse target, recurse e)}
+
+        | While(cond, body) ->
+            {node with Expr = While(recurse cond, recurse body)}
+
+        | DoWhile(body, cond) ->
+            {node with Expr = DoWhile(recurse body, recurse cond)}
+
+        | Lambda(args, body) ->
+            {node with Expr = Lambda(args, recurse body)}
+
+        | Application(fn, args) ->
+            let substFn = recurse fn
+            let substArgs = List.map recurse args
+            {node with Expr = Application(substFn, substArgs)}
+
+        | StructCons(fields) ->
+            let (fieldNames, initNodes) = List.unzip fields
+            let substInitNodes = List.map recurse initNodes
+            {node with Expr = StructCons(List.zip fieldNames substInitNodes)}
+
+        | FieldSelect(target, field) ->
+            {node with Expr = FieldSelect(recurse target, field)}
+
+        | ArrayCons(length, init) ->
+            {node with Expr = ArrayCons(recurse length, recurse init)}
+
+        | ArrayLength(target) ->
+            {node with Expr = ArrayLength(recurse target)}
+
+        | ArrayElem(target, index) ->
+            {node with Expr = ArrayElem(recurse target, recurse index)}
+
+        | ArraySlice(target, startIdx, endIdx) ->
+            {node with Expr = ArraySlice(recurse target, recurse startIdx, recurse endIdx)}
+        
+        | UnionCons(label, e) ->
+            {node with Expr = UnionCons(label, recurse e)}
+
+        | Match(e, cases) ->
+            let substE = recurse e
+            let substCases = List.map (fun (lab, v, cont) -> (lab, v, recurse cont)) cases
+            {node with Expr = Match(substE, substCases)}
+        | Copy(arg) -> recurse arg

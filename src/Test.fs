@@ -48,6 +48,25 @@ let internal testCodegen (file: string) (expected: int) =
         | Ok(tast) ->
             let asm = RISCVCodegen.codegen tast
             let explainExpected = RARS.explainExitCode expected
+            let exit = RARS.launchOpt (asm.ToString()) false true
+            let explainExit = RARS.explainExitCode exit
+            Expect.equal exit expected ($"RARS should have exited with code %d{expected} (%s{explainExpected}), "
+                                        + $"got %d{exit} (%s{explainExit})")
+
+
+/// Compile a source file after transforming it into ANF, and run the resulting
+/// assembly code on RARS, checking whether its return code matches the expected
+/// one. For this test, the ANF-based compilation uses just 3 registers.
+let internal testANFCodegen (file: string) (expected: int) =
+    match (Util.parseFile file) with
+    | Error(e) -> failwith $"Parsing failed: %s{e}"
+    | Ok(ast) ->
+        match (Typechecker.typecheck ast) with
+        | Error(es) -> failwith $"Typing failed: %s{formatErrors es}"
+        | Ok(tast) ->
+            let anf = ANF.transform tast
+            let asm = ANFRISCVCodegen.codegen anf 3u
+            let explainExpected = RARS.explainExitCode expected
             let exit = RARS.launch (asm.ToString()) false
             let explainExit = RARS.explainExitCode exit
             Expect.equal exit expected ($"RARS should have exited with code %d{expected} (%s{explainExpected}), "
@@ -117,6 +136,11 @@ let tests = testList "tests" [
             testCodegen file 0
         <| fun file ->
             testCodegen file RISCVCodegen.assertExitCode
+    // createTestList "codegen-anf"
+    //     <| fun file ->
+    //         testANFCodegen file 0
+    //     <| fun file ->
+    //         testANFCodegen file RISCVCodegen.assertExitCode
 ]
 
 

@@ -110,6 +110,27 @@ let rec internal resolvePretype (env: TypingEnv) (pt: AST.PretypeNode): Result<T
                 /// Type of each struct field
                 let fieldTypes = List.map getOkValue fieldTypes
                 Ok(TStruct(List.zip fieldNames fieldTypes))
+    | Pretype.TArray(arrType) ->
+        match (resolvePretype env arrType) with
+        | Ok(t) -> Ok(TArray(t))
+        | Error(es) -> Error(es)
+    | Pretype.TUnion(cases) ->
+        /// Union type labels and pretypes
+        let (caseLabels, casePretypes) = List.unzip cases
+        /// List of duplicate label names
+        let dups = Util.duplicates caseLabels
+        if not dups.IsEmpty then
+            Error([(pt.Pos, $"duplicate label names in union type: %s{Util.formatSeq dups}")])
+        else
+            /// List of case types (possibly with errors)
+            let caseTypes = List.map (fun a -> resolvePretype env a) casePretypes
+            /// Errors occurred while resolving 'caseTypes'
+            let errors = collectErrors caseTypes
+            if not errors.IsEmpty then Error(errors)
+            else
+                /// Type of each union case
+                let caseTypes = List.map getOkValue caseTypes
+                Ok(TUnion(List.zip caseLabels caseTypes))
 
 /// Resolve a type variable using the given typing environment: optionally
 /// return the Type corresponding to variable 'name', or None if 'name' is not
@@ -165,6 +186,31 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             else
                 List.forall2 (fun t1 t2 -> isSubtypeOf env t1 t2)
                              fieldTypes1 fieldTypes2
+    | TArray(t1), TArray(t2) ->
+        isSubtypeOf env t1 t2
+    | (TUnion(cases1), TUnion(cases2)) ->
+        /// Labels of the subtype union
+        let (labels1, _) = List.unzip cases1
+        /// Labels of the supertype union
+        let (labels2, _) = List.unzip cases2
+        // A subtype union must have a subset of the labels of the supertype
+        if not (Set.isSubset (Set(labels1)) (Set(labels2))) then false
+        else
+            // A label that appears in both the subtype and supertype unions
+            // must have a subtyped argument in the subtype union
+            let map1 = Map.ofList cases1
+            let map2 = Map.ofList cases2
+            List.forall (fun l -> isSubtypeOf env map1.[l] map2.[l]) labels1
+    | (TFun(args1, ret1), TFun(args2, ret2)) ->
+        if args1.Length <> args2.Length then false
+        else
+            // Check that the return type is a subtype of the other return type
+            // (the “smaller” function is more restrictive in the type of value it returns)
+            let retSubtype = isSubtypeOf env ret1 ret2
+            // All arguments of a supertype function must be subtypes of the subtype function
+            // (the “smaller” function is more permissive in the types of arguments it accepts)
+            let argsSubtype = List.forall2 (isSubtypeOf env) args2 args1
+            retSubtype && argsSubtype
     | (_, _) -> false
 
 
@@ -235,21 +281,15 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
 
     | Min(lhs,rhs) ->
         match (binaryNumericalOpTyper "minimize" node.Pos env lhs rhs) with
-        | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
+        | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Min(tlhs, trhs) }
-        | Ok(tpe, _, _) ->
-             Error([(node.Pos, $"'min' operator: expected type %O{TInt} or %O{TFloat}, "
-                              + $"found %O{tpe}")])
         | Error(es) -> Error(es)
 
-     | Max(lhs,rhs) ->
-        match (binaryNumericalOpTyper "maximize" node.Pos env lhs rhs) with
-        | Ok(tpe, tlhs, trhs) when (tpe = TInt || tpe = TFloat) ->
+    | Max(lhs,rhs) ->
+       match (binaryNumericalOpTyper "maximize" node.Pos env lhs rhs) with
+       | Ok(tpe, tlhs, trhs) ->
             Ok { Pos = node.Pos; Env = env; Type = tpe; Expr = Max(tlhs, trhs) }
-        | Ok(tpe, _, _) ->
-             Error([(node.Pos, $"'max' operator: expected type %O{TInt} or %O{TFloat}, "
-                              + $"found %O{tpe}")])
-        | Error(es) -> Error(es)
+       | Error(es) -> Error(es)
 
 
     | And(lhs, rhs) ->
@@ -357,6 +397,9 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
             Error([(node.Pos, $"cannot redefine basic type '%s{name}'")])
         else
             match def.Pretype with
+            | Pretype.TId(tname) when tname = name ->
+                // The type definition is something like:  type T = T
+                Error([(node.Pos, $"invalid recursive definition for type %s{name}")])
             | _ ->
                 // We disallow the redefinition of type aliases.  This avoids
                 // tricky corner cases and simplifies the handling of typing
@@ -365,7 +408,11 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                 | Some(_) ->
                     Error([(node.Pos, $"type '%s{name}' is already defined")])
                 | None ->
-                    match (resolvePretype env def) with
+                    /// Extended typing environment where the type variable
+                    /// being defined maps to 'unit' (although any other type
+                    /// would work).  This allows for recursive type definitions
+                    let env2 = {env with TypeVars = env.TypeVars.Add(name, TUnit)}
+                    match (resolvePretype env2 def) with
                     | Ok(resDef) ->
                         /// Environment to type-check the 'scope' of the type
                         /// variable.  We add the new type variable to this
@@ -446,6 +493,9 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
             | FieldSelect(_, _) ->
                 Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
                      Expr = Assign(ttarget, texpr) }
+            | ArrayElem(_, _) ->
+                Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
+                     Expr = Assign(ttarget, texpr) }
             | _ -> Error([(node.Pos, "invalid assignment target")])
         | (Ok(ttarget), Ok(texpr)) ->
             Error([(texpr.Pos,
@@ -467,11 +517,11 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                               + $"found %O{tcond.Type}") :: es)
         | Error(es), Ok(_) -> Error(es)
         | Error(esCond), Error(esBody) -> Error(esCond @ esBody)
-        
+
     | DoWhile(body, cond) ->
         match ((typer env body), (typer env cond)) with
         | (Ok(tbody), Ok(tcond)) when (isSubtypeOf env tcond.Type TBool) ->
-            Ok { Pos = node.Pos; Env = env; Type = TUnit; Expr = DoWhile(tbody, tcond)}
+            Ok { Pos = node.Pos; Env = env; Type = tbody.Type; Expr = DoWhile(tbody, tcond)}
         | (Ok(_), Ok(tcond)) ->
             Error([(tcond.Pos, $"'DoWhile' condition: expected type %O{TBool}, "
                                + $"found %O{tcond.Type}")])
@@ -578,12 +628,147 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                     let idx = List.findIndex (fun f -> f = field) fieldNames
                     Ok { Pos = node.Pos; Env = env; Type = fieldTypes.[idx];
                          Expr = FieldSelect(texpr, field)}
-            | _ -> Error([(node.Pos, $"cannot access field '%s{field}' "
+            | _ -> Error([(node.Pos, $"cannot access struct field '%s{field}' "
                                      + $"on expression of type %O{texpr.Type}")])
         | Error(es) -> Error(es)
 
     | Pointer(_) ->
         Error([(node.Pos, "pointers cannot be type-checked (by design!)")])
+
+    | ArrayCons(length, init) ->
+        let initTyping = typer env init
+        let lengthTyping = typer env length
+        match (lengthTyping, initTyping) with
+        | Ok(tlength), Ok(tinit) when (isSubtypeOf env tlength.Type TInt) ->
+            Ok { Pos = node.Pos; Env = env; Type = TArray(tinit.Type);
+                 Expr = ArrayCons(tlength, tinit) }
+        | Ok(tlength), Ok(_) ->
+            Error([(node.Pos, $"expected array length of type %O{TInt}, "
+                              + $"found %O{tlength.Type}")])
+        | Error(es), Ok _
+        | Ok _, Error(es) -> Error(es)
+        | Error(es1), Error(es2) -> Error(es1 @ es2)
+
+    | ArrayElem(target, index) ->
+        match (typer env target) with
+        | Ok(ttarget) ->
+            match (expandType env ttarget.Type) with
+            | TArray elemType ->
+                match (typer env index) with
+                | Ok(tindex) when (isSubtypeOf env tindex.Type TInt) ->
+                    Ok { Pos = node.Pos; Env = env; Type = elemType;
+                         Expr = ArrayElem(ttarget, tindex) }
+                | Ok(tindex) -> Error([(node.Pos, $"expected array index of type %O{TInt}, "
+                                        + $"found %O{tindex.Type}")])
+                | Error(es) -> Error(es)
+            | _ -> Error([(node.Pos, $"cannot access array element on expression of type %O{ttarget.Type}")])
+        | Error(es) -> Error(es)
+
+    | ArrayLength(target) ->
+        match (typer env target) with
+        | Ok(ttarget) ->
+            match (expandType env ttarget.Type) with
+            | TArray _ ->
+                Ok { Pos = node.Pos; Env = env; Type = TInt;
+                     Expr = ArrayLength(ttarget) }
+            | _ -> Error([(node.Pos, $"cannot access array length on expression of type %O{ttarget.Type}")])
+        | Error(es) -> Error(es)
+        
+    //Copy of structures
+    //Arg needs to be of struct type
+    | Copy(arg) ->
+        match (typer env arg) with
+        | Ok(targ) ->
+            match (expandType env targ.Type) with
+            | TStruct _ ->
+                Ok{ Pos = node.Pos; Env = env; Type = targ.Type; Expr = Copy(targ) }
+            | _ -> Error([(node.Pos, $"Cannot copy expression of type %O{targ.Type}. Only struct types can be copied")])
+        | Error(es) -> Error(es)
+        
+
+    | UnionCons(label, expr) ->
+        match (typer env expr) with
+        | Ok(texpr) ->
+            // We type the union instance with the most precise labelled union
+            // type that contains it
+            Ok { Pos = node.Pos; Env = env; Type = TUnion([label, texpr.Type]);
+                 Expr = UnionCons(label, texpr) }
+        | Error(es) -> Error(es)
+
+    | Match(expr, cases) ->
+        /// Duplicate labels in the pattern matching cases
+        let dups = Util.duplicates ((List.map (fun (label,_,_) -> label)) cases)
+        if not dups.IsEmpty then
+            Error([(expr.Pos, $"duplicate case labels in pattern matching: %s{Util.formatSeq dups}")])
+        else
+            match (typer env expr) with
+            | Ok(texpr) ->
+                match (expandType env texpr.Type) with
+                | TUnion(unionCases) ->
+                    let (unionLabels, unionTypes) = List.unzip unionCases
+                    /// The function 'caseTyper' is mapped over all
+                    /// 'unionCases': it looks for the matched label in
+                    /// 'unionLabels', extracts the corresponding type from
+                    /// 'unionTypes', and type-checks the match continuation by
+                    /// introducing the matched variable and type in the
+                    /// environment.
+                    let caseTyper (label, v, cont: UntypedAST): TypingResult =
+                        match (List.tryFindIndex (fun l -> l = label) unionLabels) with
+                        | Some(i) ->
+                            /// Updated environment for type-checking the union
+                            /// case continuation
+                            let env2 = {env with Vars = env.Vars.Add(v, unionTypes.[i])}
+                            typer env2 cont
+                        | None -> Error([(cont.Pos, $"invalid match case: %s{label}")])
+                    /// Typed continuations (possibly with errors)
+                    let tconts = List.map caseTyper cases
+                    /// Typing errors in continuations
+                    let errors = collectErrors tconts
+                    if errors.IsEmpty then
+                        /// Typed continuations, without errors
+                        let typedConts = List.map getOkValue tconts
+                        /// Desired type for all union cases (taken from the
+                        /// first union case)
+                        let matchType = typedConts.[0].Type
+                        /// Has the given AST node a "bad" type that is not a
+                        /// subtype of 'matchType'?
+                        let hasBadType (c: TypedAST) =
+                            not (isSubtypeOf env c.Type matchType)
+                        /// List of match continuation types that are not compatible
+                        /// with 'matchType'
+                        let badTypes = List.filter hasBadType typedConts.[1..]
+                        if badTypes.IsEmpty then
+                            /// Match case labels and variables
+                            let (caseLabels, caseVars, _) = List.unzip3 cases
+                            /// Typed match cases
+                            let tcases = List.zip3 caseLabels caseVars typedConts
+                            Ok { Pos = node.Pos; Env = env; Type = matchType;
+                                 Expr = Match(texpr, tcases)}
+                        else
+                            let errFmt (c: TypedAST) =
+                                (c.Pos, $"pattern match result type mismatch: "
+                                        + $"expected %O{matchType}, found %O{c.Type}")
+                            Error(List.map errFmt badTypes)
+                    else Error(errors)
+                | _ ->
+                    Error([(expr.Pos, $"cannot match on expression of type %O{texpr.Type}")])
+            | Error(es) -> Error(es)
+
+    | ArraySlice(target, startIdx, endIdx) ->
+        match (typer env target) with
+        | Ok(ttarget) ->
+            match (expandType env ttarget.Type) with
+            | TArray elemType ->
+                match (typer env startIdx, typer env endIdx) with
+                | Ok(tstart), Ok(tend) when (isSubtypeOf env tstart.Type TInt) &&
+                                            (isSubtypeOf env tend.Type TInt) ->
+                    Ok { Pos = node.Pos; Env = env; Type = TArray elemType;
+                         Expr = ArraySlice(ttarget, tstart, tend) }
+                | Ok(tstart), Ok(tend) -> Error([(node.Pos, $"expected array slice indices of type %O{TInt}, "
+                                                          + $"found %O{tstart.Type} and %O{tend.Type}")])
+                | es1, es2 -> mergeErrors (es1, es2)
+            | _ -> Error([(node.Pos, $"cannot create array slice on expression of type %O{ttarget.Type}")])
+        | Error(es) -> Error(es)
 
 /// Compute the typing of a binary numerical operation, by computing and
 /// combining the typings of the 'lhs' and 'rhs'.  The argument 'descr' (used in
@@ -613,8 +798,8 @@ and internal binaryNumericalOpTyper descr pos (env: TypingEnv)
         Ok(TFloat, ln, {Pos = rn.Pos; Env = env; Type = TFloat; Expr = FloatVal(single n)})
 
     | (Ok(t1), Ok(t2)) ->
-        Error([(pos, $"%s{descr}: expected arguments of a same type "
-                     + $"between %O{TInt} or %O{TFloat}, "
+        Error([(pos, $"%s{descr}: expected arguments of type "
+                     + $"between %O{TInt} or %O{TFloat} (only right hand type promotion), "
                      + $"found %O{t1.Type} and %O{t2.Type}")])
     | otherwise -> mergeErrors otherwise
 
@@ -670,12 +855,26 @@ and internal numericalRelationTyper descr pos (env: TypingEnv)
 and internal printArgTyper descr pos (env: TypingEnv) (arg: UntypedAST): Result<TypedAST, TypeErrors> =
     /// Types of values that can be printed.
     let printables = [TBool; TInt; TFloat; TString]
+
+    let printableExpanded = List.map (fun t -> t.ToString()) printables @
+                                            ["TStruct"; "TArray"; "TFun"; "TUnion"]
+    let isPrintableType t =
+        if List.exists (isSubtypeOf env t) printables then true
+        else match t with
+             | TStruct(_) -> true
+             | TArray(_) -> true
+             | TFun(_, _) -> true
+             | TUnion(_) -> true
+             | _ -> false
+
     match (typer env arg) with
     | Ok(targ) when List.exists (isSubtypeOf env targ.Type) printables ->
         Ok(targ)
-    | Ok(targ)->
+    | Ok(targ) when (isPrintableType (expandType targ.Env targ.Type))-> 
+        Ok(targ)
+    | Ok(targ) ->
         Error([(pos, $"%s{descr}: expected argument of a type among "
-                        + $"%s{Util.formatAsSet printables}, found %O{targ}")])
+                        + $"%s{Util.formatAsSet printableExpanded}, found %O{targ.Type}")])
     | Error(es) -> Error(es)
 
 /// Perform the typing of a 'let...' binding (without type annotations).  The
@@ -687,7 +886,7 @@ and internal letTyper pos (env: TypingEnv) (name: string) (init: UntypedAST)
     match (typer env init) with
     | Ok(tinit) ->
         /// Variables and types to type-check the 'let...' scope: we add the
-        /// newly-declared variable and its type (obtained fron the 'init'
+        /// newly-declared variable and its type (obtained from the 'init'
         /// sub-expression) to the typing environment
         let envVars2 = env.Vars.Add(name, tinit.Type)
         /// Mutable variables in the 'let...' scope: if we are declaring an
@@ -727,7 +926,7 @@ and internal letTypeAnnotTyper pos (env: TypingEnv) (name: string)
                 else
                     /// Variables and types to type-check the 'let...' scope: we
                     /// add the newly-declared variable and its type (obtained
-                    /// fron the resolved type annotation) to the typing
+                    /// from the resolved type annotation) to the typing
                     /// environment
                     let envVars2 = env.Vars.Add(name, letVariableType)
                     /// Mutable variables in the 'let...' scope: since we are

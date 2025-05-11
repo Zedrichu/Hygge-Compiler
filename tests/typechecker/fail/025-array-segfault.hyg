@@ -1,0 +1,3 @@
+let n = 6;
+let arr: array {int} = array(n, 40 + 2);
+arr.length <- 3

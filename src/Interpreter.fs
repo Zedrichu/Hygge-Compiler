@@ -143,10 +143,6 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             Some(env, {node with Expr = IntVal(v1 / v2)})
         | FloatVal(v1), FloatVal(v2) when v2 <> 0f ->
             Some(env, {node with Expr = FloatVal(v1 / v2)})
-        | IntVal(v1), IntVal(v2) when v2 = 0 ->
-            None // Division by zero
-        | FloatVal(v1), FloatVal(v2) when v2 = 0f ->
-            None // Division by zero
         | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
@@ -155,7 +151,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | Mod(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | IntVal(v1), IntVal(v2) ->
+        | IntVal(v1), IntVal(v2) when v2 <> 0 ->
             Some(env, {node with Expr = IntVal(v1 % v2)})
         | _,_ ->
             match(reduceLhsRhs env lhs rhs) with
@@ -171,10 +167,6 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | FloatVal(value) when value >= 0.0f ->
             let sqrt = Math.Sqrt(float value)
             Some(env, {node with Expr = FloatVal(float32 sqrt)})
-        | IntVal(value) when value < 0 ->
-            None // Negative square root
-        | FloatVal(value) when value < 0.0f ->
-            None // Negative square root
         | _ ->
             match (reduce env arg) with
             | Some(env', arg2) ->
@@ -327,6 +319,10 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                 Some(env, {node with Expr = UnitVal})
 
     | Print(arg) ->
+        let rec reduceFullyWithEnv (env: RuntimeEnv<'E,'T>) (node: Node<'E,'T>): RuntimeEnv<'E,'T>*Node<'E,'T> =
+            match (reduce env node) with
+            | Some(env', node') -> reduceFullyWithEnv env' node'
+            | None -> (env, node)
         match env.Printer with
         | None -> None
         | Some(printer) -> // Reductum when printing succeeds (a unit value)
@@ -336,6 +332,50 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | IntVal(v) -> printer $"%d{v}"; reductum
             | FloatVal(v) -> printer $"%f{v}"; reductum
             | StringVal(v) -> printer $"%s{v}"; reductum
+            | Lambda(args,_) -> 
+                let argsStr = String.concat ", " (List.map (fun (argName, _) -> $"%s{argName}") args)
+                printer $"Lambda({argsStr})"; reductum
+            | Pointer(addr) ->
+                match (env.PtrInfo.TryFind addr) with
+                | Some(fields) ->
+                    let nodes = 
+                        match fields with
+                        | ["~length"; "~data"] ->
+                            // Special case for arrays [print as 'Array{ length: 10 }']
+                            [{ node with Expr = Print({ node with Expr = StringVal("Array{ length: ") }) }] @
+                            [{ node with Expr = Print({ node with Expr = FieldSelect({ node with Expr = Pointer(addr) }, "~length") }) }] @
+                            [{ node with Expr = Print({ node with Expr = StringVal(" }") }) }]
+                        | _ ->
+                            [{ node with Expr = Print({ node with Expr = StringVal("struct { ") }) }] @
+                            (List.mapi (fun i field ->
+                                // Add quotes around string values
+                                let strVals = 
+                                    match (env.Heap.TryFind (addr + (uint i))) with
+                                    | Some(fieldNode) when (match fieldNode.Expr with StringVal(_) -> true | _ -> false) ->
+                                        $"{field} = \"", "\"; "
+                                    | _ ->
+                                        $"{field} = ", "; "
+                                [
+                                    { node with Expr = Print({ node with Expr = StringVal(fst strVals) }) }
+                                    { node with Expr = Print({ node with Expr = FieldSelect({ node with Expr = Pointer(addr) }, field) }) }
+                                    { node with Expr = Print({ node with Expr = StringVal(snd strVals) }) }
+                                ]
+                                ) fields |> List.concat) @
+                            [{ node with Expr = Print({ node with Expr = StringVal(" }") }) }]
+
+                    // since this is just Print concatenation, we reduce it fully
+                    // such that externally it looks like a single Print and no other modification is needed
+                    Some (reduceFullyWithEnv env { node with Expr = Seq(nodes) })
+                | None ->
+                    // with current implementation, this could be a Union
+                    match (env.Heap.TryFind addr) with
+                    | Some({Expr = StringVal(label)}) ->
+                        // Retrieve the value of the union instance from the heap
+                        match (env.Heap.TryFind (addr + 1u)) with
+                        | Some(v) ->
+                            Some (reduceFullyWithEnv env { node with Expr = Print({ node with Expr = StringVal(label + "{...}")})})
+                        | None -> None
+                    | _ -> None
             | _ when not (isValue node) ->
                 match (reduce env arg) with
                 | Some(env', arg2) ->
@@ -464,6 +504,35 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | None -> None
         | None -> None
 
+    | Assign({Expr = ArrayElem(arrTarget, index)} as target, expr) when not (isValue arrTarget) ->
+        match (reduce env arrTarget) with
+        | Some(env', arrTarget') ->
+            Some(env', {node with Expr = Assign({target with Expr = ArrayElem(arrTarget', index)}, expr)})
+        | None -> None
+    | Assign({Expr = ArrayElem(arrTarget, index)} as target, expr) when not (isValue index) ->
+        match (reduce env index) with
+        | Some(env', index') ->
+            Some(env', {node with Expr = Assign({target with Expr = ArrayElem(arrTarget, index')}, expr)})
+        | None -> None
+    | Assign({Expr = ArrayElem _ } as target, expr) when not (isValue expr) ->
+        match (reduce env expr) with
+        | Some(env', expr') ->
+            Some(env', {node with Expr = Assign(target, expr')})
+        | None -> None
+    | Assign({Expr = ArrayElem({Expr = Pointer(addr)}, index)}, value) ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(attrs) when attrs = ["~length"; "~data"] ->
+            let arrayInstance = (env.Heap[addr].Expr, env.Heap[addr + 1u].Expr)
+            match arrayInstance with
+            | IntVal(length), Pointer(dataPointer) ->
+                match index.Expr with
+                | IntVal(i) when i >= 0 && i < length ->
+                    /// Updated heap with selected array element overwritten by 'value'
+                    let env' = {env with Heap = env.Heap.Add(dataPointer + (uint i), value)}
+                    Some(env', value)
+                | _ -> None
+            | _ -> None
+        | _ -> None
     | Assign({Expr = FieldSelect(selTarget, field)} as target,
              expr) when not (isValue selTarget)->
         match (reduce env selTarget) with
@@ -509,16 +578,17 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                            {body with Expr = Seq([body; node])},
                            {body with Expr = UnitVal})
         Some(env, {node with Expr = rewritten})
-        
+
      | DoWhile(body, cond) ->
         /// Rewritten 'DoWhile' loop, transformed into a sequence of the body
         /// followed by an 'if' on the condition. First execute the body.
         /// Then we evaluate 'cond'. If is true we continue with the whole loop again.
-        /// Otherwise, when 'cond' is false we do nothing (unit)
-        let rewritten = Seq([body;
-                            {node with Expr = If(cond,
+        /// Otherwise, when 'cond' is false we return the value produced by the last "body" execution
+        let varName = Util.genSymbol "~doWhileResult"
+        let rewritten = Let (varName, body,
+                             {node with Expr = If(cond,
                                                 {node with Expr = DoWhile(body, cond)},
-                                                {body with Expr = UnitVal})}])
+                                                {body with Expr = Var(varName) })})
         Some(env, {node with Expr = rewritten})
 
     | Application(expr, args) ->
@@ -583,11 +653,180 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | Some(env', target') ->
             Some(env', {node with Expr = FieldSelect(target', field)})
         | None -> None
-    | FieldSelect(_, _) -> None
+    | FieldSelect _ -> None
+
+    | ArrayCons(length, init) when not (isValue length) ->
+        match (reduce env length) with
+        | Some(env', length') ->
+            Some(env', {node with Expr = ArrayCons(length', init)})
+        | None -> None
+    | ArrayCons(length, init) ->
+        match (reduce env init) with
+        | Some(env', init') ->
+            Some(env', {node with Expr = ArrayCons(length, init')})
+        | None when isValue init ->
+            match length.Expr with
+            | IntVal(l) when l > 0 ->
+                /// Allocate the array on the heap, with all elements initialized, from memory `arrAddr`
+                let (heap', arrAddr) = heapAlloc env.Heap (List.init l (fun _ -> init))
+
+                let dataNode = { node with Expr = Pointer(arrAddr) }
+                /// Updated heap with newly-allocated struct for array, placed at `baseAddr` | length + data |
+                let (heap'', baseAddr) = heapAlloc heap' [ length; dataNode ]
+
+                /// Update pointer info, mapping `baseAddr` to the length and data of the array
+                let ptrInfo' = env.PtrInfo.Add(baseAddr, ["~length"; "~data"])
+                                          .Add(arrAddr, ["~array"])
+                Some({ env with Heap = heap''; PtrInfo = ptrInfo' },
+                     { node with Expr = Pointer(baseAddr) })
+            | _ -> None
+        | None -> None
+
+    | ArrayLength({Expr = Pointer(addr) }) ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(attrs) when attrs = ["~length"; "~data"] ->
+            Some(env, env.Heap[addr + 0u]) // return first field in instance struct
+        | _ -> None
+    | ArrayLength(target) when not (isValue target) ->
+        match (reduce env target) with
+        | Some(env', target') ->
+            Some(env', {node with Expr = ArrayLength(target')})
+        | None -> None
+    | ArrayLength _ -> None
+
+    | ArrayElem ({Expr = Pointer(addr)}, {Expr = IntVal(i)}) when i >= 0 ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(attrs) when attrs = ["~length"; "~data"] ->
+            let arrayInstance = (env.Heap[addr].Expr, env.Heap[addr + 1u].Expr)
+            match arrayInstance with
+            | IntVal(length), Pointer(dataPointer) when i < length ->
+                Some(env, env.Heap[dataPointer + (uint i)])
+            | _ -> None
+        | _ -> None
+    | ArrayElem(target, index) when not (isValue index) ->
+        match (reduce env index) with
+        | Some(env', index') ->
+            Some(env', {node with Expr = ArrayElem(target, index')})
+        | None -> None
+    | ArrayElem(target, index) when not (isValue target) ->
+        match (reduce env target) with
+        | Some(env', target') ->
+            Some(env', {node with Expr = ArrayElem(target', index)})
+        | None -> None
+    | ArrayElem _ -> None
+    
+    
+    | Copy(arg) ->
+        match (reduce env arg) with
+        | Some(env', arg') -> Some(env', { node with Expr = Copy(arg') })
+        | None ->
+            match arg.Expr with
+            | Pointer(addr) ->
+                match env.PtrInfo.TryFind addr with
+                | Some(fields) ->
+                    // Deep copy struct by recursively copying field values
+                    let fieldValues = fields |> List.mapi (fun i field ->
+                        let fieldValue = env.Heap[addr + uint i]
+                        // If a field is a pointer, recursively copy it
+                        match fieldValue.Expr with
+                        | Pointer(_) ->
+                            // Create a Copy expression for this field
+                            let copyField = {node with Expr = Copy(fieldValue)}
+                            // Recursively evaluate the Copy for this field
+                            match reduce env copyField with
+                            | Some(_, copyResult) -> (field, copyResult)
+                            | None -> failwith $"Failed to copy nested pointer at field: {field}"
+                        | _ ->
+                            (field, fieldValue)) // Non-pointer fields are copied as-is
+
+                    let deepCopy = StructCons(fieldValues)
+                    Some(env, {node with Expr = deepCopy})
+                | None -> None
+            | _ -> None
+   
+             
+                 
+             
+
+    | ArraySlice({ Expr = Pointer(addr) },
+                 { Expr = IntVal(start) },
+                 { Expr = IntVal(final) }) when start >= 0 ->
+        match (env.PtrInfo.TryFind addr) with
+        | Some(attrs) when attrs = ["~length"; "~data"] ->
+            let arrayInstance = (env.Heap[addr].Expr, env.Heap[addr + 1u].Expr)
+            match arrayInstance with
+            | IntVal(length), Pointer(dataPointer) when final < length && final >= start ->
+                /// Allocate the array slice struct on the heap, with data pointing at range start
+                /// Since elements are in the subset of range [start, final]
+                let lengthNode = { node with Expr = IntVal(final - start + 1) }
+                let dataNode = { node with Expr = Pointer(dataPointer + uint start) }
+                /// Updated heap with newly-allocated struct, placed at `baseAddr`
+                let (heap', baseAddr) = heapAlloc env.Heap [ lengthNode; dataNode ]
+
+                /// Update pointer info, mapping `baseAddr` to the length and data of the array slice
+                let ptrInfo' = env.PtrInfo.Add(baseAddr, ["~length"; "~data"])
+                Some({ env with Heap = heap'; PtrInfo = ptrInfo' },
+                     { node with Expr = Pointer(baseAddr) })
+            | _ -> None
+        | _ -> None
+    | ArraySlice(target, startIdx, endIdx) when not (isValue target) ->
+        match (reduce env target) with
+        | Some(env', target') ->
+            Some(env', {node with Expr = ArraySlice(target', startIdx, endIdx)})
+        | None -> None
+    | ArraySlice(target, startIdx, endIdx) when not (isValue startIdx) ->
+        match (reduce env startIdx) with
+        | Some(env', startIdx') ->
+            Some(env', {node with Expr = ArraySlice(target, startIdx', endIdx)})
+        | None -> None
+    | ArraySlice(target, startIdx, endIdx) when not (isValue endIdx) ->
+        match (reduce env endIdx) with
+        | Some(env', endIdx') ->
+            Some(env', {node with Expr = ArraySlice(target, startIdx, endIdx')})
+        | None -> None
+    | ArraySlice _ -> None
+
+    | UnionCons(label, expr) ->
+        match (reduce env expr) with
+        | Some(env', expr') -> Some(env', {node with Expr = UnionCons(label, expr')})
+        | None when isValue expr ->
+            /// Updated heap and base address, with union instance label
+            /// followed by 'expr' (which is a value)
+            let (heap', baseAddr) =
+                heapAlloc env.Heap [{node with Expr = StringVal(label)}; expr]
+            Some({env with Heap = heap'}, {node with Expr = Pointer(baseAddr)})
+        | None -> None
+
+    | Match(expr, cases) ->
+        match (reduce env expr) with
+        | Some(env', expr') ->
+            Some(env', {node with Expr = Match(expr', cases)})
+        | None when isValue expr ->
+            match expr.Expr with
+            | Pointer(addr) ->
+                // Retrieve the label of the union instance from the heap
+                match (env.Heap.TryFind addr) with
+                | Some({Expr = StringVal(label)}) ->
+                    // Retrieve the value of the union instance from the heap
+                    match (env.Heap.TryFind (addr + 1u)) with
+                    | Some(v) ->
+                        // Find match case with label equal to union instance
+                        match List.tryFind (fun (l,_,_) -> l = label) cases with
+                        | Some(_, var, cont) ->
+                            /// Continuation expression where the matched
+                            /// variable is substituted by the value of the
+                            /// matched union instance
+                            let contSubst = ASTUtil.subst cont var v
+                            Some(env, {node with Expr = contSubst.Expr})
+                        | None -> None
+                    | None -> None
+                | _ -> None
+            | _ -> None
+        | None -> None
 
 /// Attempt to reduce the given lhs, and then (if the lhs is a value) the rhs,
 /// using the given runtime environment.  Return None if either (a) the lhs
-/// cannot reduce although it is not a value, or (b) the lhs is a value but the
+/// cannot reduce, although it is not a value, or (b) the lhs is a value but the
 /// rhs cannot reduce.
 and internal reduceLhsRhs (env: RuntimeEnv<'E,'T>)
                           (lhs: Node<'E,'T>)
