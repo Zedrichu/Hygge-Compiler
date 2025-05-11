@@ -418,7 +418,114 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
         ({node with Expr = Var(anfDef.Var)}, anfDef :: matchExprDefs)
 
+let internal isReassignedLater (varNameToSearch: string) (remainingDefs: ANFDefs<'E,'T>) : bool =
+    List.exists (fun (defEntry: ANFDef<'E, 'T>) ->
+        match defEntry.Init.Expr with
+        | Assign (targetNode, _valueNode) ->
+            match targetNode.Expr with
+            | Var tvName when tvName = varNameToSearch -> true // Found a reassignment
+            | _ -> false
+        | _ -> false
+    ) remainingDefs
 
-/// Transform the given AST node into Administrative Normal Form.
-let transform (ast: Node<'E,'T>): Node<'E,'T> =
-    toANF (toANFDefs ast)
+/// Recursively performs copy propagation on a list of ANF definitions (expected oldest first).
+/// Returns the optimized list of definitions and a map of all substitutions performed (eliminated var -> replacement var).
+let rec internal doCopyProp
+    (defs: ANFDefs<'E, 'T>)
+    (substs: Map<string, string>)
+    (varMutabilityMap: Map<string, bool>) // Map: varName -> isMutable (true if declared mutable)
+    : ANFDefs<'E, 'T> * Map<string, string> =
+    match defs with
+    | [] -> ([], substs)
+    | d :: ds -> 
+        // Apply accumulated substitutions to the init part of the current definition 'd'
+        let currentInit =
+            Map.fold (fun node vOld vNew -> substVar node vOld vNew) d.Init substs
+        
+        // Create the current definition with potentially substituted init
+        let currentDef = ANFDef(d.Var, d.IsMutable, currentInit)
+
+        match currentDef.Init.Expr with
+        | Var(copiedV) ->
+            let isCurrentDefVarDeclaredImmutable = not currentDef.IsMutable
+
+            let isCopiedVDeclaredImmutable =
+                match Map.tryFind copiedV varMutabilityMap with
+                | Some isMutableFlag -> not isMutableFlag
+                | None ->
+                    printf "Warning: ANF.doCopyProp: Mutability of copied variable '%s' not found in map. Assuming immutable for safety of propagation." copiedV
+                    true 
+
+            // Helper to check if variable is redefined (shadowed by let/let mutable) in remaining definitions
+            let isShadowedLater (varsToSearch: string list) (remainingDefsLst: ANFDefs<'E, 'T>) =
+                List.exists (fun (defEntry: ANFDef<'E, 'T>) -> List.exists (fun (vString: string) -> defEntry.Var = vString) varsToSearch) remainingDefsLst
+
+            // It's safe if it was declared immutable, OR if it was mutable but is not shadowed later.
+            let currentDefVarIsSafeToEliminate =
+                isCurrentDefVarDeclaredImmutable ||
+                ( (not isCurrentDefVarDeclaredImmutable) &&
+                  not (isShadowedLater [currentDef.Var] ds) )
+
+            let copiedVIsSafeSource =
+                (isCopiedVDeclaredImmutable && not (isShadowedLater [copiedV] ds)) ||
+                ( (not isCopiedVDeclaredImmutable) (*i.e., copiedV declared mutable*) &&
+                  not (isReassignedLater copiedV ds) &&
+                  not (isShadowedLater [copiedV] ds)
+                )
+            
+            let canPropagate = currentDefVarIsSafeToEliminate && copiedVIsSafeSource
+
+            if canPropagate then
+                let rec findUltimateSrc v sMap = 
+                    match Map.tryFind v sMap with
+                    | Some ultimateSrc -> findUltimateSrc ultimateSrc sMap
+                    | None -> v
+                
+                let replacementForDefVar = findUltimateSrc copiedV substs
+                let newSubsts = Map.add currentDef.Var replacementForDefVar substs
+                
+                // Current definition 'currentDef' is removed/skipped. Process rest 'ds' with 'newSubsts'.
+                doCopyProp ds newSubsts varMutabilityMap
+            else
+                // Cannot propagate: Keep currentDef, and process the rest of the list with original 'substs'.
+                let (optDs, finalSubsts) = doCopyProp ds substs varMutabilityMap
+                (currentDef :: optDs, finalSubsts)
+        | _ ->
+            // Not a Var(copiedV) case, so currentDef is not a simple copy. Keep it.
+            // Process the rest of the list with original substs.
+            let (optDs, finalSubsts) = doCopyProp ds substs varMutabilityMap
+            (currentDef :: optDs, finalSubsts)
+
+/// Transform the given AST node into Administrative Normal Form. (Basic version)
+let transform (ast: Node<'E, 'T>) : Node<'E, 'T> = toANF (toANFDefs ast)
+
+/// Transform the given AST node into Administrative Normal Form with copy propagation.
+let optTransform (ast: Node<'E, 'T>) : Node<'E, 'T> =
+    let (node, defs) = toANFDefs ast
+
+    let defsOldestFirst = List.rev defs // doCopyProp expects oldest definitions first
+
+    // Build the mutability map: varName -> isMutable (true if 'let mutable')
+    let mutabilityMap =
+        List.fold (fun accMap (anfDef: ANFDef<'E,'T>) ->
+            Map.add anfDef.Var anfDef.IsMutable accMap
+        ) Map.empty defsOldestFirst
+
+    // Perform copy propagation
+    let (optDefsOldestFirst, finalSubsts) = doCopyProp defsOldestFirst Map.empty mutabilityMap
+
+    // Apply final substitutions to the resulting node of the program
+    let finalNode =
+        match node.Expr with
+        | Var vname ->
+            let rec resolve v sMap = 
+                match Map.tryFind v sMap with
+                | Some r -> resolve r sMap 
+                | None -> v
+            let resolvedVname = resolve vname finalSubsts
+            { node with Expr = Var resolvedVname }
+        | _ -> node 
+
+    let optDefsForToANF = List.rev optDefsOldestFirst // toANF expects most recent definitions first
+
+    toANF (finalNode, optDefsForToANF)
