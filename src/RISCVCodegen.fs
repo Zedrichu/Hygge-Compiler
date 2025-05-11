@@ -582,6 +582,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 doCodegen env 
                     { node with Expr = Print(
                             { node with Expr = StringVal(t.ToString()); Type = TString }) }
+            | TUnion (valuePairs: List<string * Type>) ->
+                doCodegen env 
+                    { node with Expr = Print(
+                            { node with Expr = StringVal(t.ToString()); Type = TString }) }
             | t ->
                 failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
 
@@ -1456,6 +1460,171 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
     | Pointer(_) ->
         failwith "BUG: pointers cannot be compiled (by design!)"
 
+    | UnionCons(label, expr) ->
+            // Allocate space for the union instance (label ID + value = 2 words = 8 bytes)
+            // kind of like in struct, but with only one field
+            let unionAllocCode =
+                (beforeSysCall [Reg.a0] []) 
+                    .AddText([
+                        (RV.LI(Reg.a0, 8), // Amount of memory for label ID (int) + value (word)
+                            "Amount of memory to allocate for a union instance (8 bytes)")
+                        (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk") // Syscall to allocate heap in RARS
+                        (RV.ECALL, "") 
+                        (RV.MV(Reg.r(env.Target), Reg.a0), 
+                            "Move syscall result (Union mem address) to target")
+                    ])
+                    ++ (afterSysCall [Reg.a0] [])
+
+            // Instead of saving the string, we use genSymbolId to generate a unique int from a string
+            let labelId = Util.genSymbolId label
+            let labelIdCode =
+                Asm().AddText([
+                        (RV.LI(Reg.r(env.Target + 1u), labelId), $"Load integer ID for label '%s{label}'") 
+                        (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)), 
+                            $"Store label ID for '%s{label}' at base address")
+                    ])
+
+
+            // Finally save the expr at an offset of 4
+            let exprCompileAndStoreCode =
+                match expr.Type with
+                | t when (isSubtypeOf expr.Env t TFloat) ->
+                    let exprCode = doCodegen { env with Target = env.Target + 1u } expr 
+
+                    // Store the float value from env.FPTarget at offset 4
+                    let storeCode = Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(4), Reg.r(env.Target)),
+                                        "Store float value of union expr at offset 4")
+                    exprCode ++ storeCode
+                | t when (isSubtypeOf expr.Env t TUnit) ->
+                    Asm() // Unit value - nothing to store yay
+                | _ -> // Default case for everything that's not a float
+                    let exprCode = doCodegen { env with Target = env.Target + 1u } expr
+                    let storeCode = Asm(RV.SW(Reg.r(env.Target + 1u), Imm12(4), Reg.r(env.Target)),
+                                        "Store value of union expr at offset 4")
+                    exprCode ++ storeCode // Compile then store
+
+            unionAllocCode ++ labelIdCode ++ exprCompileAndStoreCode
+
+    | Match(expr, cases) ->
+        let exprAddrCode = doCodegen env expr // Code to get address of the expression to match
+
+        let unionAddrReg = Reg.r env.Target // Holds address of the union object
+        let actualTagReg = Reg.r (env.Target + 1u) // Holds the actual tag read from the union
+        let expectedTagReg = Reg.r (env.Target + 2u) // Holds the tag of the case being checked
+        let intValReg = Reg.r (env.Target + 2u) // Reuses expectedTagReg for the case's integer value after comparison
+        let fpValReg = FPReg.r (env.FPTarget + 1u) // Holds the case's float value
+
+        // Load the actual tag from the union instance (offset 0 for tag)
+        let loadActualTagCode =
+            Asm(RV.LW(actualTagReg, Imm12(0), unionAddrReg), $"Load union tag from memory")
+
+        let endLabelSym = Util.genSymbol "match_end"
+        let jmpEndInstr = Asm(RV.J(endLabelSym)) // Instruction to jump to the end of the match
+
+        // Fold over cases to generate comparison logic and case bodies
+        // We need to first generate all the comparisons, and then all the bodies
+        let processCase (cmpInstrsAcc, bodyInstrsAcc) (caseName, caseVar, caseBodyExpr) =
+            let caseTagId = Util.genSymbolId caseName // Numeric ID for the current case's tag
+
+            let loadCaseTagIdInstr =
+                Asm(RV.LI(expectedTagReg, caseTagId), $"Load ID for case '%s{caseName}' into reg")
+
+            let caseEntrySym = Util.genSymbol $"case_entry_{caseName}"
+            // If actual tag matches expected tag, branch to this case's body
+            let beqCaseEntryInstr =
+                Asm(RV.BEQ(actualTagReg, expectedTagReg, caseEntrySym), "Branch if tags equal")
+
+            let caseEntryLabelInstr =
+                Asm(RV.LABEL(caseEntrySym), $"Label for start of case '%s{caseName}' body")
+
+            // Determine the type of the value associated with this specific case
+            let valType =
+                match expandType expr.Env expr.Type with // Resolve the union type fully
+                | TUnion casesInfo ->
+                    match List.tryFind (fun (name, _) -> name = caseName) casesInfo with
+                    | Some(_, t) -> t // Type of the data payload for this case
+                    | None ->
+                        failwith
+                            $"Internal: Case '%s{caseName}' not found in resolved union %O{expr.Type} (expr: %A{expr})"
+                | resolvedType ->
+                    failwith
+                        $"Internal: Matching on non-union %O{resolvedType} (original: %O{expr.Type}, expr: %A{expr})"
+
+            // Load the case's value
+            let loadValInstr =
+                match valType with
+                | t when (isSubtypeOf expr.Env t TUnit) -> Asm() // Unit type has no runtime value to load
+                | t when (isSubtypeOf expr.Env t TFloat) ->
+                    Asm(RV.FLW_S(fpValReg, Imm12(4), unionAddrReg), $"Load float value for case '%s{caseName}'")
+                | _ -> // Integer-like types (includes pointers, bools, chars, etc.)
+                    Asm(RV.LW(intValReg, Imm12(4), unionAddrReg), $"Load int-like value for case '%s{caseName}'")
+
+            // Determine storage (register or placeholder) for the case variable, to be used in its body
+            let valStorage =
+                match valType with
+                | t when (isSubtypeOf expr.Env t TUnit) -> Storage.Label("unit_val_placeholder")
+                | t when (isSubtypeOf expr.Env t TFloat) -> Storage.FPReg(fpValReg)
+                | _ -> Storage.Reg(intValReg)
+
+            // Generate code for the case body, with the case variable set to the matched union
+            let bodyImplCode =
+              doCodegen {env with VarStorage = env.VarStorage.Add(caseVar, valStorage)} caseBodyExpr
+
+            // Assemble the full code for this case: entry label, load value, execute body, then jump to match_end
+            let caseCodeBlock =
+                caseEntryLabelInstr ++ loadValInstr ++ bodyImplCode ++ jmpEndInstr
+
+            (cmpInstrsAcc ++ loadCaseTagIdInstr ++ beqCaseEntryInstr, // Append comparison logic
+             bodyInstrsAcc ++ caseCodeBlock) // Append case body code
+
+        // Accumulate all comparison instructions and all case body instructions
+        let (allCmpInstrs, allBodyInstrs) = List.fold processCase (Asm(), Asm()) cases
+
+        let tempVarNameForActualTag = Util.genSymbol "internal_unmatched_tag_id"
+
+        // Error node in case nothing is matched 
+        let nonExhaustiveMatchErrorNode =
+            let errorMsgLiteralNode =
+                { node with 
+                    Expr = StringVal($"RUNTIME ERROR [{node.Pos.FileName}:{node.Pos.LineStart}:{node.Pos.ColStart}]: Non-exhaustive pattern match. Unmatched tag ID: ")
+                    Type = TString
+                }
+
+            let printErrorMsgLiteralNode =
+                { node with Expr = Print(errorMsgLiteralNode); Type = TUnit }
+
+            let actualTagVarNode =
+              { node with Expr = Var(tempVarNameForActualTag); Type = TInt}
+
+            let printActualTagNode =
+                { node with Expr = PrintLn(actualTagVarNode); Type = TUnit }
+
+            let falseBoolNode = { node with Expr = BoolVal(false); Type = TBool }
+
+            let assertionFailNode = { node with Expr = Assertion(falseBoolNode); Type = TUnit }
+            { node with
+                Expr = Seq([ printErrorMsgLiteralNode; printActualTagNode; assertionFailNode ])
+                Type = TUnit // The overall type of the error sequence
+            }
+
+        let envForErrorNode =
+            { env with 
+                VarStorage = env.VarStorage.Add(tempVarNameForActualTag, Storage.Reg(actualTagReg))
+            }
+
+        // Code for runtime error
+        let failOnErrorPathCode = doCodegen envForErrorNode nonExhaustiveMatchErrorNode
+
+        let endLabelInstr =
+            Asm(RV.LABEL(endLabelSym), "Label for common end of match statement")
+
+        exprAddrCode          // Evaluate the address of the expression to be matched
+        ++ loadActualTagCode   //  Load its runtime tag ID into actualTagReg
+        ++ allCmpInstrs        //  Perform all tag comparisons and conditional branches
+        ++ failOnErrorPathCode //  If all comparisons fail, execute this error handling code
+        ++ allBodyInstrs       //  The code blocks for each case (only reached by jumps from allCmpInstrs)
+        ++ endLabelInstr       //  The common exit label for successful cases (jumped to from caseCodeBlock)
+      
     | Copy(arg) ->
         match arg.Type with
         | TStruct(fields) ->
@@ -1571,7 +1740,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         | _ -> failwith "BUG: Copy expression on non-struct"
              
-        
 
 /// Generate code to save the given registers on the stack, before a RARS system
 /// call. Register a7 (which holds the system call number) is backed-up by
