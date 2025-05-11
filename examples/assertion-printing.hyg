@@ -31,30 +31,17 @@ fun test1_2(): unit = {
 };
 
 //==============================================================================
-// SECTION 2: NESTED SCOPES AND VARIABLE CAPTURE
+// SECTION 2: NESTED SCOPES
 //==============================================================================
 
-// Test 2.1: Variables from outer scopes are reported when used
+// Test 2.1: Nested assertions
 fun test2_1(): unit = {
     let outer = 100;
     
     assert({
+        assert(outer = 0); // Execution stops here
         let inner = 50;
-        outer < inner  // Both outer and inner are reported
-    })
-};
-
-// Test 2.2: Only the variables in the final condition are reported
-fun test2_2(): unit = {
-    let x = 1;
-    let y = 2;
-    
-    assert({
-        let z = 3;
-        {
-            let w = 4;
-            z > w  // Only z and w are reported, not x or y
-        }
+        outer = 2 * inner  // Does not execute after previous assert
     })
 };
 
@@ -62,20 +49,9 @@ fun test2_2(): unit = {
 // SECTION 3: MUTABLE VARIABLES AND STATE CHANGES
 //==============================================================================
 
-// Test 3.1: Current value of mutable variables is reported
-fun test3_1(): unit = {
-    let mutable counter = 0;
-    
-    for (let mutable i = 0; i < 5; i <- i + 1) {
-        counter <- counter + i
-    };
-    
-    assert(counter < 10)  // Reports current value of counter (10)
-};
-
-// Test 3.2: Complex expressions with mutated state
+// Test 3.1: Complex expressions with mutated state
 let mutable x = 0;
-fun test3_2(): unit = {
+fun test3_1(): unit = {
     let original = x;
     
     fun incX(): int = {println(x); x <- x + 1};
@@ -103,10 +79,12 @@ fun test4_1(): unit = {
         name = "Alice"; 
         age = 30
     };
+    fun dummy(x: int): int = x;
+    let s = struct { fn = dummy; val = 42 };
     
     let threshold = 25;
     
-    assert(p.age < threshold)   // Reports p = struct { name = "Alice"; age = 30; }, threshold = 25
+    assert(p.age < threshold || s.fn(10) = 0)   // Reports p = struct { name = "Alice"; age = 30; }, threshold = 25
 };
 
 // Test 4.2: Array elements in assertions
@@ -122,6 +100,29 @@ fun test4_2(): unit = {
     assert(arrayElem(arr, idx) < value) // Reports arr = Array{ type: int; length: 3 }, 
                                         // idx = 1, value = 15
 };
+
+// Test 4.3: Tuple
+fun test4_3(): unit = {
+    let tup = tuple {1, 2, 3};
+    assert(tup._1 = 5)
+};
+
+// Test 4.4: Union types in assertions
+// fun test4_4(): unit = {
+//     type OptionalInt = union {
+//         Some: int;
+//         None: unit
+//     };
+    
+//     let opt = Some{42};
+    
+//     assert({
+//         match opt with {
+//             Some{x} -> x = 0;  // Reports opt = Some{42}, x = 42
+//             None{_} -> false
+//         }
+//     })
+// };
 
 //==============================================================================
 // SECTION 5: FUNCTION CALLS AND EXPRESSIONS
@@ -153,14 +154,14 @@ fun test5_2(): unit = {
 //==============================================================================
 
 // Basic tests
-test1_1();  // Basic variable reporting
-// test1_2();  // Variables in final condition
-// test2_1();  // Outer scope variables
-// test2_2();  // Nested scope variables
-// test3_1();  // Mutable variable current state
-// test3_2();  // Mutation and state changes
+// test1_1();  // Basic variable reporting
+test1_2();  // Variables in final condition
+// test2_1();  // Nested assertions
+// test3_1();  // Complex expressions with mutated state
 // test4_1();  // Struct field access
 // test4_2();  // Array element access
+// test4_3();  // Tuples
+// test4_4();  // Union types in assertions [currently ONLY INTERPRETER]
 // test5_1();  // Function application results
 // test5_2();  // Logical combinations
 
