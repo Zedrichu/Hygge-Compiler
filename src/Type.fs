@@ -9,7 +9,7 @@ module Type
 
 /// Representation of a type.  This is essentially the abstract syntax tree of a
 /// type as it appears in a Hygge program (not to be confused with the
-/// 'TypedAST' of a whole Hygge program).  The type argument I determines how
+/// 'TypedAST' of a whole Hygge program).  The type argument `I` determines how
 /// type identifiers are represented inside the type tree.
 type Type =
     /// Boolean type.
@@ -26,7 +26,7 @@ type Type =
     | TVar of name: string
     /// A function type, with argument types and return type.
     | TFun of args: List<Type> * ret: Type
-    /// A struct type with ordered fields, each having a unique name and a type.
+    /// A struct type with ordered fields, each having a unique name and a type plus mutability flag.
     | TStruct of fields: List<string * Type * bool>
     /// An array type, with the type of the elements.
     | TArray of elemType: Type
@@ -47,7 +47,7 @@ type Type =
             let argsStr = List.map fmtArg args
             "(" + System.String.Join(", ", argsStr) + $") -> %O{ret}"
         | TStruct(fields) ->
-            let fmtEntry (f: string, t: Type, b: bool) = $"%s{f}: %O{t}, immutable: %b{b}"
+            let fmtEntry (f: string, t: Type, b: bool) = $"%s{f}: %O{t}, mutable: %b{b}"
             let entriesStr = Seq.map fmtEntry fields
             "struct {" + System.String.Join("; ", entriesStr) + "}"
         | TArray elemType ->
@@ -74,11 +74,11 @@ let rec freeTypeVars (t: Type): Set<string> =
     | TFun(args, ret) ->
         Set.union (collectFreeTypeVars args) (freeTypeVars ret)
     | TStruct(fields) ->
-        let (_, fieldTypes) = List.unzip fields
+        let _, fieldTypes, _ = List.unzip3 fields
         collectFreeTypeVars fieldTypes
     | TArray elemType -> freeTypeVars elemType
     | TUnion(cases) ->
-        let (_, caseTypes) = List.unzip cases
+        let _, caseTypes = List.unzip cases
         collectFreeTypeVars caseTypes
 
 /// Collect all free type variables in the given list of types.

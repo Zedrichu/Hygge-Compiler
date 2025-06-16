@@ -95,7 +95,7 @@ let rec internal resolvePretype (env: TypingEnv) (pt: AST.PretypeNode): Result<T
             Ok(TFun(argTypes, returnType))
     | Pretype.TStruct(fields) ->
         /// Struct field names and pretypes
-        let (fieldNames, fieldPretypes) = List.unzip fields
+        let fieldNames, fieldPretypes, fieldMuts = List.unzip3 fields
         /// List of duplicate field names
         let dups = Util.duplicates fieldNames
         if not dups.IsEmpty then
@@ -109,8 +109,8 @@ let rec internal resolvePretype (env: TypingEnv) (pt: AST.PretypeNode): Result<T
             else
                 /// Type of each struct field
                 let fieldTypes = List.map getOkValue fieldTypes
-                let fieldsWithMutability = List.map2 (fun name typ -> (name, typ, true)) fieldNames fieldTypes // Create field tuples with mutability 
-                Ok(TStruct(fieldsWithMutability))
+                let typedStruct = List.zip3 fieldNames fieldTypes fieldMuts
+                Ok(TStruct(typedStruct))
     | Pretype.TArray(arrType) ->
         match (resolvePretype env arrType) with
         | Ok(t) -> Ok(TArray(t))
@@ -165,15 +165,15 @@ let rec expandType (env: TypingEnv) (t: Type): Type =
 /// Check whether 't1' is subtype of 't2' in the typing environment 'env'.
 let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
     match (t1, t2) with
-    | (t1, t2) when t1 = t2
+    | t1, t2 when t1 = t2
         -> true // Straightforward equality between types
-    | (TVar(name), t2) ->
+    | TVar(name), t2 ->
         // Expand the type variable; crash immediately if 'name' is not in 'env'
-        isSubtypeOf env (env.TypeVars.[name]) t2
-    | (t1, TVar(name)) ->
+        isSubtypeOf env env.TypeVars.[name] t2
+    | t1, TVar(name) ->
         // Expand the type variable; crash immediately if 'name' is not in 'env'
-        isSubtypeOf env t1 (env.TypeVars.[name])
-    | (TStruct(fields1), TStruct(fields2)) ->
+        isSubtypeOf env t1 env.TypeVars.[name]
+    | TStruct(fields1), TStruct(fields2) ->
         // A subtype struct must have at least the same fields of the supertype
         if fields1.Length < fields2.Length then false
         else
@@ -181,19 +181,19 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             /// fields of the supertype struct: we only check whether these
             /// fields are compatible (the subtype can have more fields)
             let fields1' = fields1[0..(fields2.Length-1)]
-            let (fieldNames1, fieldTypes1, fieldMutability1) = List.unzip3 fields1'
-            let (fieldNames2, fieldTypes2, fieldMutability2) = List.unzip3 fields2
+            let fieldNames1, fieldTypes1, fieldMutability1 = List.unzip3 fields1'
+            let fieldNames2, fieldTypes2, fieldMutability2 = List.unzip3 fields2
             if (fieldNames1 <> fieldNames2) then false
             else
-                // List.forall2 (fun t1 t2 -> isSubtypeOf env t1 t2)
-                //              fieldTypes1 fieldTypes2
-                List.forall2 (fun (t1, m1) (t2, m2) -> 
-                    isSubtypeOf env t1 t2 && (not m2 || m1)) // m2 is mutable in supertype => m1 must be mutable in subtype
-                    (List.zip fieldTypes1 fieldMutability1)
-                    (List.zip fieldTypes2 fieldMutability2)
+                // Check that all subtype fields are subtypes of supertype fields
+                (List.forall2 (fun t1 t2 -> isSubtypeOf env t1 t2)
+                    fieldTypes1 fieldTypes2) &&
+                // Check that all mutable fields in the supertype are also mutable in the subtype
+                (List.forall2 (fun m1 m2 -> m1 || not m2) // mutable supertype implies mutability in subtype
+                    fieldMutability1 fieldMutability2)
     | TArray(t1), TArray(t2) ->
         isSubtypeOf env t1 t2
-    | (TUnion(cases1), TUnion(cases2)) ->
+    | TUnion(cases1), TUnion(cases2) ->
         /// Labels of the subtype union
         let (labels1, _) = List.unzip cases1
         /// Labels of the supertype union
@@ -495,13 +495,12 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                 else
                     Error([(node.Pos,
                             $"assignment to non-mutable variable %s{name}")])
-            | FieldSelect(targetObj, field) ->
-                // Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
-                //      Expr = Assign(ttarget, texpr) }
-                match (expandType env targetObj.Type) with
+            | FieldSelect(structTarget, field) ->
+                match (expandType env structTarget.Type) with
                 | TStruct(fields) ->
+                    let fst3 (a, _, _) = a
                     // Find the field by name
-                    let fieldInfo = List.tryFind (fun (name, _, _) -> name = field) fields
+                    let fieldInfo = List.tryFind (fun item -> (fst3 item) = field) fields
                     match fieldInfo with
                     | Some(_, _, isMutable) ->
                         // Check mutability here. If immutable we forbid assignment.
@@ -512,10 +511,8 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                                 Expr = Assign(ttarget, texpr) }
                     | None ->
                         Error([(node.Pos, $"struct has no field called '%s{field}'")])
-                | _ -> 
-                    Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
-                        Expr = Assign(ttarget, texpr) }
-            | ArrayElem(_, _) ->
+                | _ -> failwith $"BUG: expected a struct type, got %O{structTarget.Type} in assignment of field"
+            | ArrayElem _ ->
                 Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
                      Expr = Assign(ttarget, texpr) }
             | _ -> Error([(node.Pos, "invalid assignment target")])
@@ -617,7 +614,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Error(es) -> Error(es)
 
     | StructCons(fields) ->
-        let (fieldNames, fieldNodes) = List.unzip fields
+        let fieldNames, fieldNodes = List.unzip fields
         let dups = Util.duplicates fieldNames
         if not (dups.IsEmpty) then
             Error([(node.Pos, $"duplicate structure field names: %s{Util.formatSeq dups}")])

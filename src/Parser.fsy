@@ -33,6 +33,10 @@ let applySelectors (lst: 'a list): (string * 'a) list =
   let indexedList = List.indexed lst
   List.map (fun (i, p) -> ($"_{i + 1}", p)) indexedList
 
+let applySelectorsType (lst: 'a list): (string * 'a * bool) list =
+  let indexedList = List.indexed lst
+  List.map (fun (i, p) -> ($"_{i + 1}", p, true)) indexedList
+
 let decorateAssertion (node: Node<'E,'T>) =
   match node.Expr with
   | Assertion(arg) ->
@@ -469,9 +473,9 @@ pretype:
   | ARRAY LCURLY pretype RCURLY              { mkPretypeNode(parseState, 1,
                                                              Pretype.TArray($3)) }
   | REF LCURLY pretype RCURLY                { mkPretypeNode(parseState, 1,
-                                                             Pretype.TStruct([("value", $3)])) }
+                                                             Pretype.TStruct([("value", $3, true)])) }
   | TUPLE LCURLY typesSeq RCURLY             { mkPretypeNode(parseState, 1,
-                                                             Pretype.TStruct(applySelectors $3)) }
+                                                             Pretype.TStruct(applySelectorsType $3)) }
   | UNION LCURLY unionLabelTypeSeq RCURLY    { mkPretypeNode(parseState, 1,
                                                              Pretype.TUnion($3)) }
 
@@ -479,8 +483,7 @@ pretype:
 ident:
   | IDENT  { $1 } // We just return the string captured by the token 'IDENT'
 
-// Possibly empty equence of comma-separated identifiers with type ascriptions,
-// in parentheses
+// Possibly empty equence of comma-separated identifiers with type ascriptions, in parentheses
 parenArgTypesSeq:
   | LPAR RPAR              { [] }
   | LIT_UNIT               { [] } // Needed because token LIT_UNIT matches "()"
@@ -513,8 +516,7 @@ exprCommaSeq:
   | simpleExpr COMMA exprCommaSeq  { $1 :: $3 }
   | simpleExpr                     { [$1] }
 
-// Non-empty sequence of structure field initializations, separated by
-// semicolons
+// Non-empty sequence of structure field initializations, separated by semicolons
 structFieldInitSeq:
   | field EQ simpleExpr SEMI structFieldInitSeq  { ($1, $3) :: $5 }
   | field EQ simpleExpr                          { [($1, $3)] }
@@ -523,18 +525,15 @@ structFieldInitSeq:
 field:
   | ident       { $1 }
 
-// Non-empty sequence of names and types, separated by semicolons (used for
-// defining structs)
+// Non-empty sequence of names-types-mutability, separated by semicolons (used for defining structs).
+// Fields are assumed to be mutable by default, unless the IMMUTABLE token is specified.
 structFieldTypeSeq:
-  //| field COLON pretype SEMI structFieldTypeSeq  { ($1, $3) :: $5 }
   | field COLON pretype SEMI structFieldTypeSeq  { ($1, $3, true) :: $5 }
   | IMMUTABLE field COLON pretype SEMI structFieldTypeSeq { ($2, $4, false) :: $6 }
-  //| field COLON pretype                          { [($1, $3)] }
   | field COLON pretype                          { [($1, $3, true)] }
   | IMMUTABLE field COLON pretype                { [($2, $4, false)] }
 
-// Non-empty sequence of labels and types, separated by semicolons (used for
-// defining unions)
+// Non-empty sequence of labels and types, separated by semicolons (used for defining unions)
 unionLabelTypeSeq:
   | label COLON pretype SEMI unionLabelTypeSeq  { ($1, $3) :: $5 }
   | label COLON pretype                         { [($1, $3)] }
