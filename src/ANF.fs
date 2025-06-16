@@ -28,8 +28,7 @@ type internal ANFDef<'E,'T>(var: string, isMutable: bool, init: Node<'E,'T>) =
 type internal ANFDefs<'E,'T> = List<ANFDef<'E,'T>>
 
 
-/// Utility function to generate a unique variable name for binding ANF
-/// definitions.
+/// Utility function to generate a unique variable name for binding ANF definitions.
 let internal anfVar() = Util.genSymbol "$anf"
 
 
@@ -38,18 +37,20 @@ let internal anfVar() = Util.genSymbol "$anf"
 let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
     match node.Expr with
     | UnitVal
-    | IntVal(_)
-    | BoolVal(_)
-    | FloatVal(_)
-    | StringVal(_) -> node // The substitution has no effect
+    | IntVal _
+    | BoolVal _
+    | FloatVal _
+    | StringVal _ -> node // The substitution has no effect
 
-    | Pointer(_) -> node // The substitution has no effect
+    | Pointer _ -> node // The substitution has no effect
 
     | Var(vname) when vname = var -> {node with Expr = Var(var2)} // Substitution applied
-    | Var(_) -> node // The substitution has no effect
+    | Var _ -> node // The substitution has no effect
 
     | Add(lhs, rhs) ->
         {node with Expr = Add((substVar lhs var var2), (substVar rhs var var2))}
+    | Sub(lhs, rhs) ->
+        {node with Expr = Sub((substVar lhs var var2), (substVar rhs var var2))}
     | Mult(lhs, rhs) ->
         {node with Expr = Mult((substVar lhs var var2), (substVar rhs var var2))}
 
@@ -94,7 +95,7 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
          {node with Expr = ArrayCons((substVar length var var2), (substVar init var var2))}
 
     | ArrayLength(target) ->
-         {node with Expr = ArrayLength((substVar target var var2))}
+         {node with Expr = ArrayLength (substVar target var var2)}
 
     | ArrayElem(target, index) ->
          {node with Expr = ArrayElem((substVar target var var2), (substVar index var var2))}
@@ -103,7 +104,7 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
          {node with Expr = ArraySlice((substVar target var var2), 
                                     (substVar startIdx var var2),
                                     (substVar endIdx var var2))}
-    //   
+
     | ReadInt
     | ReadFloat -> node // The substitution has no effect
 
@@ -136,6 +137,15 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
     | LetT(vname, tpe, init, scope) ->
         {node with Expr = LetT(vname, tpe, (substVar init var var2),
                                (substVar scope var var2))}
+        
+    | LetRec(vname, _, _, _) when vname = var ->
+        // The variable is shadowed, do not substitute it in the "let rec" scope
+        // and similarly in "let rec" initialisation as it might be recursively defined
+        node
+    | LetRec(vname, tpe, init, scope) ->
+        // Propagate the substitution in the "let rec" scope and init safely
+        {node with Expr = LetRec(vname, tpe, (substVar init var var2),
+                                 (substVar scope var var2))}
 
     | LetMut(vname, init, scope) when vname = var ->
         // Do not substitute the variable in the "let mutable" scope
@@ -165,7 +175,7 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
 
     | Lambda(args, body) ->
         /// Arguments of this lambda term, without their pretypes
-        let (argVars, _) = List.unzip args
+        let argVars, _ = List.unzip args
         if (List.contains var argVars) then node // No substitution
         else {node with Expr = Lambda(args, (substVar body var var2))}
 
@@ -175,12 +185,14 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
         {node with Expr = Application(substExpr, substArgs)}
 
     | StructCons(fields) ->
-        let (fieldNames, initNodes) = List.unzip fields
+        let fieldNames, initNodes = List.unzip fields
         let substInitNodes = List.map (fun e -> (substVar e var var2)) initNodes
         {node with Expr = StructCons(List.zip fieldNames substInitNodes)}
 
     | FieldSelect(target, field) ->
         {node with Expr = FieldSelect((substVar target var var2), field)}
+        
+    | Copy arg -> {node with Expr = Copy (substVar arg var var2)}
 
     | UnionCons(label, expr) ->
         {node with Expr = UnionCons(label, (substVar expr var var2))}
@@ -218,18 +230,19 @@ let rec internal toANF (node: Node<'E,'T>, defs: ANFDefs<'E,'T>): Node<'E,'T> =
 let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
     match node.Expr with
     | UnitVal
-    | BoolVal(_)
-    | IntVal(_)
-    | FloatVal(_)
-    | StringVal(_) as expr ->
+    | BoolVal _
+    | IntVal _
+    | FloatVal _
+    | StringVal _ as expr ->
         /// Definition binding this value to a variable
         let anfDef = ANFDef(false, {node with Expr = expr})
         ({node with Expr = Var(anfDef.Var)}, [anfDef])
 
-    | Var(_) ->
+    | Var _ ->
         (node, []) // This AST node is already in ANF
 
     | Add(lhs, rhs)
+    | Sub(lhs, rhs)
     | Mult(lhs, rhs)
     | And(lhs, rhs)
     | Or(lhs, rhs)
@@ -243,24 +256,25 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
     | Div(lhs, rhs)
     | Mod(lhs, rhs) as expr ->
         /// Left-hand-side argument in ANF and related definitions
-        let (lhsANF, lhsDefs) = toANFDefs lhs
+        let lhsANF, lhsDefs = toANFDefs lhs
         /// Right-hand-side argument in ANF and related definitions
-        let (rhsANF, rhsDefs) = toANFDefs rhs
+        let rhsANF, rhsDefs = toANFDefs rhs
         /// This expression in ANF
         let anfExpr = match expr with
-                      | Add(_,_) -> Add(lhsANF, rhsANF)
-                      | Mult(_,_) -> Mult(lhsANF, rhsANF)
-                      | And(_,_) -> And(lhsANF, rhsANF)
-                      | Or(_,_) -> Or(lhsANF, rhsANF)
-                      | Eq(_,_) -> Eq(lhsANF, rhsANF)
-                      | Less(_,_) -> Less(lhsANF, rhsANF)
-                      | LessEq(_,_) -> LessEq(lhsANF, rhsANF)
-                      | Greater(_,_) -> Greater(lhsANF, rhsANF)
-                      | GreaterEq(_,_) -> GreaterEq(lhsANF, rhsANF)
-                      | Min(_,_) -> Min(lhsANF, rhsANF)
-                      | Max(_,_) -> Max(lhsANF, rhsANF)
-                      | Div(_,_) -> Div(lhsANF, rhsANF)
-                      | Mod(_,_) -> Mod(lhsANF, rhsANF)
+                      | Add _ -> Add(lhsANF, rhsANF)
+                      | Sub _ -> Sub(lhsANF, rhsANF)
+                      | Mult _ -> Mult(lhsANF, rhsANF)
+                      | And _ -> And(lhsANF, rhsANF)
+                      | Or _ -> Or(lhsANF, rhsANF)
+                      | Eq _ -> Eq(lhsANF, rhsANF)
+                      | Less _ -> Less(lhsANF, rhsANF)
+                      | LessEq _ -> LessEq(lhsANF, rhsANF)
+                      | Greater _ -> Greater(lhsANF, rhsANF)
+                      | GreaterEq _ -> GreaterEq(lhsANF, rhsANF)
+                      | Min _ -> Min(lhsANF, rhsANF)
+                      | Max _ -> Max(lhsANF, rhsANF)
+                      | Div _ -> Div(lhsANF, rhsANF)
+                      | Mod _ -> Mod(lhsANF, rhsANF)
                       | e -> failwith $"BUG: unexpected expression: %O{e}"
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = anfExpr})
@@ -279,14 +293,14 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
     | Assertion(arg)
     | Sqrt(arg) as expr ->
         /// Argument in ANF and related definitions
-        let (argANF, argDefs) = toANFDefs arg
+        let argANF, argDefs = toANFDefs arg
         /// This expression in ANF
         let anfExpr = match expr with
-                      | Not(_) -> Not(argANF)
-                      | Print(_) -> Print(argANF)
-                      | PrintLn(_) -> PrintLn(argANF)
-                      | Assertion(_)  -> Assertion(argANF)
-                      | Sqrt(_) -> Sqrt(argANF)
+                      | Not _ -> Not(argANF)
+                      | Print _ -> Print(argANF)
+                      | PrintLn _ -> PrintLn(argANF)
+                      | Assertion _  -> Assertion(argANF)
+                      | Sqrt _ -> Sqrt(argANF)
                       | e -> failwith $"BUG: unexpected expression: %O{e}"
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = anfExpr})
@@ -299,7 +313,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
             failwith $"BUG: empty AST Seq node at %O{node.Pos}"
         | last :: rest ->
             /// Last AST node in the sequence in ANF and related definitions
-            let (lastANF, lastDefs) = toANFDefs last
+            let lastANF, lastDefs = toANFDefs last
             /// ANF definitions of the rest of the Seq nodes (in reverse order).
             /// We collect the definitions and ignore the variable bound to each
             /// node of the sequence, because such variable will be unused in
@@ -310,14 +324,14 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | Ascription(tpe, arg) ->
         /// Argument in ANF and related definitions
-        let (argANF, argDefs) = toANFDefs arg
+        let argANF, argDefs = toANFDefs arg
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = Ascription(tpe, argANF)})
         ({node with Expr = Var(anfDef.Var)}, anfDef :: argDefs)
 
     | If(condition, ifTrue, ifFalse) ->
         /// Condition in ANF and related definitions
-        let (condANF, condDefs) = toANFDefs condition
+        let condANF, condDefs = toANFDefs condition
         /// True branch in ANF
         let ifTrueANF = toANF (toANFDefs ifTrue)
         /// True branch in ANF
@@ -329,6 +343,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | Let(name, init, scope)
     | LetT(name, _, init, scope)
+    | LetRec(name, _, init, scope)
     | LetMut(name, init, scope) as expr ->
         // ANF requires variable names to be unique, so we rewrite the scope
         /// Variable name bound by this 'let' expression, made unique
@@ -338,23 +353,24 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
         /// Variable name (now made unique) bound by this 'let' expression
         let name = uniqName
         /// Initialization expression in ANF and related definitions
-        let (initANF, initDefs) = match init.Expr with
+        let initANF, initDefs = match init.Expr with
                                   | UnitVal
-                                  | BoolVal(_)
-                                  | IntVal(_)
-                                  | FloatVal(_)
-                                  | StringVal(_)
-                                  | Var(_) ->
+                                  | BoolVal _
+                                  | IntVal _
+                                  | FloatVal _
+                                  | StringVal _
+                                  | Var _ ->
                                       (init, []) // 'init' is already in ANF
                                   | _ ->
                                       toANFDefs init
         /// Scope expression in ANF and its related definitions
-        let (scopeANF, scopeDefs)  = toANFDefs scope
+        let scopeANF, scopeDefs  = toANFDefs scope
         /// Is this a mutable "let"?
         let isMutable = match expr with
-                        | Let(_,_,_)
-                        | LetT(_,_,_,_) -> false
-                        | LetMut(_,_,_) -> true
+                        | Let _
+                        | LetT _
+                        | LetRec _ -> false
+                        | LetMut _ -> true                      
                         | e -> failwith $"BUG: unexpected expression: %O{e}"
         /// Definition binding the "let" variable to the init expression in ANF
         let letDef = ANFDef(name, isMutable, initANF)
@@ -363,15 +379,15 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | Assign(target, asgnExpr) ->
         /// Source expression of the assignment in ANF and related definitions
-        let (asgnExprANF, asgnExprDefs) = toANFDefs asgnExpr
+        let asgnExprANF, asgnExprDefs = toANFDefs asgnExpr
         match target.Expr with
-        | Var(_) ->
+        | Var _ ->
             /// Definition binding this expression in ANF to its variable
             let anfDef = ANFDef(false, {node with Expr = Assign(target, asgnExprANF)})
             ({node with Expr = Var(anfDef.Var)}, anfDef :: asgnExprDefs)
         | FieldSelect(ftarget, field) ->
             /// Target expr of the field selection in ANF and related definitions
-            let (ftargetExprANF, ftargetExprDefs) = toANFDefs ftarget
+            let ftargetExprANF, ftargetExprDefs = toANFDefs ftarget
             /// Assignment to field selection in ANF form
             let anfAssign = Assign({target with Expr = FieldSelect(ftargetExprANF, field)}, asgnExprANF)
             /// Definition binding this expression in ANF to its variable
@@ -380,9 +396,9 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
         | ArrayElem(atarget, index) ->
             /// We also require Assign to handle array elements.
             /// Target array expression in ANF and related definitions
-            let (atargetANF, atargetDefs) = toANFDefs atarget
+            let atargetANF, atargetDefs = toANFDefs atarget
             /// Index expression in ANF and related definitions
-            let (indexANF, indexDefs) = toANFDefs index
+            let indexANF, indexDefs = toANFDefs index
             /// Assignment to array element in ANF form
             let anfAssign = Assign({target with Expr = ArrayElem(atargetANF, indexANF)}, asgnExprANF)
              /// Definition binding this expression in ANF to its variable
@@ -422,7 +438,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
     | Lambda(args, body) ->
         // ANF requires variable names to be unique, so we rewrite the body
         /// Variable names bound by the lambda term, and their types
-        let (argNames, argTypes) = List.unzip args
+        let argNames, argTypes = List.unzip args
         /// Variable names bound by the lambda term, made unique
         let uniqArgNames = List.map Util.genSymbol argNames
         /// Rewritten lambda term body with renamed variables
@@ -437,9 +453,9 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | Application(appExpr, args) ->
         /// Applied expression in ANF and related definitions
-        let (appExprANF, appExprDefs) = toANFDefs appExpr
+        let appExprANF, appExprDefs = toANFDefs appExpr
         /// Application arguments in ANF and related definitions
-        let (argsANF, argsDefs) = List.unzip (List.map toANFDefs args)
+        let argsANF, argsDefs = List.unzip (List.map toANFDefs args)
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = Application(appExprANF, argsANF)})
 
@@ -448,9 +464,9 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
          anfDef :: List.concat (List.rev argsDefs) @ appExprDefs)
 
     | StructCons(fields) ->
-        let (fieldNames, fieldNodes) = List.unzip fields
+        let fieldNames, fieldNodes = List.unzip fields
         /// Struct fields in ANF and related definitions
-        let (fieldsANF, fieldsDefs) = List.unzip (List.map toANFDefs fieldNodes)
+        let fieldsANF, fieldsDefs = List.unzip (List.map toANFDefs fieldNodes)
         /// Updated structure fields (names and nodes) in ANF
         let fields2 = List.zip fieldNames fieldsANF
         /// Definition binding this expression in ANF to its variable
@@ -462,18 +478,18 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | FieldSelect(target, field) ->
         /// Target expression in ANF and related definitions
-        let (targetANF, targetDefs) = toANFDefs target
+        let targetANF, targetDefs = toANFDefs target
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = FieldSelect(targetANF, field)})
 
         ({node with Expr = Var(anfDef.Var)}, anfDef :: targetDefs)
 
-    | Pointer(_) ->
+    | Pointer _ ->
         failwith "BUG: pointers cannot be converted to ANF (by design!)"
 
     | UnionCons(label, init) ->
         /// Union initialization expression in ANF and related definitions
-        let (initANF, initDefs) = toANFDefs init
+        let initANF, initDefs = toANFDefs init
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = UnionCons(label, initANF)})
 
@@ -481,9 +497,9 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | ArrayCons(length, init) ->
         /// Length expression in ANF and related definitions
-        let (lengthANF, lengthDefs) = toANFDefs length
+        let lengthANF, lengthDefs = toANFDefs length
         /// Init expression in ANF and related definitions
-        let (initANF, initDefs) = toANFDefs init
+        let initANF, initDefs = toANFDefs init
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = ArrayCons(lengthANF, initANF)})
 
@@ -491,10 +507,10 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | ArrayElem(target, index) ->
         /// Target expression in ANF and related definitions
-        let (targetANF, targetDefs) = toANFDefs target
+        let targetANF, targetDefs = toANFDefs target
         /// Index expression in ANF and related definitions
         /// We need to evaluate the index like an expression because it may be something complex and not simply an int
-        let (indexANF, indexDefs) = toANFDefs index
+        let indexANF, indexDefs = toANFDefs index
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = ArrayElem(targetANF, indexANF)})
 
@@ -502,7 +518,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | ArrayLength(target) ->
         /// Target expression in ANF and related definitions
-        let (targetANF, targetDefs) = toANFDefs target
+        let targetANF, targetDefs = toANFDefs target
         /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = ArrayLength(targetANF)})
 
@@ -510,19 +526,28 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | ArraySlice(target, startIdx, endIdx) ->
         /// Target expression in ANF and related definitions
-        let (targetANF, targetDefs) = toANFDefs target
+        let targetANF, targetDefs = toANFDefs target
         /// startIdx expression in ANF and related definitions
-        let (startIdxANF, startIdxDefs) = toANFDefs startIdx
+        let startIdxANF, startIdxDefs = toANFDefs startIdx
         /// endIdx expression in ANF and related definitions
-        let (endIdxANF, endIdxDefs) = toANFDefs endIdx
+        let endIdxANF, endIdxDefs = toANFDefs endIdx
         /// Definition binding this expression in ANF to its variables
         let anfDef = ANFDef(false, {node with Expr = ArraySlice(targetANF, startIdxANF, endIdxANF)})
 
         ({node with Expr = Var(anfDef.Var)}, anfDef :: (startIdxDefs @ endIdxDefs @ targetDefs))
+    
+    | Copy arg -> 
+        /// Argument in ANF and related definitions
+        let argANF, argDefs = toANFDefs arg
+        /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = Copy(argANF)})
+
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: argDefs)
+    
     | Match(matchExpr, cases) ->
         /// Matched expression in ANF and related definitions
-        let (matchExprANF, matchExprDefs) = toANFDefs matchExpr
-        let (casesLabels, casesVars, casesConts) = List.unzip3 cases
+        let matchExprANF, matchExprDefs = toANFDefs matchExpr
+        let casesLabels, casesVars, casesConts = List.unzip3 cases
         // ANF requires unique var names, so we rewrite the match continuations
         /// Match case variables, made unique
         let uniqCasesVars = List.map Util.genSymbol casesVars
@@ -610,17 +635,17 @@ let rec internal doCopyProp
                 doCopyProp ds newSubsts varMutabilityMap
             else
                 // Cannot propagate: Keep currentDef, and process the rest of the list with original 'substs'.
-                let (optDs, finalSubsts) = doCopyProp ds substs varMutabilityMap
+                let optDs, finalSubsts = doCopyProp ds substs varMutabilityMap
                 (currentDef :: optDs, finalSubsts)
         | _ ->
             // Not a Var(copiedV) case, so currentDef is not a simple copy. Keep it.
             // Process the rest of the list with original substs.
-            let (optDs, finalSubsts) = doCopyProp ds substs varMutabilityMap
+            let optDs, finalSubsts = doCopyProp ds substs varMutabilityMap
             (currentDef :: optDs, finalSubsts)
 
 /// Transform the given AST node into Administrative Normal Form with copy propagation.
 let optTransform (ast: Node<'E, 'T>) : Node<'E, 'T> =
-    let (node, defs) = toANFDefs ast
+    let node, defs = toANFDefs ast
 
     let defsOldestFirst = List.rev defs // doCopyProp expects oldest definitions first
 
@@ -631,7 +656,7 @@ let optTransform (ast: Node<'E, 'T>) : Node<'E, 'T> =
         ) Map.empty defsOldestFirst
 
     // Perform copy propagation
-    let (optDefsOldestFirst, finalSubsts) = doCopyProp defsOldestFirst Map.empty mutabilityMap
+    let optDefsOldestFirst, finalSubsts = doCopyProp defsOldestFirst Map.empty mutabilityMap
 
     // Apply final substitutions to the resulting node of the program
     let finalNode =
@@ -658,12 +683,15 @@ let verifyANF (node: Node<'E,'T>) =
     let rec visit (node: Node<'E,'T>) =
         match node.Expr with
         | Let(var, init, body)
+        | LetT(var, _, init, body)
         | LetMut(var, init, body) ->
             // ANF property check
             let check = 
                 match init.Expr with
-                | Var(_) | IntVal(_) | BoolVal(_) | FloatVal(_) | StringVal(_) | UnitVal | ReadInt | ReadFloat | Lambda(_, _) -> true
-                | Add(a, b) 
+                | Var _ | IntVal _ | BoolVal _ | FloatVal _ | StringVal _ | UnitVal | Pointer _ -> true
+                | ReadInt | ReadFloat -> true
+                | Add(a, b)
+                | Sub(a, b)
                 | Mult(a, b) 
                 | And(a, b) 
                 | Or(a, b) 
@@ -677,47 +705,59 @@ let verifyANF (node: Node<'E,'T>) =
                 | Div(a, b) 
                 | Mod(a, b)  ->
                     match a.Expr, b.Expr with
-                    | Var(_), Var(_) -> true
+                    | Var _, Var _ -> true
                     | _ -> false
                 | Not(a) 
-                | Print(a) 
-                | PrintLn(a) 
-                | Assertion(a) 
                 | Sqrt(a) 
+                | Print(a) 
+                | PrintLn(a)
+                | Assertion(a) 
+                | Ascription(_, a)
                 | ArrayLength(a) ->
                     match a.Expr with 
-                    | Var(_) -> true 
+                    | Var _ -> true 
                     | _ -> false
                 | ArrayCons(length, init) ->
                     match length.Expr, init.Expr with
-                    | Var(_), Var(_) -> true 
+                    | Var _, Var _ -> true 
                     | _ -> false
                 | ArrayElem(a, idx) ->
                     match a.Expr, idx.Expr with 
-                    | Var(_), Var(_) -> true 
+                    | Var _, Var _ -> true 
                     | _ -> false
                 | ArraySlice(a, s, e) ->
                     match a.Expr, s.Expr, e.Expr with
-                    | Var(_), Var(_), Var(_) -> true
+                    | Var _, Var _, Var _ -> true
                     | _ -> false
-                | FieldSelect(a, fieldName) ->
+                | FieldSelect(a, _) ->
                     match a.Expr with 
-                    | Var(_) -> true 
+                    | Var _ -> true 
                     | _ -> false
                 | Application(f, args) ->
                     match f.Expr with
-                    | Var(_) -> List.forall (fun (arg: Node<'E,'T>) -> 
+                    | Var _ -> List.forall (fun (arg: Node<'E,'T>) -> 
                         match arg.Expr with 
-                        Var(_) -> true 
+                        Var _ -> true 
                         | _ -> false) args
                     | _ -> false
+                | Copy(a)
                 | UnionCons(_, a) ->
                     match a.Expr with 
-                    Var(_) -> true 
+                    Var _ -> true 
                     | _ -> false
+
+                | Type(_, _, scope) ->
+                    // Check that the scope is in ANF
+                    visit scope
+                    true
+                | Lambda (_, body) ->
+                    // Check that the body of the lambda is in ANF
+                    visit body
+                    true
+                    
                 | If(condition, ifTrue, ifFalse) ->
                     match condition.Expr with
-                    | Var(_) -> 
+                    | Var _ -> 
                         // We also need to check the other branches for ANF expressions
                         visit ifTrue
                         visit ifFalse
@@ -738,30 +778,44 @@ let verifyANF (node: Node<'E,'T>) =
                     visit condition
                     true
 
+                | StructCons fields ->
+                    List.forall (fun (_: string, init: Node<'E, 'T>) ->
+                        match init.Expr with
+                        | Var _ -> true // All field initializations must be variables
+                        | _ -> false
+                    ) fields           
+
                 | Assign(target, expr) ->
                     match target.Expr, expr.Expr with
-                    | Var(_), Var(_) -> true  // Simple variable assignment
-                    | ArrayElem(a, idx), Var(_) ->
+                    | Var _, Var _ -> true  // Simple variable assignment
+                    | ArrayElem(a, idx), Var _ ->
                         // Array element assignment
                         match a.Expr, idx.Expr with
-                        | Var(_), Var(_) -> true
+                        | Var _, Var _ -> true
                         | _ -> false
-                    | FieldSelect(a, _), Var(_) ->
+                    | FieldSelect(a, _), Var _ ->
                         // Field selection assignment
                         match a.Expr with
-                        | Var(_) -> true
+                        | Var _ -> true
                         | _ -> false
                     | _ -> false
+
                 | Match(expr, cases) ->
                     // First check that matched expression is a variable
                     match expr.Expr with
-                    | Var(_) -> 
-                        // Then check that all branch continuations are in ANF ingnore the strings.
-                        let (_, _, continuations) = List.unzip3 cases
+                    | Var _ -> 
+                        // Then check that all branch continuations are in ANF ignore the strings.
+                        let _, _, continuations = List.unzip3 cases
                         List.iter visit continuations
                         true
                     | _ -> false
-                | _ -> false
+                    
+                | Seq nodes -> 
+                    // Check that all nodes in the sequence are in ANF
+                    List.map visit nodes |> ignore
+                    true
+                
+                | _ -> false // Other expressions are not allowed in ANF
             
             if not check then
                 isValid <- false
@@ -772,7 +826,7 @@ let verifyANF (node: Node<'E,'T>) =
             
         | _ -> 
             match node.Expr with
-            | Var(_) -> () // If the final result is a variable
+            | Var _ -> () // If the final result is a variable
             | _ -> 
                 isValid <- false
                 violations <- $"Final expression is not a variable" :: violations

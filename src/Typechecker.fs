@@ -52,16 +52,16 @@ type TypingResult = Result<TypedAST, TypeErrors>
 /// least one of the two Results is an Error.
 let internal mergeErrors (r1: Result<'A, TypeErrors>, r2: Result<'A, TypeErrors>): Result<'B, TypeErrors> =
     match (r1, r2) with
-    | (Ok(_), Error(es)) -> Error(es)
-    | (Error(es), Ok(_)) -> Error(es)
-    | (Error(es1), Error(es2)) -> Error(es1 @ es2)
-    | (ok1, ok2) -> failwith $"BUG: expecting at least one Error, got %O{ok1}, %O{ok2}"
+    | Ok _, Error(es) -> Error(es)
+    | Error(es), Ok _ -> Error(es)
+    | Error(es1), Error(es2) -> Error(es1 @ es2)
+    | ok1, ok2 -> failwith $"BUG: expecting at least one Error, got %O{ok1}, %O{ok2}"
 
 
 /// Retrieve a list of all errors from a list of results.
 let internal collectErrors (rs: List<Result<'R, List<'E>>>): List<'E> =
     let getError (x: Result<'R, List<'E>>): List<'E> = match x with
-                                                       | Ok(_) -> []
+                                                       | Ok _ -> []
                                                        | Error(es) -> es
     List.collect id (List.map getError rs)
 
@@ -117,7 +117,7 @@ let rec internal resolvePretype (env: TypingEnv) (pt: AST.PretypeNode): Result<T
         | Error(es) -> Error(es)
     | Pretype.TUnion(cases) ->
         /// Union type labels and pretypes
-        let (caseLabels, casePretypes) = List.unzip cases
+        let caseLabels, casePretypes = List.unzip cases
         /// List of duplicate label names
         let dups = Util.duplicates caseLabels
         if not dups.IsEmpty then
@@ -144,8 +144,8 @@ and internal lookupTypeVar (env: TypingEnv) (name: string): Option<Type> =
     | None ->
         // Let's check whether we are dealing with a type alias.  Note that we
         // do *not* recursively resolve the type alias with its definition
-        match (env.TypeVars.TryFind(name)) with
-        | Some(_) -> Some(TVar(name))
+        match env.TypeVars.TryFind(name) with
+        | Some _ -> Some(TVar(name))
         | None -> None
 
 
@@ -158,7 +158,7 @@ let rec expandType (env: TypingEnv) (t: Type): Type =
     match t with
     | TVar(name) ->
         // Recursive look-up. Crash immediately if 'name' is not in 'env'
-        expandType  env (env.TypeVars.[name])
+        expandType  env env.TypeVars.[name]
     | other -> other
 
 
@@ -195,9 +195,9 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
         isSubtypeOf env t1 t2
     | TUnion(cases1), TUnion(cases2) ->
         /// Labels of the subtype union
-        let (labels1, _) = List.unzip cases1
+        let labels1, _ = List.unzip cases1
         /// Labels of the supertype union
-        let (labels2, _) = List.unzip cases2
+        let labels2, _ = List.unzip cases2
         // A subtype union must have a subset of the labels of the supertype
         if not (Set.isSubset (Set(labels1)) (Set(labels2))) then false
         else
@@ -206,7 +206,7 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             let map1 = Map.ofList cases1
             let map2 = Map.ofList cases2
             List.forall (fun l -> isSubtypeOf env map1.[l] map2.[l]) labels1
-    | (TFun(args1, ret1), TFun(args2, ret2)) ->
+    | TFun(args1, ret1), TFun(args2, ret2) ->
         if args1.Length <> args2.Length then false
         else
             // Check that the return type is a subtype of the other return type
@@ -216,7 +216,7 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             // (the “smaller” function is more permissive in the types of arguments it accepts)
             let argsSubtype = List.forall2 (isSubtypeOf env) args2 args1
             retSubtype && argsSubtype
-    | (_, _) -> false
+    | _, _ -> false
 
 
 /// Perform type checking on an untyped AST, using the given typing environment.
@@ -368,13 +368,13 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         match (typer env cond) with
         | Ok(tcond) when (isSubtypeOf env tcond.Type TBool) ->
             match ((typer env ifT), (typer env ifF)) with
-            | (Ok(tifT), Ok(tifF)) when (isSubtypeOf env tifT.Type tifF.Type) ->
+            | Ok(tifT), Ok(tifF) when (isSubtypeOf env tifT.Type tifF.Type) ->
                 Ok { Pos = node.Pos; Env = env; Type = tifT.Type;
                      Expr = If(tcond, tifT, tifF) }
-            | (Ok(tifT), Ok(tifF)) when (isSubtypeOf env tifF.Type tifT.Type) ->
+            | Ok(tifT), Ok(tifF) when (isSubtypeOf env tifF.Type tifT.Type) ->
                 Ok { Pos = node.Pos; Env = env; Type = tifF.Type;
                      Expr = If(tcond, tifT, tifF) }
-            | (Ok(tifT), Ok(tifF)) ->
+            | Ok(tifT), Ok(tifF) ->
                 Error([(node.Pos, $"mismatching 'then' and 'else' types: "
                                + $"%O{tifT.Type} and %O{tifF.Type}")])
             | otherwise -> mergeErrors otherwise
@@ -410,7 +410,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                 // tricky corner cases and simplifies the handling of typing
                 // environments.
                 match (lookupTypeVar env name) with
-                | Some(_) ->
+                | Some _ ->
                     Error([(node.Pos, $"type '%s{name}' is already defined")])
                 | None ->
                     /// Extended typing environment where the type variable
@@ -451,15 +451,15 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         let tascr = resolvePretype env ascr
         let texpr = typer env expr
         match (tascr, texpr) with
-        | (Ok(tascr), Ok(texpr)) when (isSubtypeOf env (texpr.Type) tascr) ->
+        | Ok(tascr), Ok(texpr) when (isSubtypeOf env texpr.Type tascr) ->
             Ok { Pos = node.Pos; Env = env; Type = tascr; Expr = Ascription(ascr, texpr) }
-        | (Ok(tascr), Ok(texpr)) ->
+        | Ok(tascr), Ok(texpr) ->
             Error([(node.Pos, $"expression type %O{texpr.Type} does not match "
                               + $"ascription type %O{tascr}")])
-        | (Ok(_), Error(es)) -> Error(es)
-        | (Error(es), tn) ->
+        | Ok _, Error(es) -> Error(es)
+        | Error(es), tn ->
             let terrs = match tn with
-                        | Ok(_) -> es
+                        | Ok _ -> es
                         | Error(es2) -> es @ es2
             Error(terrs)
 
@@ -486,7 +486,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
 
     | Assign(target, expr) ->
         match ((typer env target), (typer env expr)) with
-        | (Ok(ttarget), Ok(texpr)) when (isSubtypeOf env texpr.Type ttarget.Type) ->
+        | Ok(ttarget), Ok(texpr) when (isSubtypeOf env texpr.Type ttarget.Type) ->
             match ttarget.Expr with
             | Var(name) ->
                 if (env.Mutables.Contains name) then
@@ -516,52 +516,52 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                 Ok { Pos = node.Pos; Env = env; Type = ttarget.Type;
                      Expr = Assign(ttarget, texpr) }
             | _ -> Error([(node.Pos, "invalid assignment target")])
-        | (Ok(ttarget), Ok(texpr)) ->
+        | Ok(ttarget), Ok(texpr) ->
             Error([(texpr.Pos,
                     $"expected an expression of type %O{ttarget.Type}, "
                     + $" found %O{texpr.Type}")])
-        | (Error(es), Ok(_)) -> Error(es)
-        | (Ok(_), Error(es)) -> Error(es)
-        | (Error(es1), Error(es2)) -> Error(es1 @ es2)
+        | Error(es), Ok _ -> Error(es)
+        | Ok _, Error(es) -> Error(es)
+        | Error(es1), Error(es2) -> Error(es1 @ es2)
 
     | While(cond, body) ->
         match ((typer env cond), (typer env body)) with
-        | (Ok(tcond), Ok(tbody)) when (isSubtypeOf env tcond.Type TBool) ->
+        | Ok(tcond), Ok(tbody) when (isSubtypeOf env tcond.Type TBool) ->
             Ok { Pos = node.Pos; Env = env; Type = TUnit; Expr = While(tcond, tbody)}
-        | (Ok(tcond), Ok(_)) ->
+        | Ok(tcond), Ok _ ->
             Error([(tcond.Pos, $"'while' condition: expected type %O{TBool}, "
                                + $"found %O{tcond.Type}")])
         | Ok(tcond), Error(es) ->
             Error((tcond.Pos, $"'while' condition: expected type %O{TBool}, "
                               + $"found %O{tcond.Type}") :: es)
-        | Error(es), Ok(_) -> Error(es)
+        | Error(es), Ok _ -> Error(es)
         | Error(esCond), Error(esBody) -> Error(esCond @ esBody)
 
     | DoWhile(body, cond) ->
         match ((typer env body), (typer env cond)) with
-        | (Ok(tbody), Ok(tcond)) when (isSubtypeOf env tcond.Type TBool) ->
+        | Ok(tbody), Ok(tcond) when (isSubtypeOf env tcond.Type TBool) ->
             Ok { Pos = node.Pos; Env = env; Type = tbody.Type; Expr = DoWhile(tbody, tcond)}
-        | (Ok(_), Ok(tcond)) ->
+        | Ok _, Ok(tcond) ->
             Error([(tcond.Pos, $"'DoWhile' condition: expected type %O{TBool}, "
                                + $"found %O{tcond.Type}")])
         | Error(es), Ok(tcond)  ->
             Error((tcond.Pos, $"'DoWhile' condition: expected type %O{TBool}, "
                               + $"found %O{tcond.Type}") :: es)
-        | Ok(_), Error(es) -> Error(es)
+        | Ok _, Error(es) -> Error(es)
         | Error(esBody), Error(esCond) -> Error(esBody @ esCond)
 
     | Lambda(args, body) ->
-        let (argNames, argPretypes) = List.unzip args
+        let argNames, argPretypes = List.unzip args
         /// Duplicate names in 'lambda' arguments
         let dups = Util.duplicates argNames
-        if not (dups.IsEmpty) then
+        if not dups.IsEmpty then
             Error([(node.Pos, $"duplicate argument names: %s{Util.formatSeq dups}")])
         else
             /// Tentatively-resolved types of all 'lambda' arguments
             let tryResArgTypes = List.map (fun t -> resolvePretype env t) argPretypes
             /// Errors (if any) which occurred during argument type resolution
             let argTypeErrors = collectErrors tryResArgTypes
-            if not (argTypeErrors.IsEmpty) then Error(argTypeErrors)
+            if not argTypeErrors.IsEmpty then Error(argTypeErrors)
             else
                 /// List of resolved argument types
                 let resArgTypes = List.map getOkValue tryResArgTypes
@@ -616,7 +616,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
     | StructCons(fields) ->
         let fieldNames, fieldNodes = List.unzip fields
         let dups = Util.duplicates fieldNames
-        if not (dups.IsEmpty) then
+        if not dups.IsEmpty then
             Error([(node.Pos, $"duplicate structure field names: %s{Util.formatSeq dups}")])
         else
             /// Typings (possibly with errors) of init expressions of all fields
@@ -641,7 +641,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Ok(texpr) ->
             match (expandType env texpr.Type) with
             | TStruct(fields) ->
-                let (fieldNames, fieldTypes, _) = List.unzip3 fields
+                let fieldNames, fieldTypes, _ = List.unzip3 fields
                 if not (List.contains field fieldNames) then
                     Error([(node.Pos, $"struct has no field called '%s{field}'")])
                 else
@@ -652,7 +652,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                                      + $"on expression of type %O{texpr.Type}")])
         | Error(es) -> Error(es)
 
-    | Pointer(_) ->
+    | Pointer _ ->
         Error([(node.Pos, "pointers cannot be type-checked (by design!)")])
 
     | ArrayCons(length, init) ->
@@ -662,7 +662,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Ok(tlength), Ok(tinit) when (isSubtypeOf env tlength.Type TInt) ->
             Ok { Pos = node.Pos; Env = env; Type = TArray(tinit.Type);
                  Expr = ArrayCons(tlength, tinit) }
-        | Ok(tlength), Ok(_) ->
+        | Ok(tlength), Ok _ ->
             Error([(node.Pos, $"expected array length of type %O{TInt}, "
                               + $"found %O{tlength.Type}")])
         | Error(es), Ok _
@@ -725,7 +725,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
             | Ok(texpr) ->
                 match (expandType env texpr.Type) with
                 | TUnion(unionCases) ->
-                    let (unionLabels, unionTypes) = List.unzip unionCases
+                    let unionLabels, unionTypes = List.unzip unionCases
                     /// The function 'caseTyper' is mapped over all
                     /// 'unionCases': it looks for the matched label in
                     /// 'unionLabels', extracts the corresponding type from
@@ -759,7 +759,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                         let badTypes = List.filter hasBadType typedConts.[1..]
                         if badTypes.IsEmpty then
                             /// Match case labels and variables
-                            let (caseLabels, caseVars, _) = List.unzip3 cases
+                            let caseLabels, caseVars, _ = List.unzip3 cases
                             /// Typed match cases
                             let tcases = List.zip3 caseLabels caseVars typedConts
                             Ok { Pos = node.Pos; Env = env; Type = matchType;
@@ -803,21 +803,21 @@ and internal binaryNumericalOpTyper descr pos (env: TypingEnv)
     let tlhs = typer env lhs
     let trhs = typer env rhs
     match (tlhs, trhs) with
-    | (Ok(ln), Ok(rn)) when (isSubtypeOf env ln.Type TInt)
+    | Ok(ln), Ok(rn) when (isSubtypeOf env ln.Type TInt)
                             && (isSubtypeOf env rn.Type TInt) ->
         Ok(TInt, ln, rn)
-    | (Ok(ln), Ok(rn)) when (isSubtypeOf env ln.Type TFloat)
+    | Ok(ln), Ok(rn) when (isSubtypeOf env ln.Type TFloat)
                             && (isSubtypeOf env rn.Type TFloat) ->
         Ok(TFloat, ln, rn)
     | Ok(ln), Ok(rn) when (isSubtypeOf env ln.Type TFloat)
                           && (isSubtypeOf env rn.Type TInt)
-                          && (match rn.Expr with | IntVal(_) -> true | _ -> false) ->
+                          && (match rn.Expr with | IntVal _ -> true | _ -> false) ->
         let n = match rn.Expr with
                 | IntVal x -> x
                 | _ -> 0
         Ok(TFloat, ln, {Pos = rn.Pos; Env = env; Type = TFloat; Expr = FloatVal(single n)})
 
-    | (Ok(t1), Ok(t2)) ->
+    | Ok(t1), Ok(t2) ->
         Error([(pos, $"%s{descr}: expected arguments of type "
                      + $"between %O{TInt} or %O{TFloat} (only right hand type promotion), "
                      + $"found %O{t1.Type} and %O{t2.Type}")])
@@ -835,10 +835,10 @@ and internal binaryBooleanOpTyper descr pos (env: TypingEnv)
     let tlhs = typer env lhs
     let trhs = typer env rhs
     match (tlhs, trhs) with
-    | (Ok(ln), Ok(rn)) when (isSubtypeOf env ln.Type TBool)
+    | Ok(ln), Ok(rn) when (isSubtypeOf env ln.Type TBool)
                             && (isSubtypeOf env rn.Type TBool) ->
         Ok(ln, rn)
-    | (Ok(t1), Ok(t2)) ->
+    | Ok(t1), Ok(t2) ->
         Error([(pos, $"logical '%s{descr}': expected arguments of type %O{TBool}, "
                      + $"found %O{t1.Type} and %O{t2.Type}")])
     | otherwise -> mergeErrors otherwise
@@ -855,13 +855,13 @@ and internal numericalRelationTyper descr pos (env: TypingEnv)
     let tlhs = typer env lhs
     let trhs = typer env rhs
     match (tlhs, trhs) with
-    | (Ok(ln), Ok(rn)) when (isSubtypeOf env ln.Type TInt)
+    | Ok(ln), Ok(rn) when (isSubtypeOf env ln.Type TInt)
                             && (isSubtypeOf env rn.Type TInt) ->
         Ok(ln, rn)
-    | (Ok(ln), Ok(rn)) when (isSubtypeOf env ln.Type TFloat)
+    | Ok(ln), Ok(rn) when (isSubtypeOf env ln.Type TFloat)
                             && (isSubtypeOf env rn.Type TFloat) ->
         Ok(ln, rn)
-    | (Ok(t1), Ok(t2)) ->
+    | Ok(t1), Ok(t2) ->
         Error([(pos, $"relation '%s{descr}': expected arguments of a same type "
                      + $"between %O{TInt} or %O{TFloat}, "
                      + $"found %O{t1.Type} and %O{t2.Type}")])
@@ -881,10 +881,10 @@ and internal printArgTyper descr pos (env: TypingEnv) (arg: UntypedAST): Result<
     let isPrintableType t =
         if List.exists (isSubtypeOf env t) printables then true
         else match t with
-             | TStruct(_) -> true
-             | TArray(_) -> true
+             | TStruct _ -> true
+             | TArray _ -> true
              | TFun(_, _) -> true
-             | TUnion(_) -> true
+             | TUnion _ -> true
              | _ -> false
 
     match (typer env arg) with

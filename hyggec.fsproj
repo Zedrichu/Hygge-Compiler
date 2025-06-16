@@ -2,7 +2,7 @@
   <PropertyGroup>
     <!-- General -->
     <AssemblyName>HyggeC</AssemblyName>
-    <Version>0.0.3</Version>
+    <Version>1.0.2</Version>
     <Description>A didactic compiler for the Hygge programming language.</Description>
     <Copyright>Copyright 2025 DTU - Technical University of Denmark</Copyright>
     <Authors>Alceste Scalas</Authors>

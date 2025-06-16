@@ -206,7 +206,7 @@ type FPReg (n: uint) =
 
 /// Does the given integer fit in 12 bits?
 let isImm12 (value: int32): bool =
-    (value >= (-(2<<<(12-1)))) && ((value <= (2<<<(12-1)-1)))
+    (value >= (-(2<<<(12-1)))) && (value <= (2<<<(12-1)-1))
 
 
 /// Immediate signed integer value of 12 bits.
@@ -236,7 +236,7 @@ type Imm12U (value: uint32) =
 
 /// Does the given integer fit in 20 bits?
 let isImm20 (value: int32): bool =
-    (value >= (-(2<<<(20-1)))) && ((value <= (2<<<(20-1)-1)))
+    (value >= (-(2<<<(20-1)))) && (value <= (2<<<(20-1)-1))
 
 
 /// Immediate integer value of 20 bits.
@@ -448,7 +448,7 @@ type RV =
         | BLT(rs1, rs2, label) -> $"blt %O{rs1}, %O{rs2}, %s{label}"
         | BLTU(rs1, rs2, label) -> $"bltu %O{rs1}, %O{rs2}, %s{label}"
         | JAL(rd, label) -> $"jal %O{rd}, %s{label}"
-        | JR (rs) -> $"jr %O{rs}"
+        | JR rs -> $"jr %O{rs}"
         | JALR(rd, imm12, rs1) -> $"jalr %O{rd}, %O{imm12}(%O{rs1})"
         | ECALL -> "ecall"
         | EBREAK -> "ebreak"

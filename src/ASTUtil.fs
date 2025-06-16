@@ -15,15 +15,15 @@ open AST
 let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> =
     match node.Expr with
     | UnitVal
-    | IntVal(_)
-    | BoolVal(_)
-    | FloatVal(_)
-    | StringVal(_) -> node // The substitution has no effect
+    | IntVal _
+    | BoolVal _
+    | FloatVal _
+    | StringVal _ -> node // The substitution has no effect
 
-    | Pointer(_) -> node // The substitution has no effect
+    | Pointer _ -> node // The substitution has no effect
 
     | Var(vname) when vname = var -> sub // Substitution applied
-    | Var(_) -> node // The substitution has no effect
+    | Var _ -> node // The substitution has no effect
 
     | Add(lhs, rhs) ->
         {node with Expr = Add((subst lhs var sub), (subst rhs var sub))}
@@ -100,7 +100,7 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         {node with Expr = LetT(vname, tpe, (subst init var sub),
                                (subst scope var sub))}
 
-    | LetRec(vname, tpe, init, scope) when vname = var ->
+    | LetRec(vname, _, _, _) when vname = var ->
         // The variable is shadowed, do not substitute it in the "let rec" scope
         // and similarly in "let rec" initialisation as it might be recursively defined
         node
@@ -131,7 +131,7 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 
     | Lambda(args, body) ->
         /// Arguments of this lambda term, without their pretypes
-        let (argVars, _) = List.unzip args
+        let argVars, _ = List.unzip args
         if (List.contains var argVars) then node // No substitution
         else {node with Expr = Lambda(args, (subst body var sub))}
 
@@ -141,7 +141,7 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         {node with Expr = Application(substExpr, substArgs)}
 
     | StructCons(fields) ->
-        let (fieldNames, initNodes) = List.unzip fields
+        let fieldNames, initNodes = List.unzip fields
         let substInitNodes = List.map (fun e -> (subst e var sub)) initNodes
         {node with Expr = StructCons(List.zip fieldNames substInitNodes)}
 
@@ -179,11 +179,11 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
 let rec freeVars (node: Node<'E,'T>): Set<string> =
     match node.Expr with
     | UnitVal
-    | IntVal(_)
-    | BoolVal(_)
-    | FloatVal(_)
-    | StringVal(_)
-    | Pointer(_) -> Set[]
+    | IntVal _
+    | BoolVal _
+    | FloatVal _
+    | StringVal _
+    | Pointer _ -> Set[]
     | Var(name) -> Set[name]
     | Sub(lhs, rhs)
     | Div(lhs, rhs)
@@ -227,7 +227,7 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
     | Assertion(arg) -> freeVars arg
     | Type(_, _, scope) -> freeVars scope
     | Lambda(args, body) ->
-        let (argNames, _) = List.unzip args
+        let argNames, _ = List.unzip args
         // All the free variables in the lambda function body, minus the
         // names of the arguments
         Set.difference (freeVars body) (Set.ofList argNames)
@@ -236,7 +236,7 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
         // Union of free variables in the applied expr, plus all its arguments
         Set.union (freeVars expr) (freeVarsInList args)
     | StructCons(fields) ->
-        let (_, nodes) = List.unzip fields
+        let _, nodes = List.unzip fields
         freeVarsInList nodes
     | FieldSelect(expr, _) -> freeVars expr
     | LetRec(name, _, init, scope) ->
@@ -275,15 +275,15 @@ and internal freeVarsInList (nodes: List<Node<'E,'T>>): Set<string> =
 let rec capturedVars (node: Node<'E,'T>): Set<string> =
     match node.Expr with
     | UnitVal
-    | IntVal(_)
-    | BoolVal(_)
-    | FloatVal(_)
-    | StringVal(_)
-    | Pointer(_)
+    | IntVal _
+    | BoolVal _
+    | FloatVal _
+    | StringVal _
+    | Pointer _
     | Lambda _ ->
         // All free variables of a value are considered as captured
         freeVars node
-    | Var(_) -> Set[]
+    | Var _ -> Set[]
     | Add(lhs, rhs)
     | Sub(lhs, rhs)
     | Div(lhs, rhs)
@@ -330,7 +330,7 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
         // Union of captured variables in the applied expr, plus all arguments
         Set.union (capturedVars expr) (capturedVarsInList args)
     | StructCons(fields) ->
-        let (_, nodes) = List.unzip fields
+        let _, nodes = List.unzip fields
         capturedVarsInList nodes
     | FieldSelect(expr, _) -> capturedVars expr
     | LetRec(name, _, init, scope) ->
@@ -375,11 +375,11 @@ let mapDifference (map1: Map<'Key, 'T>) (map2: Map<'Key, 'U>) =
 let rec freeVarsMap (node: Node<'E,'T>): Map<string,Node<'E,'T>> =
     match node.Expr with
     | UnitVal
-    | IntVal(_)
-    | BoolVal(_)
-    | FloatVal(_)
-    | StringVal(_)
-    | Pointer(_) -> Map[]
+    | IntVal _
+    | BoolVal _
+    | FloatVal _
+    | StringVal _
+    | Pointer _ -> Map[]
     | Var(name) -> Map [(name, node)]
     | Sub(lhs, rhs)
     | Div(lhs, rhs)
@@ -426,7 +426,7 @@ let rec freeVarsMap (node: Node<'E,'T>): Map<string,Node<'E,'T>> =
     | Assertion(arg) -> freeVarsMap arg
     | Type(_, _, scope) -> freeVarsMap scope
     | Lambda(args, body) ->
-        let (argNames, _) = List.unzip args
+        let argNames, _ = List.unzip args
         let zipped = List.zip argNames (List.map (fun argName -> Var(argName)) argNames)
         // All the free variables in the lambda function body, minus the
         // names of the arguments
@@ -435,7 +435,7 @@ let rec freeVarsMap (node: Node<'E,'T>): Map<string,Node<'E,'T>> =
         // Union of free variables in the applied expr, plus all its arguments
         mapUnion (freeVarsMap expr) (freeVarsInListNode args)
     | StructCons(fields) ->
-        let (_, nodes) = List.unzip fields
+        let _, nodes = List.unzip fields
         freeVarsInListNode nodes
     | FieldSelect(expr, _) -> freeVarsMap expr
     | LetRec(name, _, init, scope) ->
@@ -458,7 +458,7 @@ let rec freeVarsMap (node: Node<'E,'T>): Map<string,Node<'E,'T>> =
         let folder (acc: Map<string, Node<'E,'T>>) (_, var, cont: Node<'E,'T>): Map<string, Node<'E,'T>> =
             mapUnion acc ((freeVarsMap cont).Remove var)
         /// Free variables in all match continuations
-        let fvConts: Map<string,(Node<'E,'T>)> = List.fold folder Map[] cases
+        let fvConts: Map<string,Node<'E,'T>> = List.fold folder Map[] cases
         mapUnion (freeVarsMap expr) fvConts
     | Copy(arg) -> freeVarsMap arg
 
@@ -476,14 +476,14 @@ let rec substExprByRef (node: Node<'E,'T>) (expr: Expr<'E,'T>) (sub: ref<Node<'E
         let recurse childNode = substExprByRef childNode expr sub // Helper for recursive calls
         match node.Expr with
         | UnitVal
-        | IntVal(_)
-        | BoolVal(_)
-        | FloatVal(_)
-        | StringVal(_) -> node // The substitution has no effect
+        | IntVal _
+        | BoolVal _
+        | FloatVal _
+        | StringVal _ -> node // The substitution has no effect
 
-        | Pointer(_) -> node // The substitution has no effect
+        | Pointer _ -> node // The substitution has no effect
 
-        | Var(_) -> node // The substitution has no effect
+        | Var _ -> node // The substitution has no effect
 
         | Add(lhs, rhs) ->
             {node with Expr = Add(recurse lhs, recurse rhs)}
@@ -573,7 +573,7 @@ let rec substExprByRef (node: Node<'E,'T>) (expr: Expr<'E,'T>) (sub: ref<Node<'E
             {node with Expr = Application(substFn, substArgs)}
 
         | StructCons(fields) ->
-            let (fieldNames, initNodes) = List.unzip fields
+            let fieldNames, initNodes = List.unzip fields
             let substInitNodes = List.map recurse initNodes
             {node with Expr = StructCons(List.zip fieldNames substInitNodes)}
 
