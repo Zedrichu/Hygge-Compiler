@@ -1,0 +1,10 @@
+type Shape = struct { immutable name: string;
+                      area: float };
+
+let r: struct {name: string; area: float} = // The type of r matches 'Shape'
+    struct { name = "Rectangle";            // and has less fields than the
+             area = 3.0f * 4.0f;            // actual struct instance
+             width = 3.0f;
+             height = 4.0f };
+(r: Shape);
+(r: Shape).name <- "Rectangle small" // This is not allowed as the up-casting to Shape (ascription) makes the field immutable

@@ -1,0 +1,5 @@
+type Shape = struct { immutable name: string;
+                      area: float };
+                      
+let r2: Shape = struct { name = "Shape2"; area = 5.0f * 5.0f };
+r2.name <- "Shape2 modified" // Shape.name is immutable, so this will fail
