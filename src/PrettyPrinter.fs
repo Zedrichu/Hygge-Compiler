@@ -63,7 +63,7 @@ let rec internal formatType (t: Type.Type): Tree =
     | Type.TStruct(fields) ->
         /// Formatted fields with their respective type
         let fieldsChildren =
-            List.map (fun (f, t) -> ($"field %s{f}", formatType t)) fields
+            List.map (fun (f, t, m) -> ((if m then "mutable" else "immutable") + $" field %s{f}", formatType t)) fields
         Node("struct", fieldsChildren)
     | Type.TArray elemType ->
         Node("array", [("elemType", formatType elemType)])
@@ -285,8 +285,9 @@ and internal formatPretypeNode (node: PretypeNode): Tree =
              [("return", formatPretypeNode ret)])
     | Pretype.TStruct(fields) ->
         /// Formatted pretypes of each field with their respective field name
-        let fieldsChildren =
-            List.map (fun (name, t) -> ((formatPretypeDescr t $"field %s{name}"),
+        let fieldsChildren = List.map (fun (name, t, m) ->
+                                        ((formatPretypeDescr t ((if m then "mutable" else "immutable")
+                                                                + $" field %s{name}")),
                                         formatPretypeNode t)) fields
         Node((formatPretypeDescr node "Struct pretype"), fieldsChildren)
     | Pretype.TArray(arrType) ->
@@ -304,7 +305,7 @@ and internal formatPretypeNode (node: PretypeNode): Tree =
 and internal formatPretypeDescr (node: PretypeNode) (descr: string) : string =
     $"%s{descr}; pos: %s{node.Pos.Format}"
 
- /// Format the an AST node with a list of children.
+ /// Format the AST node with a list of children.
 and internal formatPretypeNodeWithChildren (node: PretypeNode) (descr: string)
                                            (children: list<string * PretypeNode>): Tree =
     Node((formatPretypeDescr node descr), (formatPretypeChildren children))

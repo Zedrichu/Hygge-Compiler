@@ -553,7 +553,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 let nodes = 
                     [{ node with Expr = Print(
                                 { node with Expr = StringVal("struct { "); Type = TString }) }] @
-                    (List.collect (fun (name, tpe) ->
+                    (List.collect (fun (name, tpe, _) ->
                         let strVals = 
                             match tpe with
                             | TString -> (name + @" = \"""), @"\""; "
@@ -826,7 +826,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             match (expandType target.Env target.Type) with
             | TStruct(fields) ->
                 /// Names of the struct fields
-                let (fieldNames, _) = List.unzip fields
+                let (fieldNames, _, _) = List.unzip3 fields
                 /// Offset of the selected struct field from the beginning of
                 /// the struct
                 let offset = List.findIndex (fun f -> f = field) fieldNames
@@ -1172,7 +1172,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let fieldAccessCode =
             match (expandType node.Env target.Type) with
             | TStruct(fields) ->
-                let (fieldNames, fieldTypes) = List.unzip fields
+                let (fieldNames, fieldTypes, _) = List.unzip3 fields
                 let offset = List.findIndex (fun f -> f = field) fieldNames
                 match fieldTypes.[offset] with
                 | t when (isSubtypeOf node.Env t TUnit) ->
@@ -1732,7 +1732,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             // Generate the code for copying all the fields using the folder function
             let copyCode =
                  fields
-                 |> List.mapi (fun i (fName, fType) -> (i, (fName, fType))) // Add index as offset
+                 |> List.mapi (fun i (fName, fType, _) -> (i, (fName, fType))) // Add index as offset
                  |> List.fold folder (Asm()) // Apply folder to generate copy code for all fields
 
             
@@ -1896,7 +1896,7 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
     let filteredCv = ASTUtil.capturedVars node |> Set.filter topLevelFilter
     /// Remove the env struct - the closure environment is not captured
     let cv = Set.toList (Set.difference filteredCv (Set.singleton closureEnvVar))
-    let cvFields = cv |> List.map (fun v -> (v, body.Env.Vars[v]))
+    let cvFields = cv |> List.map (fun v -> (v, body.Env.Vars[v], false))
 
     /// Outer closure environment fields - ~clos is safely assumed to be the outer closure environment
     /// Select fields of the outer closure environment - without shadowed captured fields and outer ~f
@@ -1908,11 +1908,11 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
                     | TStruct fields -> fields
                     | tpe -> failwith $"Bug: Unknown non-structured closure: {tpe}"
             | None -> []
-        List.filter (fun (v, _) -> not ((List.contains v cv) || v = "~f")) outerFields
+        List.filter (fun (v, _, _) -> not ((List.contains v cv) || v = "~f")) outerFields
 
     /// Define the closure environment type T_clos as a struct with a plain function pointer @f +
     /// outer closure env fields + named fields for each captured variable in the current closure
-    let closureEnvType = TStruct([("~f", node.Type)] @ (outerClosureFields @ cvFields))
+    let closureEnvType = TStruct([("~f", node.Type, false)] @ (outerClosureFields @ cvFields))
 
     //--------------------------Step2: Plain (non-capturing) Function `v'` from Lambda Term-------------------------
     let argNames, _ = List.unzip args // lambda argument names
@@ -1954,14 +1954,14 @@ and internal closureConversion (env: CodegenEnv) (funLabel: string)
 
     //----------------------------------Step3: Closure Environment Structure `clos`---------------------------------
     /// Mapper function for pairing environment fields from the surrounding (outer) closure with their values/types
-    let outerClosureEnvMapping (name: string, fieldType: Type) =
+    let outerClosureEnvMapping (name: string, fieldType: Type, _: bool) =
         /// ~clos is safely assumed to be the outer closure environment - its type can be retrieved
         let closureType = node.Env.Vars[closureEnvVar]
         let closureFieldSelect = FieldSelect({node with Expr = Var(closureEnvVar); Type = closureType}, name)
         (name, {node with Expr = closureFieldSelect; Type = fieldType})
 
     /// Mapper function for pairing the captured variable name with its value and environment type
-    let capturedEnvMapping (name: string, varType: Type) =
+    let capturedEnvMapping (name: string, varType: Type, _: bool) =
         (name, {node with Expr = Var(name); Type = varType})
 
     /// Construct the list of closure environment fields covering captured variables

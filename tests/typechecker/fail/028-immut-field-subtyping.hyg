@@ -1,0 +1,10 @@
+type Shape = struct { name: string;
+                      area: float };
+type Circle = struct { immutable name: string;
+                       area: float;
+                       radius: float }; 
+                      
+let r: Circle = struct { name = "Shape2"; area = 5.0f * 5.0f; radius = 4.0f };
+
+(r: Shape); // fails: immutable field `name` in the subtype not allowed
+(r: struct { name: string; area: float }) // fails: immutable field `name` in the subtype not allowed

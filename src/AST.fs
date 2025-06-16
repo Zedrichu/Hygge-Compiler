@@ -49,8 +49,8 @@ and Pretype =
     /// A function pretype, with argument pretypes and return pretype.
     | TFun of args: List<PretypeNode>
             * ret: PretypeNode
-    /// A structure pretype, with pretypes for each field.
-    | TStruct of fields: List<string * PretypeNode>
+    /// A structure pretype, with pretypes for each field and flag for mutability.
+    | TStruct of fields: List<string * PretypeNode * bool>
     /// Discriminated union type.  Each case consists of a name and a pretype.
     | TUnion of cases: List<string * PretypeNode>
     /// An array pretype, with the pretype of the elements (unique).
