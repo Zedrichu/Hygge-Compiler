@@ -714,8 +714,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             Some(env', {node with Expr = ArrayElem(target', index)})
         | None -> None
     | ArrayElem _ -> None
-    
-    
+
     | Copy(arg) ->
         match (reduce env arg) with
         | Some(env', arg') -> Some(env', { node with Expr = Copy(arg') })
@@ -743,10 +742,6 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                     Some(env, {node with Expr = deepCopy})
                 | None -> None
             | _ -> None
-   
-             
-                 
-             
 
     | ArraySlice({ Expr = Pointer(addr) },
                  { Expr = IntVal(start) },
