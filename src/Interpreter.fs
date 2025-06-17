@@ -735,8 +735,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                             match reduce env copyField with
                             | Some(_, copyResult) -> (field, copyResult)
                             | None -> failwith $"Failed to copy nested pointer at field: {field}"
-                        | _ ->
-                            (field, fieldValue)) // Non-pointer fields are copied as-is
+                        | _ -> (field, fieldValue)) // Non-pointer fields are copied as-is
 
                     let deepCopy = StructCons(fieldValues)
                     Some(env, {node with Expr = deepCopy})
