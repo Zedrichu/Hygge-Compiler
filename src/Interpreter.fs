@@ -14,12 +14,12 @@ open System
 let rec isValue (node: Node<'E,'T>): bool =
     match node.Expr with
     | UnitVal
-    | BoolVal(_)
-    | IntVal(_)
-    | FloatVal(_)
-    | StringVal(_) -> true
+    | BoolVal _
+    | IntVal _
+    | FloatVal _
+    | StringVal _ -> true
     | Lambda(_, _) -> true
-    | Pointer(_) -> true
+    | Pointer _ -> true
     | _ -> false
 
 
@@ -84,26 +84,26 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                         (node: Node<'E,'T>): Option<RuntimeEnv<'E,'T> * Node<'E,'T>> =
     match node.Expr with
     | UnitVal
-    | BoolVal(_)
-    | IntVal(_)
-    | FloatVal(_)
-    | StringVal(_) -> None
+    | BoolVal _
+    | IntVal _
+    | FloatVal _
+    | StringVal _ -> None
 
     | Var(name) when env.Mutables.ContainsKey(name) ->
         Some(env, env.Mutables[name])
-    | Var(_) -> None
+    | Var _ -> None
 
     | Lambda(_, _) -> None
 
-    | Pointer(_) -> None
+    | Pointer _ -> None
 
     | Mult(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = IntVal(v1 * v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = FloatVal(v1 * v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Mult(lhs', rhs')})
@@ -111,13 +111,13 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | Add(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = IntVal(v1 + v2)})
-        | (FloatVal(v1), IntVal(v2)) ->
+        | FloatVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = FloatVal(v1 + single v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = FloatVal(v1 + v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Add(lhs', rhs')})
@@ -125,13 +125,13 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | Sub(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = IntVal(v1 - v2)})
-        | (FloatVal(v1), IntVal(v2)) ->
+        | FloatVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = FloatVal(v1 - single v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = FloatVal(v1 - v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Sub(lhs', rhs')})
@@ -175,11 +175,11 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | Min(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = IntVal(min v1 v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = FloatVal(min v1 v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Min(lhs', rhs')})
@@ -187,11 +187,11 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | Max(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = IntVal(max v1 v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = FloatVal(max v1 v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Max(lhs', rhs')})
@@ -199,9 +199,9 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | And(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (BoolVal(v1), BoolVal(v2)) ->
+        | BoolVal(v1), BoolVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 && v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = And(lhs', rhs')})
@@ -209,9 +209,9 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | Or(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (BoolVal(v1), BoolVal(v2)) ->
+        | BoolVal(v1), BoolVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 || v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Or(lhs', rhs')})
@@ -229,11 +229,11 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | Eq(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 = v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 = v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Eq(lhs', rhs')})
@@ -241,11 +241,11 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | Less(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 < v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 < v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Less(lhs', rhs')})
@@ -253,11 +253,11 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | LessEq(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 <= v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 <= v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = LessEq(lhs', rhs')})
@@ -265,11 +265,11 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | Greater(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 > v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 > v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = Greater(lhs', rhs')})
@@ -277,11 +277,11 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
 
     | GreaterEq(lhs, rhs) ->
         match (lhs.Expr, rhs.Expr) with
-        | (IntVal(v1), IntVal(v2)) ->
+        | IntVal(v1), IntVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 >= v2)})
-        | (FloatVal(v1), FloatVal(v2)) ->
+        | FloatVal(v1), FloatVal(v2) ->
             Some(env, {node with Expr = BoolVal(v1 >= v2)})
-        | (_, _) ->
+        | _, _ ->
             match (reduceLhsRhs env lhs rhs) with
             | Some(env', lhs', rhs') ->
                 Some(env', {node with Expr = GreaterEq(lhs', rhs')})
@@ -296,9 +296,9 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             // Use the invariant culture to parse the integer value
             match System.Int32.TryParse(input, System.Globalization.NumberStyles.AllowLeadingSign,
                                         System.Globalization.CultureInfo.InvariantCulture) with
-            | (true, result) ->
+            | true, result ->
                 Some(env, {node with Expr = IntVal(result)})
-            | (false, _) ->
+            | false, _ ->
                 Some(env, {node with Expr = UnitVal})
 
     | ReadFloat ->
@@ -313,9 +313,9 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             // Use the invariant culture to parse the floating point value
             match System.Single.TryParse(input, format,
                                          System.Globalization.CultureInfo.InvariantCulture) with
-            | (true, result) ->
+            | true, result ->
                 Some(env, {node with Expr = FloatVal(result)})
-            | (false, _) ->
+            | false, _ ->
                 Some(env, {node with Expr = UnitVal})
 
     | Print(arg) ->
@@ -351,7 +351,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                                 // Add quotes around string values
                                 let strVals = 
                                     match (env.Heap.TryFind (addr + (uint i))) with
-                                    | Some(fieldNode) when (match fieldNode.Expr with StringVal(_) -> true | _ -> false) ->
+                                    | Some(fieldNode) when (match fieldNode.Expr with StringVal _ -> true | _ -> false) ->
                                         $"{field} = \"", "\"; "
                                     | _ ->
                                         $"{field} = ", "; "
@@ -495,7 +495,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                 /// we remove it from the updated runtime environment (so it
                 /// is only visible in its scope)
                 let env''' =
-                    match (env.Mutables.TryFind(name)) with
+                    match env.Mutables.TryFind(name) with
                     | Some(v) -> {env'' with
                                     Mutables = env''.Mutables.Add(name, v)}
                     | None -> {env'' with
@@ -562,7 +562,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | None -> None
     | Assign({Expr = Var(vname)} as target, expr) when (isValue expr)  ->
         match (env.Mutables.TryFind vname) with
-        | Some(_) ->
+        | Some _ ->
             let env' = {env with Mutables = env.Mutables.Add(vname, expr)}
             Some(env', {node with Expr = expr.Expr})
         | None -> None
@@ -603,7 +603,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                     // To reduce, make sure all the arguments are values
                     if (List.forall isValue args) then
                         /// Names of lambda term arguments
-                        let (lamArgNames, _) = List.unzip lamArgs
+                        let lamArgNames, _ = List.unzip lamArgs
                         /// Pairs of lambda term argument names with a
                         /// corresponding value (from 'args') that we are going
                         /// to substitute
@@ -621,7 +621,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | None -> None
 
     | StructCons(fields) ->
-        let (fieldNames, fieldNodes) = List.unzip fields
+        let fieldNames, fieldNodes = List.unzip fields
         match (reduceList env fieldNodes) with
             | Some(env', fieldNodes') ->
                 let fields' = List.zip fieldNames fieldNodes'
@@ -632,7 +632,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                 if (List.forall isValue fieldNodes) then
                     /// Updated heap with newly-allocated struct, placed at
                     /// 'baseAddr'
-                    let (heap', baseAddr) = heapAlloc env.Heap fieldNodes
+                    let heap', baseAddr = heapAlloc env.Heap fieldNodes
                     /// Updated pointer info, mapping 'baseAddr' to the list of
                     /// struct field names
                     let ptrInfo' = env.PtrInfo.Add(baseAddr, fieldNames)
@@ -668,11 +668,11 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             match length.Expr with
             | IntVal(l) when l > 0 ->
                 /// Allocate the array on the heap, with all elements initialized, from memory `arrAddr`
-                let (heap', arrAddr) = heapAlloc env.Heap (List.init l (fun _ -> init))
+                let heap', arrAddr = heapAlloc env.Heap (List.init l (fun _ -> init))
 
                 let dataNode = { node with Expr = Pointer(arrAddr) }
                 /// Updated heap with newly-allocated struct for array, placed at `baseAddr` | length + data |
-                let (heap'', baseAddr) = heapAlloc heap' [ length; dataNode ]
+                let heap'', baseAddr = heapAlloc heap' [ length; dataNode ]
 
                 /// Update pointer info, mapping `baseAddr` to the length and data of the array
                 let ptrInfo' = env.PtrInfo.Add(baseAddr, ["~length"; "~data"])
@@ -714,8 +714,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             Some(env', {node with Expr = ArrayElem(target', index)})
         | None -> None
     | ArrayElem _ -> None
-    
-    
+
     | Copy(arg) ->
         match (reduce env arg) with
         | Some(env', arg') -> Some(env', { node with Expr = Copy(arg') })
@@ -729,24 +728,19 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                         let fieldValue = env.Heap[addr + uint i]
                         // If a field is a pointer, recursively copy it
                         match fieldValue.Expr with
-                        | Pointer(_) ->
+                        | Pointer _ ->
                             // Create a Copy expression for this field
                             let copyField = {node with Expr = Copy(fieldValue)}
                             // Recursively evaluate the Copy for this field
                             match reduce env copyField with
                             | Some(_, copyResult) -> (field, copyResult)
                             | None -> failwith $"Failed to copy nested pointer at field: {field}"
-                        | _ ->
-                            (field, fieldValue)) // Non-pointer fields are copied as-is
+                        | _ -> (field, fieldValue)) // Non-pointer fields are copied as-is
 
                     let deepCopy = StructCons(fieldValues)
                     Some(env, {node with Expr = deepCopy})
                 | None -> None
             | _ -> None
-   
-             
-                 
-             
 
     | ArraySlice({ Expr = Pointer(addr) },
                  { Expr = IntVal(start) },
@@ -761,7 +755,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                 let lengthNode = { node with Expr = IntVal(final - start + 1) }
                 let dataNode = { node with Expr = Pointer(dataPointer + uint start) }
                 /// Updated heap with newly-allocated struct, placed at `baseAddr`
-                let (heap', baseAddr) = heapAlloc env.Heap [ lengthNode; dataNode ]
+                let heap', baseAddr = heapAlloc env.Heap [ lengthNode; dataNode ]
 
                 /// Update pointer info, mapping `baseAddr` to the length and data of the array slice
                 let ptrInfo' = env.PtrInfo.Add(baseAddr, ["~length"; "~data"])
@@ -792,7 +786,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | None when isValue expr ->
             /// Updated heap and base address, with union instance label
             /// followed by 'expr' (which is a value)
-            let (heap', baseAddr) =
+            let heap', baseAddr =
                 heapAlloc env.Heap [{node with Expr = StringVal(label)}; expr]
             Some({env with Heap = heap'}, {node with Expr = Pointer(baseAddr)})
         | None -> None
@@ -952,5 +946,5 @@ let interpret (node: AST.Node<'E,'T>) (verbose: bool): AST.Node<'E,'T> =
                     Mutables = Map[];
                     Heap = Map[];
                     PtrInfo = Map[] }
-        let (env', node') = reduceVerbosely env node
+        let env', node' = reduceVerbosely env node
         node'

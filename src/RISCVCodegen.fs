@@ -230,7 +230,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | Some(Storage.Frame(offset)) ->
                 Asm(RV.FLW_S(FPReg.r(env.FPTarget), Imm12(offset), Reg.fp),
                 $"Load float variable '%s{name}' from stack at offset %d{offset}")
-            | Some(Storage.Reg(_)) as st ->
+            | Some(Storage.Reg _) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: float variable without storage: %s{name}"
         | t ->  // Default case for variables holding integer-like values
@@ -246,7 +246,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | Some(Storage.Frame(offset)) ->
                 Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
                 $"Load variable '%s{name}' from stack at offset %d{offset}, with fp at %d{Reg.fp.Number}")
-            | Some(Storage.FPReg(_)) as st ->
+            | Some(Storage.FPReg _) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
 
@@ -826,7 +826,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             match (expandType target.Env target.Type) with
             | TStruct(fields) ->
                 /// Names of the struct fields
-                let (fieldNames, _, _) = List.unzip3 fields
+                let fieldNames, _, _ = List.unzip3 fields
                 /// Offset of the selected struct field from the beginning of
                 /// the struct
                 let offset = List.findIndex (fun f -> f = field) fieldNames
@@ -1108,7 +1108,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // The struct heap address will end up in the 'target' register - i.e.
         // the register will contain a pointer to the first element of the
         // allocated structure
-        let (fieldNames, fieldInitNodes) = List.unzip fields
+        let fieldNames, fieldInitNodes = List.unzip fields
         /// Generate the code that initialises a struct field, and accumulates
         /// the result.  This function is folded over all indexed struct fields,
         /// to produce the assembly code that initialises all fields.\
@@ -1172,7 +1172,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let fieldAccessCode =
             match (expandType node.Env target.Type) with
             | TStruct(fields) ->
-                let (fieldNames, fieldTypes, _) = List.unzip3 fields
+                let fieldNames, fieldTypes, _ = List.unzip3 fields
                 let offset = List.findIndex (fun f -> f = field) fieldNames
                 match fieldTypes.[offset] with
                 | t when (isSubtypeOf node.Env t TUnit) ->
@@ -1457,7 +1457,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             ++ indexOutBoundsCode ++ dataPointerCode ++ structAllocCode
             ++ lengthCode ++ instanceFieldSetCode ++ moveSliceObjectCode
 
-    | Pointer(_) ->
+    | Pointer _ ->
         failwith "BUG: pointers cannot be compiled (by design!)"
 
     | UnionCons(label, expr) ->
@@ -1578,7 +1578,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
              bodyInstrsAcc ++ caseCodeBlock) // Append case body code
 
         // Accumulate all comparison instructions and all case body instructions
-        let (allCmpInstrs, allBodyInstrs) = List.fold processCase (Asm(), Asm()) cases
+        let allCmpInstrs, allBodyInstrs = List.fold processCase (Asm(), Asm()) cases
 
         let tempVarNameForActualTag = Util.genSymbol "internal_unmatched_tag_id"
 
@@ -1831,7 +1831,7 @@ and internal compileFunction (args: List<string * Type>)
         | _ ->
         // Handle all else since everything else is an int.+
             if i < 8 then
-                acc.Add(var, Storage.Reg(Reg.a((uint)i)))
+                acc.Add(var, Storage.Reg(Reg.a(uint i)))
             else
                 // Account for float args already on the stack...as ints are handled second by the caller
                 let floatArgsOnStack = max 0 (floatArgsCount - 8)
@@ -2060,7 +2060,7 @@ and internal checkIndexOutOfBounds env target (indexL, indexR) node: Asm =
                 Pos = node.Pos
             }
 
-    Asm().AddText((RV.COMMENT "Check: Array index out of bounds?")) ++
+    Asm().AddText (RV.COMMENT "Check: Array index out of bounds?") ++
                                 doCodegen env indexOutOfBoundsCheck
 
 /// Generate RISC-V assembly for the given AST.

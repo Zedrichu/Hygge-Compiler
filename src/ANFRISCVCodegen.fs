@@ -110,7 +110,7 @@ let internal spillVar (env: ANFCodegenEnv) (varName: string): ANFCodegenResult =
 /// environment.
 let internal spillOldestIntVar (env: ANFCodegenEnv) (doNotSpill: List<string>): ANFCodegenResult =
     /// Variables in registers, starting with the ones allocated earlier
-    let (varsInRegisters, _) = List.unzip (List.rev env.IntVarsInRegs)
+    let varsInRegisters, _ = List.unzip (List.rev env.IntVarsInRegs)
     /// Select the first variable in the given list that is not in 'except'
     let rec selectVar (varRegs: List<string>): string =
         match varRegs with
@@ -167,7 +167,7 @@ let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string) : Reg * A
         /// Assembly code and environment for spilling a variable onto the stack
         let { Asm = spillAsm; Env = spillEnv} = spillOldestIntVar env []
         /// Allocated register, assembly code and environment
-        let (reg, {Asm = allocAsm; Env = allocEnv}) = allocateIntVar spillEnv varName
+        let reg, {Asm = allocAsm; Env = allocEnv} = allocateIntVar spillEnv varName
         (reg, { Asm = spillAsm ++ allocAsm
                 Env = allocEnv })
 
@@ -203,7 +203,7 @@ let rec internal loadIntVar (env: ANFCodegenEnv) (varName: string)
             /// Assembly code and environment for spilling a variable onto the stack
             let { Asm = spillAsm; Env = spillEnv} = spillOldestIntVar env doNotSpill
             /// Register and codegen env after variable spilling and loading
-            let (reg, loadCodegenRes) = loadIntVar spillEnv varName doNotSpill
+            let reg, loadCodegenRes = loadIntVar spillEnv varName doNotSpill
             (reg, { Asm = spillAsm ++ loadCodegenRes.Asm
                     Env = loadCodegenRes.Env })
 
@@ -227,7 +227,7 @@ let internal loadVars (env: ANFCodegenEnv)
             /// Register and codegen result after loading variable 'vname'. When
             /// loading the variable, we ensure that none of the variables in
             /// 'vars' is spilled
-            let (reg, loadRes) = loadIntVar codegenRes.Env vname
+            let reg, loadRes = loadIntVar codegenRes.Env vname
                                             (doNotSpill @ varNames)
             (regs @ [reg],
              {codegenRes with Env = loadRes.Env
@@ -325,7 +325,7 @@ let rec internal doCodegen (env: ANFCodegenEnv)
     match node.Expr with
     | Var(vname) when (expandType node.Env node.Type) <> TFloat ->
         /// Target register to store the vname's value, and code to load it
-        let (targetReg, targetLoadRes) = loadIntVar env env.TargetVar [vname]
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar [vname]
         match findIntVarRegister targetLoadRes.Env vname with
         | Some(reg) ->
             { Env = targetLoadRes.Env
@@ -349,7 +349,7 @@ let rec internal doCodegen (env: ANFCodegenEnv)
             match (expandType init.Env init.Type) with
             | t when t <> TFloat ->
                 /// Allocation code for 'vname' + updated codegen environment
-                let (_, allocRes) = allocateIntVar initEnv vname
+                let _, allocRes = allocateIntVar initEnv vname
                 /// Code generation environment for the init block of the 'let',
                 /// where all variables used in the 'scope' are marked as
                 /// 'needed' (since they must not be deallocated, although they
@@ -357,7 +357,7 @@ let rec internal doCodegen (env: ANFCodegenEnv)
                 let initCodegenEnv =
                     { allocRes.Env with TargetVar = vname
                                         NeededVars = Set.union env.NeededVars
-                                                               ((ASTUtil.freeVars scope)) }
+                                                               (ASTUtil.freeVars scope) }
                 /// Code generation result for 'init' expression
                 let initCodegenRes = doLetInitCodegen initCodegenEnv init
                 { initCodegenRes with Asm = allocRes.Asm ++ initCodegenRes.Asm }
@@ -367,7 +367,7 @@ let rec internal doCodegen (env: ANFCodegenEnv)
         let scopeEnv =
             cleanupUnusedVars {initRes.Env with NeededVars = env.NeededVars
                                                 TargetVar = env.TargetVar }
-                              ((ASTUtil.freeVars scope))
+                              (ASTUtil.freeVars scope)
         /// Code generation for the 'let' scope
         let scopeCodegenResult = doCodegen scopeEnv scope
         { Asm = initRes.Asm ++ scopeCodegenResult.Asm
@@ -387,19 +387,19 @@ let rec internal doCodegen (env: ANFCodegenEnv)
 /// environment.  The expression is expected to be in ANF.
 and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenResult =
     match init.Expr with
-    | Var(_) ->
+    | Var _ ->
         doCodegen env init
 
     | BoolVal(value) ->
         /// Target register to store the boolean value and code to load it
-        let (targetReg, targetLoadRes) = loadIntVar env env.TargetVar []
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
         { Asm = targetLoadRes.Asm ++ Asm(RV.LI(targetReg,
                                                if value then 1 else 0))
           Env = targetLoadRes.Env }
 
     | IntVal(value) ->
         /// Target register to store the integer value and code to load it
-        let (targetReg, targetLoadRes) = loadIntVar env env.TargetVar []
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
         { Asm = targetLoadRes.Asm ++ Asm(RV.LI(targetReg, value))
           Env = targetLoadRes.Env }
 
@@ -408,9 +408,9 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         /// Names of the variables used by the lhs and rhs of this operation
         let lrVarNames = getVarNames [lhs; rhs]
         match (loadVars env [lhs; rhs] []) with
-        | ([lhsReg; rhsReg], argLoadRes) ->
+        | [lhsReg; rhsReg], argLoadRes ->
             /// Target register to store the operation result + code to load it
-            let (targetReg, targetLoadRes) =
+            let targetReg, targetLoadRes =
                 loadIntVar argLoadRes.Env env.TargetVar lrVarNames
             /// Assembly code for the operation
             let opAsm =
@@ -430,9 +430,9 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         /// Names of the variables used by the lhs and rhs of this operation
         let lrVarNames = getVarNames [lhs; rhs]
         match (loadVars env [lhs; rhs] []) with
-        | ([lhsReg; rhsReg], argLoadRes) ->
+        | [lhsReg; rhsReg], argLoadRes ->
             /// Target register to store the operation result + code to load it
-            let (targetReg, targetLoadRes) =
+            let targetReg, targetLoadRes =
                 loadIntVar argLoadRes.Env env.TargetVar lrVarNames
             /// Human-readable prefix for jump labels, describing the kind of
             /// relational operation we are compiling
@@ -472,11 +472,11 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
 
     | Assertion(arg) ->
         /// Register holding assertion argument, and code to load it
-        let (argReg, argLoadRes) = loadIntVar env (getVarName arg) []
+        let argReg, argLoadRes = loadIntVar env (getVarName arg) []
         /// Label to jump to when the assertion is true
         let passLabel = Util.genSymbol "assert_true"
         /// Target register to store the assertion bool value + code to load it
-        let (targetReg, targetLoadRes) =
+        let targetReg, targetLoadRes =
                 loadIntVar argLoadRes.Env env.TargetVar [getVarName arg]
         /// Assembly code for the assertion: check the assertion, and jump
         /// to 'passLabel' if it is true; otherwise, fail
@@ -492,7 +492,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
 
     | If(condition, ifTrue, ifFalse) ->
         /// Register holding 'if' condition, and code to load it
-        let (condReg, condLoadRes) = loadIntVar env (getVarName condition) []
+        let condReg, condLoadRes = loadIntVar env (getVarName condition) []
         /// Code generation result for the 'true' branch
         let trueCodegenRes = doCodegen condLoadRes.Env ifTrue
         /// Code generation result for the 'false' branch

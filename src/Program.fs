@@ -32,7 +32,7 @@ let internal parse (opt: CmdLine.ParserOptions): int =
         Log.error $"%s{msg}"; 1 // Non-zero exit code
     | Ok(ast) ->
         Log.info "Lexing and parsing succeeded."
-        if (opt.ANF) then
+        if opt.ANF then
             Log.debug $"Parsed AST:%s{Util.nl}%s{PrettyPrinter.prettyPrint ast}"
             Log.debug $"Transforming AST into ANF"
             let anf = ANF.transform ast
@@ -92,7 +92,7 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
         Log.info "Lexing and parsing succeeded."
         if (not opt.Typecheck) then
             Log.info "Skipping type checking."
-            if (opt.ANF) then
+            if opt.ANF then
                 Log.debug $"Parsed AST:%s{Util.nl}%s{PrettyPrinter.prettyPrint ast}"
                 Log.debug $"Transforming AST into ANF"
                 let anf = ANF.transform ast
@@ -105,12 +105,12 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
             Log.info "Running type checker (as requested)."
             match (Typechecker.typecheck ast) with
             | Error(typErrs) ->
-                for (pos, errMsg) in typErrs do
+                for pos, errMsg in typErrs do
                     Log.error $"%s{opt.File}:%d{pos.LineStart}: %s{errMsg}"
                 1 // Non-zero exit code
             | Ok(tast) ->
                 Log.info "Type checking succeeded."
-                if (opt.ANF) then
+                if opt.ANF then
                     Log.debug $"Parsed and typed AST:%s{Util.nl}%s{PrettyPrinter.prettyPrint tast}"
                     Log.debug $"Transforming AST into ANF"
                     let anf = ANF.transform tast
@@ -139,7 +139,7 @@ let internal generateAsm (filename: string)
         | Ok(tast) ->
             Log.info "Type checking succeeded."
             let asm =
-                if (anf) then
+                if anf then
                     Log.debug $"Transforming AST into ANF"
                     let anf = if(optimize >= 2u) then ANF.optTransform tast else ANF.transform tast
                     let registers =
