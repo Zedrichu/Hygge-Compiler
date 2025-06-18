@@ -711,8 +711,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let valueAccess = {node with Expr = FieldSelect({node with Expr = Var(name)
                                                                    Type = refCellType}, "value")
                                      Type = init.Type}
-        
+
+        // Enable the promoted variable in scope environment, substitute accesses with field selectors
         let scope' = ASTUtil.subst (addVarNode scope name refCellType) name valueAccess
+
         // Code generation for the immutable let binder after heap promotion
         doCodegen env {node with Expr = Let(name, refCell, scope')}
     

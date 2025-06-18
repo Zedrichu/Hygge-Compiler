@@ -473,6 +473,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             let init' = (ASTUtil.subst init name rec_init)
             Some(env, {node with Expr = (ASTUtil.subst scope name init').Expr})
         | None -> None
+
     | LetMut(_, _, scope) when (isValue scope) -> // <> R-LetM-Res
         Some(env, {node with Expr = scope.Expr})
     | LetMut(name, init, scope)
@@ -480,7 +481,6 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         // Convert to immutable binder with heap-allocated structure === heap promotion
         let refCell = {init with Expr = StructCons(["value", init])}
         let valueAccess = {node with Expr = FieldSelect({node with Expr = Var(name)}, "value")}
-        
         let scope' = ASTUtil.subst scope name valueAccess
         Some(env, {node with Expr = Let(name, refCell, scope')})
     | LetMut(name, init, scope) ->
