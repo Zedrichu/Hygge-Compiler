@@ -9,7 +9,6 @@ module Interpreter
 open AST
 open System
 
-
 /// Does the given AST node represent a value?
 let rec isValue (node: Node<'E,'T>): bool =
     match node.Expr with
@@ -18,7 +17,7 @@ let rec isValue (node: Node<'E,'T>): bool =
     | IntVal _
     | FloatVal _
     | StringVal _ -> true
-    | Lambda(_, _) -> true
+    | Lambda _ -> true
     | Pointer _ -> true
     | _ -> false
 
@@ -93,7 +92,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         Some(env, env.Mutables[name])
     | Var _ -> None
 
-    | Lambda(_, _) -> None
+    | Lambda _ -> None
 
     | Pointer _ -> None
 
@@ -474,18 +473,26 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             let init' = (ASTUtil.subst init name rec_init)
             Some(env, {node with Expr = (ASTUtil.subst scope name init').Expr})
         | None -> None
-
-    | LetMut(_, _, scope) when (isValue scope) ->
+    | LetMut(_, _, scope) when (isValue scope) -> // <> R-LetM-Res
         Some(env, {node with Expr = scope.Expr})
+    | LetMut(name, init, scope)
+        when Set.contains name (ASTUtil.capturedVars scope) -> // <> R-LetM-Promote
+        // Convert to immutable binder with heap-allocated structure === heap promotion
+        let refCell = {init with Expr = StructCons(["value", init])}
+        let valueAccess = {node with Expr = FieldSelect({node with Expr = Var(name)}, "value")}
+        
+        let scope' = ASTUtil.subst scope name valueAccess
+        Some(env, {node with Expr = Let(name, refCell, scope')})
     | LetMut(name, init, scope) ->
+        // Reducing a mutable let binder that is not captured by the scope.
         match (reduce env init) with
-        | Some(env', init') ->
+        | Some(env', init') -> // <> R-LetM-Eval-Init-NCV
             Some(env', {node with Expr = LetMut(name, init', scope)})
         | None when (isValue init) ->
             /// Runtime environment for reducing the 'let mutable...' scope
             let env' = {env with Mutables = env.Mutables.Add(name, init)}
             match (reduce env' scope) with
-            | Some(env'', scope') ->
+            | Some(env'', scope') -> // <> R-LetM-Eval-Scope-NCV
                 /// Updated init value for the mutable variable
                 let init' = env''.Mutables[name] // Crash if 'name' not found
                 /// Updated runtime environment.  If the declared mutable
@@ -540,7 +547,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             let target' = {target with Expr = FieldSelect(selTarget', field)}
             Some(env', {node with Expr = Assign(target', expr)})
         | None -> None
-    | Assign({Expr = FieldSelect(_, _)} as target, expr) when not (isValue expr) ->
+    | Assign({Expr = FieldSelect _ } as target, expr) when not (isValue expr) ->
         match (reduce env expr) with
         | Some(env', expr') ->
             Some(env', {node with Expr = Assign(target, expr')})
