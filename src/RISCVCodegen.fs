@@ -7,7 +7,6 @@
 module RISCVCodegen
 
 open AST
-open PrettyPrinter
 open RISCV
 open Type
 open Typechecker
@@ -275,27 +274,27 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             /// Generated code for the numerical operation
             let opAsm =
                 match expr with
-                    | Add(_,_) ->
+                    | Add _ ->
                         Asm(RV.ADD(Reg.r(env.Target),
                                    Reg.r(env.Target), Reg.r(rtarget)))
-                    | Sub(_,_) ->
+                    | Sub _ ->
                         Asm(RV.SUB(Reg.r(env.Target),
                                    Reg.r(env.Target), Reg.r(rtarget)))
-                    | Mult(_,_) ->
+                    | Mult _ ->
                         Asm(RV.MUL(Reg.r(env.Target),
                                    Reg.r(env.Target), Reg.r(rtarget)))
-                    | Div(_,_) ->
+                    | Div _ ->
                         Asm(RV.DIV(Reg.r(env.Target),
                                    Reg.r(env.Target), Reg.r(rtarget)))
-                    | Mod(_,_) ->
+                    | Mod _ ->
                         Asm(RV.REM(Reg.r(env.Target),
                                    Reg.r(env.Target), Reg.r(rtarget)))
-                    | Min(_,_) -> Asm().AddText([
+                    | Min _ -> Asm().AddText([
                             (RV.BLT(Reg.r(env.Target), Reg.r(rtarget), label), "")
                             (RV.MV(Reg.r(env.Target), Reg.r(rtarget)), "")
                             (RV.LABEL(label), "")
                         ])
-                    | Max(_,_) -> Asm().AddText([
+                    | Max _ -> Asm().AddText([
                             (RV.BLT(Reg.r(rtarget), Reg.r(env.Target), label), "")
                             (RV.MV(Reg.r(env.Target), Reg.r(rtarget)), "")
                             (RV.LABEL(label), "")
@@ -312,24 +311,24 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             /// Generated code for the numerical operation
             let opAsm =
                 match expr with
-                | Add(_,_) ->
+                | Add _ ->
                     Asm(RV.FADD_S(FPReg.r(env.FPTarget),
                                   FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | Sub(_,_) ->
+                | Sub _ ->
                     Asm(RV.FSUB_S(FPReg.r(env.FPTarget),
                                   FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | Mult(_,_) ->
+                | Mult _ ->
                     Asm(RV.FMUL_S(FPReg.r(env.FPTarget),
                                   FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | Div(_,_) ->
+                | Div _ ->
                     Asm(RV.FDIV_S(FPReg.r(env.FPTarget),
                                   FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | Min(_,_) ->
+                | Min _ ->
                     Asm(RV.FLT_S(Reg.r(env.Target), FPReg.r(rfptarget), FPReg.r(env.FPTarget))) ++
                     Asm(RV.BEQ(Reg.r(env.Target), Reg.zero, label)) ++
                     Asm(RV.FMV_S(FPReg.r(env.FPTarget), FPReg.r(rfptarget))) ++
                     Asm(RV.LABEL(label))
-                | Max(_,_) ->
+                | Max _ ->
                     Asm(RV.FLT_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget))) ++
                     Asm(RV.BEQ(Reg.r(env.Target), Reg.zero, label)) ++
                     Asm(RV.FMV_S(FPReg.r(env.FPTarget), FPReg.r(rfptarget))) ++
@@ -372,9 +371,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Generated code for the logical operation
         let opAsm =
             match expr with
-            | And(_,_) ->
+            | And _ ->
                 Asm(RV.AND(Reg.r(env.Target), Reg.r(env.Target), Reg.r(rtarget)))
-            | Or(_,_) ->
+            | Or _ ->
                 Asm(RV.OR(Reg.r(env.Target), Reg.r(env.Target), Reg.r(rtarget)))
             | x -> failwith $"BUG: unexpected operation %O{x}"
         // Put everything together
@@ -418,11 +417,11 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             /// Human-readable prefix for jump labels, describing the kind of
             /// relational operation we are compiling
             let labelName = match expr with
-                            | Eq(_,_) -> "eq"
-                            | Less(_,_) -> "less"
-                            | LessEq(_,_) -> "lesseq"
-                            | Greater(_,_) -> "greater"
-                            | GreaterEq(_,_) -> "greatereq"
+                            | Eq _ -> "eq"
+                            | Less _ -> "less"
+                            | LessEq _ -> "lesseq"
+                            | Greater _ -> "greater"
+                            | GreaterEq _ -> "greatereq"
                             | x -> failwith $"BUG: unexpected operation %O{x}"
             /// Label to jump to when the comparison is true
             let trueLabel = Util.genSymbol $"%O{labelName}_true"
@@ -432,15 +431,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             /// Codegen for the relational operation between lhs and rhs
             let opAsm =
                 match expr with
-                | Eq(_,_) ->
+                | Eq _ ->
                     Asm(RV.BEQ(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
-                | Less(_,_) ->
+                | Less _ ->
                     Asm(RV.BLT(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
-                | LessEq(_,_) ->
+                | LessEq _ ->
                     Asm(RV.BLE(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
-                | Greater(_,_) ->
+                | Greater _ ->
                     Asm(RV.BGT(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
-                | GreaterEq(_,_) ->
+                | GreaterEq _ ->
                     Asm(RV.BGE(Reg.r(env.Target), Reg.r(rtarget), trueLabel))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
 
@@ -461,15 +460,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             /// Generated code for the relational operation
             let opAsm =
                 match expr with
-                | Eq(_,_) ->
+                | Eq _ ->
                     Asm(RV.FEQ_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | Less(_,_) ->
+                | Less _ ->
                     Asm(RV.FLT_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | LessEq(_,_) ->
+                | LessEq _ ->
                     Asm(RV.FLE_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | Greater(_,_) ->
+                | Greater _ ->
                     Asm(RV.FGT_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
-                | GreaterEq(_,_) ->
+                | GreaterEq _ ->
                     Asm(RV.FGE_S(Reg.r(env.Target), FPReg.r(env.FPTarget), FPReg.r(rfptarget)))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
@@ -578,11 +577,11 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     { node with Expr = Print({ node with Expr = StringVal(" }"); Type = TString }) }
                 ]
                 doCodegen env { node with Expr = Seq(nodes) }
-            | TFun (_,_) ->
+            | TFun _ ->
                 doCodegen env 
                     { node with Expr = Print(
                             { node with Expr = StringVal(t.ToString()); Type = TString }) }
-            | TUnion (valuePairs: List<string * Type>) ->
+            | TUnion (_: List<string * Type>) ->
                 doCodegen env 
                     { node with Expr = Print(
                             { node with Expr = StringVal(t.ToString()); Type = TString }) }
@@ -660,7 +659,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // Check the assertion, and jump to 'passLabel' if it is true;
         // otherwise, fail
         (doCodegen env arg)
-            // .AddData([])
             .AddText([
                 (RV.ADDI(Reg.r(env.Target), Reg.r(env.Target), Imm12(-1)), "")
                 (RV.BEQZ(Reg.r(env.Target), passLabel), "Jump if assertion OK")
@@ -703,6 +701,21 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
     | LetRec _ ->
         failwith $"BUG: unexpected LetRec node without lambda initialisation in codegen: %s{PrettyPrinter.prettyPrint node}"
 
+    | LetMut(name, init, scope)
+        when Set.contains name (ASTUtil.capturedVars scope) ->
+        // Perform heap promotion for mutable binders of captured variables
+        let refCellType = TStruct(["value", init.Type, true])
+        let refCell = {init with Expr = StructCons(["value", init])
+                                 Type = refCellType}
+        
+        let valueAccess = {node with Expr = FieldSelect({node with Expr = Var(name)
+                                                                   Type = refCellType}, "value")
+                                     Type = init.Type}
+        
+        let scope' = ASTUtil.subst (addVarNode scope name refCellType) name valueAccess
+        // Code generation for the immutable let binder after heap promotion
+        doCodegen env {node with Expr = Let(name, refCell, scope')}
+    
     | Let(name, init, scope)
     | LetT(name, _, init, scope)
     | LetMut(name, init, scope) ->
@@ -1126,11 +1139,11 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 | t when (isSubtypeOf fieldInit.Env t TFloat) ->
                     Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(fieldOffset * 4),
                                  Reg.r(env.Target)),
-                        $"Initialize struct field '%s{fieldNames.[fieldOffset]}'")
+                        $"Initialize struct field '%s{fieldNames[fieldOffset]}'")
                 | _ ->
                     Asm(RV.SW(Reg.r(env.Target + 1u), Imm12(fieldOffset * 4),
                               Reg.r(env.Target)),
-                        $"Initialize struct field '%s{fieldNames.[fieldOffset]}'")
+                        $"Initialize struct field '%s{fieldNames[fieldOffset]}'")
             acc ++ (doCodegen {env with Target = env.Target + 1u} fieldInit)
                 ++ fieldInitCode
         /// Assembly code for initialising each field of the struct, by folding
@@ -1141,7 +1154,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             List.fold folder (Asm()) (List.indexed fieldInitNodes)
 
         /// Assembly code that allocates space on the heap for the new
-        /// structure, through an 'Sbrk' system call.  The size of the structure
+        /// structure, through a 'Sbrk' system call.  The size of the structure
         /// is computed by multiplying the number of fields by the word size (4)
         let structAllocCode =
             (beforeSysCall [Reg.a0] [])
@@ -1174,7 +1187,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | TStruct(fields) ->
                 let fieldNames, fieldTypes, _ = List.unzip3 fields
                 let offset = List.findIndex (fun f -> f = field) fieldNames
-                match fieldTypes.[offset] with
+                match fieldTypes[offset] with
                 | t when (isSubtypeOf node.Env t TUnit) ->
                     Asm() // Nothing to do
                 | t when (isSubtypeOf node.Env t TFloat) ->
@@ -1660,7 +1673,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
                     let fieldCopyCode: Asm =
                         match expandType node.Env fType with
-                        | TStruct(fields') ->
+                        | TStruct _ ->
                             //Recursively copy the struct field by reusing registers, saving context in the stack
                             
                             let stackSpace = 8 // Space for 2 registers (4 bytes each)
@@ -1814,7 +1827,7 @@ and internal compileFunction (args: List<string * Type>)
         |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
 
     let floatArgsCount = indexedArgsFloat.Length
-    let intArgsCount = indexedArgsInt.Length
+    let _intArgsCount = indexedArgsInt.Length
 
     /// Folder function that assigns storage information to function arguments:
     /// it assigns an 'a' register to each function argument, and accumulates
@@ -2059,12 +2072,12 @@ and internal checkIndexOutOfBounds env target (indexL, indexR) node: Asm =
                 Type = TUnit
                 Pos = node.Pos
             }
-
+ 
     Asm().AddText (RV.COMMENT "Check: Array index out of bounds?") ++
                                 doCodegen env indexOutOfBoundsCheck
 
 /// Generate RISC-V assembly for the given AST.
-let codegen (node: TypedAST): RISCV.Asm =
+let codegen (node: TypedAST): Asm =
     /// Initial codegen environment, targeting generic registers 0 and without
     /// any variable in the storage map
     let env = {Target = 0u; FPTarget = 0u; VarStorage =  Map[]; TopLevel = true}
