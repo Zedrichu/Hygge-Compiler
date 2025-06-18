@@ -1,0 +1,18 @@
+type Counters = struct {f1: () -> int; f2: () -> int};
+
+// Return a structure with two functions that share a counter, counting how
+// many times they have been called.
+fun makeCounters(): Counters = {
+    let mutable i = 0;
+    // The lambda terms below capture i twice
+    struct { f1 = fun () -> i <- i + 1;
+             f2 = fun () -> i <- i + 1 } : Counters
+};
+
+let c1 = makeCounters();
+assert(c1.f1() = 1); // c1.f1 and c2.f2 should share the same counter
+assert(c1.f2() = 2);
+
+let c2 = makeCounters();
+assert(c2.f2() = 1); // c2.f1 and c2.f2 should share another counter
+assert(c2.f1() = 2)
