@@ -63,7 +63,8 @@ fun getAreaUnion(shape: ExtraMoreShapeUnion): SmallUnion = {
     match shape with {
         Circle{c} -> { let x: SmallUnion = A{c.radius}; x };
         Square{s} -> { let x: SmallUnion = B{getArea(s)}; x };
-        ExtraCircle{ec} -> { let x: SmallUnion = B{ec.extra}; x }
+        ExtraCircle{ec} -> { let x: SmallUnion = B{ec.extra}; x };
+        extra{e} -> { let x: SmallUnion = A{0}; x }
     }
 };
 
