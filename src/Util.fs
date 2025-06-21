@@ -157,7 +157,7 @@ let mutable internal knownSymsWithIds = System.Collections.Generic.List<string>(
 
 
 /// Generate a numerical id that is unique for the given symbol, e.g. usable to
-/// tag the type of an object in memory.  This function returns different ids
+/// tag the type of object in memory.  This function returns different ids
 /// when invoked with different arguments; if it is called twice with the same
 /// argument, it returns the same id.
 let genSymbolId (symbol: string): int =
