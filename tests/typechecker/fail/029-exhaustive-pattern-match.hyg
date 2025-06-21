@@ -1,0 +1,13 @@
+// An optional integer value.
+type OptionalInt = union {
+    Some: int;
+    None: unit
+};
+
+fun displayOption(o: OptionalInt): unit =
+    match o with {
+        // Some{x} -> println(x);
+        None{_} -> println("None")
+    };
+
+displayOption(Some{42})

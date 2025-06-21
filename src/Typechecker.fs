@@ -397,7 +397,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
 
     | Type(name, def, scope) ->
         // List of known basic type identifiers
-        let basicTypeNames = List.map (fun t -> t.ToString()) Type.basicTypes
+        let basicTypeNames = List.map _.ToString() basicTypes
         if List.contains name basicTypeNames then
             Error([(node.Pos, $"cannot redefine basic type '%s{name}'")])
         else
@@ -715,9 +715,9 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                  Expr = UnionCons(label, texpr) }
         | Error(es) -> Error(es)
 
-    | Match(expr, cases) ->
+    | Match(expr, matchCases) ->
         /// Duplicate labels in the pattern matching cases
-        let dups = Util.duplicates ((List.map (fun (label,_,_) -> label)) cases)
+        let dups = Util.duplicates ((List.map (fun (label,_,_) -> label)) matchCases)
         if not dups.IsEmpty then
             Error([(expr.Pos, $"duplicate case labels in pattern matching: %s{Util.formatSeq dups}")])
         else
@@ -726,40 +726,50 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                 match (expandType env texpr.Type) with
                 | TUnion(unionCases) ->
                     let unionLabels, unionTypes = List.unzip unionCases
+                    let matchLabels, _, _ = List.unzip3 matchCases
+                    
+                    /// Mapper function to verify that all labels in the matched expression union type are covered
+                    let verifyUnionCase (label: string): Result<string, TypeErrors> =
+                        if List.contains label matchLabels
+                        then Ok(label)
+                        else Error([(expr.Pos, $"union case not covered in pattern-matching: %s{label}")])
+                    let coveredCases = List.map verifyUnionCase unionLabels
+                    
                     /// The function 'caseTyper' is mapped over all
-                    /// 'unionCases': it looks for the matched label in
+                    /// 'matchCases': it looks for the matched label in
                     /// 'unionLabels', extracts the corresponding type from
                     /// 'unionTypes', and type-checks the match continuation by
                     /// introducing the matched variable and type in the
                     /// environment.
-                    let caseTyper (label, v, cont: UntypedAST): TypingResult =
+                    let caseTyper (label: string, v: string, cont: UntypedAST): TypingResult =
                         match (List.tryFindIndex (fun l -> l = label) unionLabels) with
                         | Some(i) ->
                             /// Updated environment for type-checking the union
                             /// case continuation
-                            let env2 = {env with Vars = env.Vars.Add(v, unionTypes.[i])}
+                            let env2 = {env with Vars = env.Vars.Add(v, unionTypes[i])}
                             typer env2 cont
                         | None -> Error([(cont.Pos, $"invalid match case: %s{label}")])
                     /// Typed continuations (possibly with errors)
-                    let tconts = List.map caseTyper cases
+                    let rawTypedConts = List.map caseTyper matchCases
+                    
                     /// Typing errors in continuations
-                    let errors = collectErrors tconts
+                    let errors = (collectErrors rawTypedConts) @ (collectErrors coveredCases)
                     if errors.IsEmpty then
                         /// Typed continuations, without errors
-                        let typedConts = List.map getOkValue tconts
+                        let typedConts = List.map getOkValue rawTypedConts
                         /// Desired type for all union cases (taken from the
                         /// first union case)
-                        let matchType = typedConts.[0].Type
+                        let matchType = typedConts[0].Type
                         /// Has the given AST node a "bad" type that is not a
                         /// subtype of 'matchType'?
                         let hasBadType (c: TypedAST) =
                             not (isSubtypeOf env c.Type matchType)
                         /// List of match continuation types that are not compatible
                         /// with 'matchType'
-                        let badTypes = List.filter hasBadType typedConts.[1..]
+                        let badTypes = List.filter hasBadType typedConts[1..]
                         if badTypes.IsEmpty then
                             /// Match case labels and variables
-                            let caseLabels, caseVars, _ = List.unzip3 cases
+                            let caseLabels, caseVars, _ = List.unzip3 matchCases
                             /// Typed match cases
                             let tcases = List.zip3 caseLabels caseVars typedConts
                             Ok { Pos = node.Pos; Env = env; Type = matchType;
