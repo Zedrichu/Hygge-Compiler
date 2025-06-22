@@ -162,17 +162,30 @@ let rec expandType (env: TypingEnv) (t: Type): Type =
     | other -> other
 
 
-/// Check whether 't1' is subtype of 't2' in the typing environment 'env'.
-let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
+/// Check whether 't1' is subtype of 't2' in the typing environment 'env' using subtyping assumptions.
+/// The set of assumptions 'A' contains pairs of types (T, T') for which we assume T is a subtype of T'.
+let rec isSubtypeWithAssumption (A: Set<Type * Type>) (env: TypingEnv) (t1: Type) (t2: Type): bool =
     match (t1, t2) with
-    | t1, t2 when t1 = t2
-        -> true // Straightforward equality between types
+    // <> [TSubA-Refl] rule: any type is a subtype of itself
+    | t1, t2 when t1 = t2 -> true
+    
+    // <> [TSubA-Assume] rule: if (t1, t2) is in the set of assumptions A, then t1 is a subtype of t2
+    | pair when Set.contains pair A -> true
+    
+    // <> [TSubA-Var-L] rule: handle case where t1 is a type variable
     | TVar(name), t2 ->
-        // Expand the type variable; crash immediately if 'name' is not in 'env'
-        isSubtypeOf env env.TypeVars[name] t2
+        // Introduce the current pair to assumptions to avoid infinite recursion
+        let extA = Set.add (TVar(name), t2) A
+        // Expand the type variable and subtype recursively, crash if type `name` is not defined
+        isSubtypeWithAssumption extA env env.TypeVars[name] t2
+    // <> [TSubA-Var-R] rule: handle case where t2 is a type variable
     | t1, TVar(name) ->
-        // Expand the type variable; crash immediately if 'name' is not in 'env'
-        isSubtypeOf env t1 env.TypeVars[name]
+        // Introduce the current pair to assumptions to avoid infinite recursion
+        let extA = Set.add (t1, TVar(name)) A
+        // Expand the type variable and subtype recursively, crash if type `name` is not defined
+        isSubtypeWithAssumption extA env t1 env.TypeVars[name]
+    
+    // <> [TSubA-Struct] rule: handle struct subtyping with assumptions
     | TStruct(fields1), TStruct(fields2) ->
         // A subtype struct must have at least the same fields of the supertype
         if fields1.Length < fields2.Length then false
@@ -186,13 +199,17 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             if (fieldNames1 <> fieldNames2) then false
             else
                 // Check that all subtype fields are subtypes of supertype fields
-                (List.forall2 (fun t1 t2 -> isSubtypeOf env t1 t2)
+                (List.forall2 (fun t1 t2 -> isSubtypeWithAssumption A env t1 t2)
                     fieldTypes1 fieldTypes2) &&
                 // Check that all mutable fields in the supertype are also mutable in the subtype
                 (List.forall2 (fun m1 m2 -> m1 || not m2) // mutable supertype implies mutability in subtype
                     fieldMutability1 fieldMutability2)
+
+    // <> [T-SubA-Array] rule: handle array subtyping with assumptions
     | TArray(t1), TArray(t2) ->
-        isSubtypeOf env t1 t2
+        isSubtypeWithAssumption A env t1 t2
+
+    // <> [T-SubA-Union] rule: handle union subtyping with assumptions
     | TUnion(cases1), TUnion(cases2) ->
         /// Labels of the subtype union
         let labels1, _ = List.unzip cases1
@@ -205,18 +222,26 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             // must have a subtyped argument in the subtype union
             let map1 = Map.ofList cases1
             let map2 = Map.ofList cases2
-            List.forall (fun l -> isSubtypeOf env map1[l] map2[l]) labels1
+            List.forall (fun l -> isSubtypeWithAssumption A env map1[l] map2[l]) labels1
+
+    // <> [T-Sub-Function] rule: handle function subtyping
     | TFun(args1, ret1), TFun(args2, ret2) ->
         if args1.Length <> args2.Length then false
         else
             // Check that the return type is a subtype of the other return type
-            // (the “smaller” function is more restrictive in the type of value it returns)
-            let retSubtype = isSubtypeOf env ret1 ret2
+            // (the "smaller" function is more restrictive in the type of value it returns)
+            let retSubtype = isSubtypeWithAssumption A env ret1 ret2
             // All arguments of a supertype function must be subtypes of the subtype function
-            // (the “smaller” function is more permissive in the types of arguments it accepts)
-            let argsSubtype = List.forall2 (isSubtypeOf env) args2 args1
+            // (the "smaller" function is more permissive in the types of arguments it accepts)
+            let argsSubtype = List.forall2 (fun arg2 arg1 -> isSubtypeWithAssumption A env arg2 arg1) args2 args1
             retSubtype && argsSubtype
+
     | _, _ -> false
+
+/// Check whether 't1' is subtype of 't2' in the typing environment 'env'.
+and isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
+    // <> [TSub] rule: Use the subtyping judgment with assumptions starting with an empty set
+    isSubtypeWithAssumption Set.empty env t1 t2
 
 
 /// Perform type checking on an untyped AST, using the given typing environment.
@@ -431,7 +456,8 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                             // _outside_ the type definition, i.e. the return
                             // type does not capture the type variable being
                             // defined.  To this end, we expand the return type,
-                            // and check whether the type variable being defined
+                            // and check whether the type variable being
+                            // defined
                             // still occurs in it.
 
                             /// Expanded return type of the 'scope' expression.
