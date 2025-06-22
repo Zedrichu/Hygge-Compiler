@@ -534,15 +534,15 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         match (typer env cond) with
         | Ok(tcond) when (isSubtypeOf env tcond.Type TBool) ->
             match ((typer env ifT), (typer env ifF)) with
-            | Ok(tifT), Ok(tifF) when (isSubtypeOf env tifT.Type tifF.Type) ->
-                Ok { Pos = node.Pos; Env = env; Type = tifF.Type;
-                     Expr = If(tcond, tifT, tifF) }
-            | Ok(tifT), Ok(tifF) when (isSubtypeOf env tifF.Type tifT.Type) ->
-                Ok { Pos = node.Pos; Env = env; Type = tifT.Type;
-                     Expr = If(tcond, tifT, tifF) }
             | Ok(tifT), Ok(tifF) ->
-                Error([(node.Pos, $"mismatching 'then' and 'else' types: "
-                               + $"%O{tifT.Type} and %O{tifF.Type}")])
+                // Compute the LUB of the then and else result types
+                match leastUpperBound env node.Pos tifT.Type tifF.Type with
+                | Ok lubType ->
+                    Ok { Pos = node.Pos; Env = env; Type = lubType
+                         Expr = If(tcond, tifT, tifF) }
+                | Error es ->
+                    Error([node.Pos, $"mismatching `then` and `else` types: "
+                                        + $"%O{tifT.Type} and %O{tifF.Type}"] @ es)
             | otherwise -> mergeErrors otherwise
         | Ok(tcond) ->
             Error([(cond.Pos, $"'if' condition: expected type %O{TBool}, "
