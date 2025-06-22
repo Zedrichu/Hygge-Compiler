@@ -8,6 +8,7 @@
 module Typechecker
 
 open AST
+open FSharp.Text.Parsing.ParseHelpers
 open Type
 
 
@@ -243,6 +244,146 @@ and isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
     // <> [TSub] rule: Use the subtyping judgment with assumptions starting with an empty set
     isSubtypeWithAssumption Set.empty env t1 t2
 
+
+let unionLabelMerger (fn: TypingEnv -> Position -> Type -> Type -> Result<Type, TypeErrors>)
+                     (env: TypingEnv) (pos: Position) (union1: List<string * Type>) (union2: List<string * Type>)
+                     (iterator: List<string>) : List<Result<string * Type, TypeErrors>> =
+    // Create maps of labels to types for each union
+    let map1 = Map.ofList union1
+    let map2 = Map.ofList union2
+    
+    // Helper function to merge labels from both unions: take LUB of types if exists in both, else the original type
+    let merger (label: string): Result<string * Type, TypeErrors> =
+        match (map1.TryFind label, map2.TryFind label) with
+        | Some(t1), Some(t2) ->
+            match (fn env pos t1 t2) with
+            | Ok lubType ->
+                // If the label is present in both unions, compute the LUB of the two types
+                Ok(label, lubType)
+            | Error errorValue -> Error errorValue
+        | None, Some(t1)
+        | Some(t1), None -> 
+            // If the label is present only in a single union, take its own type
+            Ok(label, t1)
+        | _ -> failwith "Error: label must exist in at least one union type"
+    
+    iterator |> List.map merger
+
+/// Compute the least upper bound (LUB) of two types - the most precise supertype of both.
+let rec leastUpperBound (env: TypingEnv) (pos: Position) (t: Type) (tp: Type): Result<Type, TypeErrors> =
+    match (t, tp) with
+    | sub, super when isSubtypeOf env sub super -> Ok(super)
+    | super, sub when isSubtypeOf env sub super -> Ok(super)
+    
+    | TUnion(cases1), TUnion(cases2) -> // <> LUB: union of all labelled cases
+        // Merge the case labels from both union types - all unique labels
+        let allLabels: Set<string> =
+            Set.union (Set.ofList (List.map fst cases1)) (Set.ofList (List.map fst cases2))
+        
+        // Apply the merger function to all labels and collect the results
+        let lubCases = allLabels
+                       |> Set.toList
+                       |> unionLabelMerger leastUpperBound env pos cases1 cases2
+                       
+        let errors = collectErrors lubCases
+        if errors.IsEmpty then 
+            Ok(TUnion(List.map getOkValue lubCases))
+        else 
+            Error(errors)
+        
+    | TStruct(fields1), TStruct(fields2) -> // <> LUB: intersection of all fields, respecting order
+        // Split fields into names, types and muts
+        let names1, types1, muts1 = List.unzip3 fields1
+        let names2, types2, muts2 = List.unzip3 fields2
+        
+        // Intersection of field names
+        let commonNames: List<string> = Set.intersect (Set.ofList names1) (Set.ofList names2) |> Set.toList
+        
+        if List.isEmpty commonNames
+        then // if no common fields exist, no LUB can be computed
+            Error([(pos, $"cannot compute LUB of structs with no common fields: %O{t} and %O{tp}")])
+        else
+            // Compute maps for easy lookup of names to types and mutability
+            let nameMap1 = Map.ofList (List.zip names1 (List.zip types1 muts1))
+            let nameMap2 = Map.ofList (List.zip names2 (List.zip types2 muts2))
+            
+            let fieldMerger (name:string) : Result<string * Type * bool, TypeErrors> =
+                let type1, isMutable1 = nameMap1[name]
+                let type2, isMutable2 = nameMap2[name]
+                
+                // Compute mutability of LUB field: supertype is mutable if both are mutable
+                let lubMut = isMutable1 && isMutable2
+                
+                match leastUpperBound env pos type1 type2 with
+                | Ok(lubType) ->
+                    // If the LUB of the field types is successful, return the field name and LUB type
+                    Ok(name, lubType, lubMut)
+                | Error(es) -> Error(es)
+            
+            let lubFields = commonNames
+                            |> List.map fieldMerger
+            let errors = collectErrors lubFields
+            if errors.IsEmpty then 
+                Ok(TStruct(List.map getOkValue lubFields))
+            else 
+                Error(errors)
+
+    | TArray(arr1), TArray(arr2) -> // <> LUB: array of LUB of element types
+        match (leastUpperBound env pos arr1 arr2) with
+        | Ok(lubType) -> 
+            // If the LUB of the array types is successful, return an array type with the LUB type
+            Ok(TArray(lubType))
+        | Error(es) -> Error(es)
+
+    | TFun(args1, ret1), TFun(args2, ret2) when args1.Length = args2.Length ->
+        // <> LUB: function with LUB of argument types and LUB of return types
+        // For functions with same arity:
+        // - Arguments are contravariant: GLB of argument types - the most precise subtype of both (+ specific)
+        // - Return types are covariant: LUB of return types - the most precise supertype of both (+ general)
+        
+        let argLubs = List.map2 (greatestLowerBound env pos) args1 args2
+        let retLub = leastUpperBound env pos ret1 ret2
+        
+        let errors = collectErrors (argLubs @ [retLub])
+        if errors.IsEmpty then
+            let lubArgs = List.map getOkValue argLubs
+            let lubRet = getOkValue retLub
+            Ok(TFun(lubArgs, lubRet))
+        else
+            Error(errors)        
+    | _ -> Error [(pos, $"cannot compute LUB of types %O{t} and %O{tp}")]
+
+/// Compute the greatest lower bound (GLB) of two types - the most precise subtype of both.
+and greatestLowerBound (env: TypingEnv) (pos: Position) (t1: Type) (t2: Type): Result<Type, TypeErrors> =
+    match (t1, t2) with
+    | sub, super when isSubtypeOf env sub super -> Ok(sub)
+    | super, sub when isSubtypeOf env sub super -> Ok(sub)
+    
+    | TArray(arr1), TArray(arr2) -> // <> GLB: array of GLB of element types
+        match (greatestLowerBound env pos arr1 arr2) with
+        | Ok(glbType) -> 
+            // If the GLB of the array types is successful, return an array type with the GLB type
+            Ok(TArray(glbType))
+        | Error(es) -> Error(es)
+    
+    | TUnion(cases1), TUnion(cases2) -> // <> GLB: intersection of all labelled cases
+        // Merge the case labels from both union types - all unique labels
+        let commonLabels: Set<string> =
+            Set.intersect (Set.ofList (List.map fst cases1)) (Set.ofList (List.map fst cases2))
+        
+        // Apply the merger function to all common labels and collect the results
+        let glbCases = commonLabels
+                       |> Set.toList
+                       |> unionLabelMerger greatestLowerBound env pos cases1 cases2
+
+        let errors = collectErrors glbCases
+        if errors.IsEmpty then 
+            Ok(TUnion(List.map getOkValue glbCases))
+        else 
+            Error(errors)
+    
+    // For other combinations, GLB might not exist
+    | _ -> Error([(pos, $"cannot compute GLB of types %O{t1} and %O{t2}")])
 
 /// Perform type checking on an untyped AST, using the given typing environment.
 /// Return a well-typed AST in case of success, or a sequence of error messages
