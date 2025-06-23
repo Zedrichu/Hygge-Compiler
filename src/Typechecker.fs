@@ -48,6 +48,9 @@ type TypedExpr = Expr<TypingEnv, Type>
 type TypingResult = Result<TypedAST, TypeErrors>
 
 
+exception LUBTypeError of TypeErrors
+
+
 /// Auxiliary function that takes 2 Results, combines their Error contents into
 /// a single Error instance, and returns it.  This function expects that at
 /// least one of the two Results is an Error.
@@ -924,27 +927,34 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                     if errors.IsEmpty then
                         /// Typed continuations, without errors
                         let typedConts = List.map getOkValue rawTypedConts
-                        /// Desired type for all union cases (taken from the
-                        /// first union case)
-                        let matchType = typedConts[0].Type
-                        /// Has the given AST node a "bad" type that is not a
-                        /// subtype of 'matchType'?
-                        let hasBadType (c: TypedAST) =
-                            not (isSubtypeOf env c.Type matchType)
-                        /// List of match continuation types that are not compatible with 'matchType'
-                        let badTypes = List.filter hasBadType typedConts[1..]
-                        if badTypes.IsEmpty then
-                            /// Match case labels and variables
-                            let caseLabels, caseVars, _ = List.unzip3 matchCases
-                            /// Typed match cases
-                            let tcases = List.zip3 caseLabels caseVars typedConts
-                            Ok { Pos = node.Pos; Env = env; Type = matchType;
-                                 Expr = Match(texpr, tcases)}
-                        else
-                            let errFmt (c: TypedAST) =
-                                (c.Pos, $"pattern match result type mismatch: "
-                                        + $"expected %O{matchType}, found %O{c.Type}")
-                            Error(List.map errFmt badTypes)
+                        
+                        try 
+                            /// Desired type for all union cases - LUB of all continuation types
+                            let matchType = typedConts
+                                            |> List.map _.Type
+                                            |> List.reduce (fun acc t ->
+                                                match leastUpperBound env node.Pos acc t with
+                                                | Ok(lubType) -> lubType
+                                                | Error es -> raise (LUBTypeError es))
+                            /// Has the given AST node a "bad" type that is not a subtype of 'matchType'?
+                            let hasBadType (c: TypedAST) =
+                                not (isSubtypeOf env c.Type matchType)
+                            /// List of match continuation types that are not compatible with 'matchType'
+                            let badTypes = List.filter hasBadType typedConts[1..]
+                            if badTypes.IsEmpty then
+                                /// Match case labels and variables
+                                let caseLabels, caseVars, _ = List.unzip3 matchCases
+                                /// Typed match cases
+                                let tcases = List.zip3 caseLabels caseVars typedConts
+                                Ok { Pos = node.Pos; Env = env; Type = matchType;
+                                     Expr = Match(texpr, tcases)}
+                            else
+                                let errFmt (c: TypedAST) =
+                                    (c.Pos, $"pattern match result type mismatch: "
+                                            + $"expected %O{matchType}, found %O{c.Type}")
+                                Error(List.map errFmt badTypes)
+                        with | LUBTypeError(es) -> // If LUB computation fails, report an error
+                            Error([(node.Pos, $"Cannot find a common LUB type for match cases")] @ es)
                     else Error(errors)
                 | _ ->
                     Error([(expr.Pos, $"cannot match on expression of type %O{texpr.Type}")])
