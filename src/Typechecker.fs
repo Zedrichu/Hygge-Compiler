@@ -394,10 +394,10 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Ok(tcond) when (isSubtypeOf env tcond.Type TBool) ->
             match ((typer env ifT), (typer env ifF)) with
             | Ok(tifT), Ok(tifF) when (isSubtypeOf env tifT.Type tifF.Type) ->
-                Ok { Pos = node.Pos; Env = env; Type = tifT.Type;
+                Ok { Pos = node.Pos; Env = env; Type = tifF.Type;
                      Expr = If(tcond, tifT, tifF) }
             | Ok(tifT), Ok(tifF) when (isSubtypeOf env tifF.Type tifT.Type) ->
-                Ok { Pos = node.Pos; Env = env; Type = tifF.Type;
+                Ok { Pos = node.Pos; Env = env; Type = tifT.Type;
                      Expr = If(tcond, tifT, tifF) }
             | Ok(tifT), Ok(tifF) ->
                 Error([(node.Pos, $"mismatching 'then' and 'else' types: "
