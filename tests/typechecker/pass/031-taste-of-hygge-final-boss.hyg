@@ -1,0 +1,73 @@
+// Define a list type as a labelled union type: either an empty list ('Nil'),
+// or a list 'Elem'ent followed by the rest of the list.
+type List = union {
+    Nil: unit;
+    Elem: struct {
+        value: int;
+        rest: List
+    }
+};
+
+// Is the given list empty?
+fun isEmpty(l: List): bool = {
+    match l with {
+        Nil{_} -> true;
+        Elem{_} -> false
+    }
+};
+
+// Create a list of ints starting with 'start' and ending with 'end' (included).
+rec fun range(start: int, end: int): List = {
+    if (start < end or start = end)
+        then Elem{struct{value = start; rest = range(start+1, end)}}
+        else Nil{()}
+};
+
+// Compute and return the length of the given list.
+rec fun length(l: List): int = {
+    match l with {
+        Nil{_} -> 0;
+        Elem{e} -> 1 + length(e.rest)
+    }
+};
+
+// Display the elements of the given list: show the elements between square
+// brackets, with a semicolon between consecutive elements, and a final newline.
+fun display(l: List): unit = {
+    // Internal helper function to display each list element
+    rec fun displayRec(l: List): unit = {
+        match l with {
+            Nil{_} -> ();
+            Elem{e} -> {
+                print(e.value);
+                if not isEmpty(e.rest) then print("; ")
+                                       else ();
+                displayRec(e.rest)
+            }
+        }
+    };
+    print("[");
+    displayRec(l);
+    println("]")
+};
+
+// Map the given function over the given list
+rec fun map(f: (int) -> int, l: List): List = {
+    match l with {
+        Nil{_} -> Nil{()};
+        Elem{e} -> Elem{struct{ value = f(e.value);
+                                rest = map(f, e.rest) }}
+    }
+};
+
+let l = range(1, 42);
+print("The length of the list 'l' is: ");
+println(length(l));
+
+print("The elements of the list 'l' are: ");
+display(l);
+
+// Create a list 'l2' by adding 1 to each element of 'l'
+let l2 = map(fun(x: int) -> x + 1, l);
+print("The elements of the list 'l2' are: ");
+display(l2)

@@ -1,0 +1,18 @@
+// An optional integer value.
+type OptionalInt = union {
+    Some: int;
+    None: unit
+};
+
+fun maybeIncrement(o: OptionalInt): OptionalInt =
+    match o with {
+        Some{x} -> Some{x + 1};
+        None{_} -> None{()}
+    };
+
+let x = maybeIncrement(Some{41});
+
+assert(match x with {
+           Some{y} -> y = 42;
+           None{_} -> false
+       })

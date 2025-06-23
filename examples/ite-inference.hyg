@@ -1,0 +1,14 @@
+type OptionalInt = union {
+    Some: int;
+    None: unit
+};
+
+let x = 0;
+let y = { 
+    if (x > 0) then {
+        Some{x}
+    } else {
+        None{()}
+    }
+};
+y: OptionalInt
