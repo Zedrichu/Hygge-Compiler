@@ -271,6 +271,33 @@ let unionLabelMerger (fn: TypingEnv -> Position -> Type -> Type -> Result<Type, 
         | _ -> failwith "Error: label must exist in at least one union type"
     
     iterator |> List.map merger
+    
+let fieldMerger (fn: TypingEnv -> Position -> Type -> Type -> Result<Type, TypeErrors>)
+                (env: TypingEnv) (pos: Position) (struct1: List<string * Type* bool>) (struct2: List<string * Type * bool>)
+                (iterator: List<string>) : List<Result<string * Type * bool, TypeErrors>> =
+    // Split fields into names, types and muts
+    let names1, types1, muts1 = List.unzip3 struct1
+    let names2, types2, muts2 = List.unzip3 struct2
+    
+    // Compute maps for easy lookup of names to types and mutability
+    let nameMap1 = Map.ofList (List.zip names1 (List.zip types1 muts1))
+    let nameMap2 = Map.ofList (List.zip names2 (List.zip types2 muts2))
+    
+    let fieldMerger (name:string) : Result<string * Type * bool, TypeErrors> =
+        let type1, isMutable1 = nameMap1[name]
+        let type2, isMutable2 = nameMap2[name]
+        
+        // Compute mutability of LUB field: supertype is mutable if both are mutable
+        let lubMut = isMutable1 && isMutable2
+        
+        match fn env pos type1 type2 with
+        | Ok(lubType) ->
+            // If the LUB of the field types is successful, return the field name and LUB type
+            Ok(name, lubType, lubMut)
+        | Error(es) -> Error(es)
+    
+    iterator |> List.map fieldMerger
+
 
 /// Compute the least upper bound (LUB) of two types - the most precise supertype of both.
 let rec leastUpperBound (env: TypingEnv) (pos: Position) (t: Type) (tp: Type): Result<Type, TypeErrors> =
@@ -295,36 +322,21 @@ let rec leastUpperBound (env: TypingEnv) (pos: Position) (t: Type) (tp: Type): R
             Error(errors)
         
     | TStruct(fields1), TStruct(fields2) -> // <> LUB: intersection of all fields, respecting order
-        // Split fields into names, types and muts
-        let names1, types1, muts1 = List.unzip3 fields1
-        let names2, types2, muts2 = List.unzip3 fields2
-        
+        // Retrieve list of field names across the 2 structs
+        let names1 = List.map (fun (name, _, _) -> name) fields1
+        let names2 = List.map (fun (name, _, _) -> name) fields2
+
         // Intersection of field names
-        let commonNames: List<string> = Set.intersect (Set.ofList names1) (Set.ofList names2) |> Set.toList
+        let commonFieldNames: Set<string> = Set.intersect (Set.ofList names1) (Set.ofList names2)
         
-        if List.isEmpty commonNames
+        if Set.isEmpty commonFieldNames
         then // if no common fields exist, no LUB can be computed
             Error([(pos, $"cannot compute LUB of structs with no common fields: %O{t} and %O{tp}")])
         else
-            // Compute maps for easy lookup of names to types and mutability
-            let nameMap1 = Map.ofList (List.zip names1 (List.zip types1 muts1))
-            let nameMap2 = Map.ofList (List.zip names2 (List.zip types2 muts2))
+            let lubFields = commonFieldNames
+                            |> Set.toList
+                            |> fieldMerger leastUpperBound env pos fields1 fields2
             
-            let fieldMerger (name:string) : Result<string * Type * bool, TypeErrors> =
-                let type1, isMutable1 = nameMap1[name]
-                let type2, isMutable2 = nameMap2[name]
-                
-                // Compute mutability of LUB field: supertype is mutable if both are mutable
-                let lubMut = isMutable1 && isMutable2
-                
-                match leastUpperBound env pos type1 type2 with
-                | Ok(lubType) ->
-                    // If the LUB of the field types is successful, return the field name and LUB type
-                    Ok(name, lubType, lubMut)
-                | Error(es) -> Error(es)
-            
-            let lubFields = commonNames
-                            |> List.map fieldMerger
             let errors = collectErrors lubFields
             if errors.IsEmpty then 
                 Ok(TStruct(List.map getOkValue lubFields))
@@ -339,7 +351,7 @@ let rec leastUpperBound (env: TypingEnv) (pos: Position) (t: Type) (tp: Type): R
         | Error(es) -> Error(es)
 
     | TFun(args1, ret1), TFun(args2, ret2) when args1.Length = args2.Length ->
-        // <> LUB: function with LUB of argument types and LUB of return types
+        // <> LUB: function with GLB of argument types and LUB of return types
         // For functions with same arity:
         // - Arguments are contravariant: GLB of argument types - the most precise subtype of both (+ specific)
         // - Return types are covariant: LUB of return types - the most precise supertype of both (+ general)
@@ -384,6 +396,45 @@ and greatestLowerBound (env: TypingEnv) (pos: Position) (t1: Type) (t2: Type): R
             Ok(TUnion(List.map getOkValue glbCases))
         else 
             Error(errors)
+            
+    | TStruct(fields1), TStruct(fields2) -> // <> GLB: union of all fields, respecting order
+        // Retrieve list of field names across the 2 structs
+        let names1 = List.map (fun (name, _, _) -> name) fields1
+        let names2 = List.map (fun (name, _, _) -> name) fields2
+
+        // Intersection of field names
+        let allFieldNames: Set<string> = Set.intersect (Set.ofList names1) (Set.ofList names2)
+        
+        if Set.isEmpty allFieldNames
+        then // if no common fields exist, no LUB can be computed
+            Error([(pos, $"cannot compute LUB of structs with no common fields: %O{t1} and %O{t2}")])
+        else
+            let lubFields = allFieldNames
+                            |> Set.toList
+                            |> fieldMerger greatestLowerBound env pos fields1 fields2
+            
+            let errors = collectErrors lubFields
+            if errors.IsEmpty then 
+                Ok(TStruct(List.map getOkValue lubFields))
+            else 
+                Error(errors)
+    
+    | TFun(args1, ret1), TFun(args2, ret2) when args1.Length = args2.Length ->
+        // <> GLB: function with LUB of argument types and GLB of return types
+        // For functions with same arity:
+        // - Arguments are contravariant: LUB of argument types - the most precise supertype of both (+ specific)
+        // - Return types are covariant: GLB of return types - the most precise subtype of both (+ general)
+        
+        let argLubs = List.map2 (leastUpperBound env pos) args1 args2
+        let retLub = greatestLowerBound env pos ret1 ret2
+        
+        let errors = collectErrors (argLubs @ [retLub])
+        if errors.IsEmpty then
+            let lubArgs = List.map getOkValue argLubs
+            let lubRet = getOkValue retLub
+            Ok(TFun(lubArgs, lubRet))
+        else
+            Error(errors)   
     
     // For other combinations, GLB might not exist
     | _ -> Error([(pos, $"cannot compute GLB of types %O{t1} and %O{t2}")])
