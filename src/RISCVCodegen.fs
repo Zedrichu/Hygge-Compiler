@@ -1580,7 +1580,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
             // Generate code for the case body, with the case variable set to the matched union
             let bodyImplCode =
-              doCodegen {env with VarStorage = env.VarStorage.Add(caseVar, valStorage)} caseBodyExpr
+              doCodegen {env with VarStorage = env.VarStorage.Add(caseVar, valStorage)
+                                  Target = env.Target + 3u
+                                  FPTarget = env.FPTarget + 2u} caseBodyExpr
 
             let jmpEndInstr = Asm(RV.J(endLabelSym)) // Instruction to jump to the end of the match
 
@@ -1631,6 +1633,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         let endLabelInstr =
             Asm(RV.LABEL(endLabelSym), "Label for common end of match statement")
+        
+        // Instruction to copy match result into target register
+        let copyMatchResult =
+            match expandType node.Env node.Type with
+            | TUnit -> Asm() // Nothing to do
+            | TFloat -> Asm().AddText([RV.FMV_S(FPReg.r env.FPTarget, FPReg.r (env.FPTarget + 2u)),
+                                       "Copy match result into target"])
+            | _ -> Asm().AddText([RV.MV(Reg.r env.Target, Reg.r (env.Target + 3u)),
+                                  "Copy match result into target"])
 
         exprAddrCode          // Evaluate the address of the expression to be matched
         ++ loadActualTagCode   //  Load its runtime tag ID into actualTagReg
@@ -1638,6 +1649,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         ++ failOnErrorPathCode //  If all comparisons fail, execute this error handling code
         ++ allBodyInstrs       //  The code blocks for each case (only reached by jumps from allCmpInstrs)
         ++ endLabelInstr       //  The common exit label for successful cases (jumped to from caseCodeBlock)
+        ++ copyMatchResult     //  Place the result of the match expression into target
       
     | Copy(arg) ->
         match arg.Type with
