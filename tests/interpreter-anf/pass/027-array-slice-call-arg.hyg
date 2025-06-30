@@ -1,0 +1,10 @@
+let mutable x = 0;
+let y = 1;
+
+fun getArr(dummy: int): array {int} = { x <- x + 1; array(10, 40 + 2) };
+
+println(x);
+let newArr = slice(getArr(y), 0, 1);
+
+assert(arrayLength(newArr) = 2);
+assert(x = 1)
