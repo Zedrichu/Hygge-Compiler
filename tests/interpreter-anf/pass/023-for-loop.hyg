@@ -1,0 +1,5 @@
+let mutable x = 0;
+let mutable y = x;
+for ((); x < 2; x <- x + 1) y <- y + x;
+assert (x = 2);
+assert (y = 1)
