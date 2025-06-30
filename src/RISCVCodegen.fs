@@ -901,9 +901,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 /// Assembly code that performs the field value assignment
                 let assignCode =
                     match expandType node.Env rhs.Type with
-                    | t when (isSubtypeOf rhs.Env t TUnit) ->
+                    | TUnit ->
                         Asm() // Nothing to do
-                    | t when (isSubtypeOf rhs.Env t TFloat) ->
+                    | TFloat ->
                         Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0),
                                      Reg.r(env.Target)),
                             $"Assigning value to array element at index")
@@ -1265,9 +1265,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// value stored in `target+3u` to the heap location of the next array element in `target+2u`
         let elemInitCode: Asm =
             match expandType node.Env init.Type with
-            | t when (isSubtypeOf init.Env t TUnit) ->
+            | TUnit ->
                 Asm() // Nothing to do
-            | t when (isSubtypeOf init.Env t TFloat) ->
+            | TFloat ->
                 Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0), Reg.r(env.Target + 2u)),
                     $"Initialize next array element")
             | _ ->
@@ -1879,7 +1879,7 @@ and internal compileFunction (args: List<string * Type>)
     /// Code to move the body result into the function return value register
     let returnCode =
         match expandType body.Env body.Type with
-        | t when (isSubtypeOf body.Env t TFloat) ->
+        | TFloat ->
             Asm(RV.FMV_S(FPReg.fa0, FPReg.r(0u)),
                 "Move float result of function into return value register")
         | _ ->
