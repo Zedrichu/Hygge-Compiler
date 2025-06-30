@@ -419,9 +419,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let labelName = match expr with
                             | Eq _ -> "eq"
                             | Less _ -> "less"
-                            | LessEq _ -> "lesseq"
+                            | LessEq _ -> "less_eq"
                             | Greater _ -> "greater"
-                            | GreaterEq _ -> "greatereq"
+                            | GreaterEq _ -> "greater_eq"
                             | x -> failwith $"BUG: unexpected operation %O{x}"
             /// Label to jump to when the comparison is true
             let trueLabel = Util.genSymbol $"%O{labelName}_true"
@@ -500,10 +500,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let argCode = doCodegen env arg
         // The generated code depends on the 'print' argument type
         match expandType arg.Env arg.Type with
-        | t when (isSubtypeOf arg.Env t TBool) ->
+        | TBool ->
             let strTrue = Util.genSymbol "true"
             let strFalse = Util.genSymbol "false"
-            let printFalse = Util.genSymbol "print_true"
+            let printFalse = Util.genSymbol "print_false"
             let printExec = Util.genSymbol "print_execute"
             argCode.AddData(strTrue, Alloc.String("true"))
                 .AddData(strFalse, Alloc.String("false"))
@@ -519,7 +519,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     (RV.ECALL, "")
                   ])
                   ++ (afterSysCall [Reg.a0] [])
-        | t when (isSubtypeOf arg.Env t TInt) ->
+        | TInt ->
             argCode
             ++ (beforeSysCall [Reg.a0] [])
                 .AddText([
@@ -528,7 +528,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     (RV.ECALL, "")
                 ])
                 ++ (afterSysCall [Reg.a0] [])
-        | t when (isSubtypeOf arg.Env t TFloat) ->
+        | TFloat ->
             argCode
             ++ (beforeSysCall [] [FPReg.fa0])
                 .AddText([
@@ -537,7 +537,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     (RV.ECALL, "")
                 ])
                 ++ (afterSysCall [] [FPReg.fa0])
-        | t when (isSubtypeOf arg.Env t TString) ->
+        | TString ->
             argCode
             ++ (beforeSysCall [Reg.a0] [])
                 .AddText([
@@ -546,47 +546,45 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     (RV.ECALL, "")
                 ])
                 ++ (afterSysCall [Reg.a0] [])
+        | TStruct fields ->
+            let nodes = 
+                [{ node with Expr = Print(
+                            { node with Expr = StringVal("struct { "); Type = TString }) }] @
+                (List.collect (fun (name, tpe, _) ->
+                    let strVals = 
+                        match tpe with
+                        | TString -> (name + @" = \"""), @"\""; "
+                        | _ -> (name + " = "), "; "
+                    [
+                        { node with Expr = Print(
+                                { node with Expr = StringVal(fst strVals); Type = TString }) }
+                        { node with Expr = Print(
+                                { node with Expr = FieldSelect(arg, name); Type = tpe }) }
+                        { node with Expr = Print(
+                                { node with Expr = StringVal(snd strVals); Type = TString }) }
+                    ]
+                ) fields) @
+                [{ node with Expr = Print({ node with Expr = StringVal("}"); Type = TString }) }]
+            doCodegen env { node with Expr = Seq(nodes) }
+        | TArray tpe ->
+            let nodes = [
+                { node with Expr = Print(
+                        { node with Expr = StringVal(
+                                $"Array{{ type: {tpe.ToString()}; length: "); Type = TString }) }
+                { node with Expr = Print({ node with Expr = ArrayLength(arg); Type = TInt }) }
+                { node with Expr = Print({ node with Expr = StringVal(" }"); Type = TString }) }
+            ]
+            doCodegen env { node with Expr = Seq(nodes) }
+        | TFun _ as t ->
+            doCodegen env 
+                { node with Expr = Print(
+                        { node with Expr = StringVal(t.ToString()); Type = TString }) }
+        | TUnion (_: List<string * Type>) as t ->
+            doCodegen env 
+                { node with Expr = Print(
+                        { node with Expr = StringVal(t.ToString()); Type = TString }) }
         | t ->
-            match t with
-            | TStruct fields ->
-                let nodes = 
-                    [{ node with Expr = Print(
-                                { node with Expr = StringVal("struct { "); Type = TString }) }] @
-                    (List.collect (fun (name, tpe, _) ->
-                        let strVals = 
-                            match tpe with
-                            | TString -> (name + @" = \"""), @"\""; "
-                            | _ -> (name + " = "), "; "
-                        [
-                            { node with Expr = Print(
-                                    { node with Expr = StringVal(fst strVals); Type = TString }) }
-                            { node with Expr = Print(
-                                    { node with Expr = FieldSelect(arg, name); Type = tpe }) }
-                            { node with Expr = Print(
-                                    { node with Expr = StringVal(snd strVals); Type = TString }) }
-                        ]
-                    ) fields) @
-                    [{ node with Expr = Print({ node with Expr = StringVal("}"); Type = TString }) }]
-                doCodegen env { node with Expr = Seq(nodes) }
-            | TArray tpe ->
-                let nodes = [
-                    { node with Expr = Print(
-                            { node with Expr = StringVal(
-                                    $"Array{{ type: {tpe.ToString()}; length: "); Type = TString }) }
-                    { node with Expr = Print({ node with Expr = ArrayLength(arg); Type = TInt }) }
-                    { node with Expr = Print({ node with Expr = StringVal(" }"); Type = TString }) }
-                ]
-                doCodegen env { node with Expr = Seq(nodes) }
-            | TFun _ ->
-                doCodegen env 
-                    { node with Expr = Print(
-                            { node with Expr = StringVal(t.ToString()); Type = TString }) }
-            | TUnion (_: List<string * Type>) ->
-                doCodegen env 
-                    { node with Expr = Print(
-                            { node with Expr = StringVal(t.ToString()); Type = TString }) }
-            | t ->
-                failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
+            failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
 
     | PrintLn(arg) ->
         // Recycle codegen for Print above, then also output a newline
@@ -656,8 +654,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         // Reconstruct the AST to do a printout and then exit as usual for assertion - from Parser
 
-        // Check the assertion, and jump to 'passLabel' if it is true;
-        // otherwise, fail
+        // Check the assertion, and jump to 'passLabel' if it is true; otherwise, fail
         (doCodegen env arg)
             .AddText([
                 (RV.ADDI(Reg.r(env.Target), Reg.r(env.Target), Imm12(-1)), "")
@@ -904,9 +901,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 /// Assembly code that performs the field value assignment
                 let assignCode =
                     match expandType node.Env rhs.Type with
-                    | t when (isSubtypeOf rhs.Env t TUnit) ->
+                    | TUnit ->
                         Asm() // Nothing to do
-                    | t when (isSubtypeOf rhs.Env t TFloat) ->
+                    | TFloat ->
                         Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0),
                                      Reg.r(env.Target)),
                             $"Assigning value to array element at index")
@@ -1268,9 +1265,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// value stored in `target+3u` to the heap location of the next array element in `target+2u`
         let elemInitCode: Asm =
             match expandType node.Env init.Type with
-            | t when (isSubtypeOf init.Env t TUnit) ->
+            | TUnit ->
                 Asm() // Nothing to do
-            | t when (isSubtypeOf init.Env t TFloat) ->
+            | TFloat ->
                 Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(0), Reg.r(env.Target + 2u)),
                     $"Initialize next array element")
             | _ ->
@@ -1882,7 +1879,7 @@ and internal compileFunction (args: List<string * Type>)
     /// Code to move the body result into the function return value register
     let returnCode =
         match expandType body.Env body.Type with
-        | t when (isSubtypeOf body.Env t TFloat) ->
+        | TFloat ->
             Asm(RV.FMV_S(FPReg.fa0, FPReg.r(0u)),
                 "Move float result of function into return value register")
         | _ ->
