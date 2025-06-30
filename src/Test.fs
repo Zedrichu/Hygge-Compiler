@@ -150,11 +150,11 @@ let tests = testList "tests" [
             testCodegen file 0
         <| fun file ->
             testCodegen file RISCVCodegen.assertExitCode
-    // createTestList "codegen-anf"
-    //     <| fun file ->
-    //         testANFCodegen file 0
-    //     <| fun file ->
-    //         testANFCodegen file RISCVCodegen.assertExitCode
+    createTestList "codegen-anf"
+        <| fun file ->
+            testANFCodegen file 0
+        <| fun file ->
+            testANFCodegen file RISCVCodegen.assertExitCode
 ]
 
 

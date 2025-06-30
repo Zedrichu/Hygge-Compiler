@@ -15,7 +15,7 @@ open Typechecker
 /// Storage information for variables.
 [<RequireQualifiedAccess; StructuralComparison; StructuralEquality>]
 type internal Storage =
-    /// The variable is stored in an integerregister.
+    /// The variable is stored in an integer register.
     | Reg of reg: Reg
     /// This variable is stored on the stack, at the given offset (in bytes)
     /// from the memory address contained in the frame pointer (fp) register.
@@ -85,9 +85,8 @@ let internal getIntVarRegister (env: ANFCodegenEnv) (varName: string): Reg =
     (findIntVarRegister env varName).Value
 
 
-/// Spill the variable with the given name onto its stack position assigned in
-/// 'env'.  Return the assembly code that performs the spill and the updated
-/// codegen environment.
+/// Spill the variable with the given name onto its stack position assigned in 'env'.
+/// Return the assembly code that performs the spill and the updated codegen environment.
 let internal spillVar (env: ANFCodegenEnv) (varName: string): ANFCodegenResult =
     match (findIntVarRegister env varName) with
     | Some(reg) ->
@@ -106,8 +105,7 @@ let internal spillVar (env: ANFCodegenEnv) (varName: string): ANFCodegenResult =
 /// Spill the integer variable that has been stored in an integer register for
 /// the longest time, saving it in the stack position assigned in 'env'.  Choose
 /// a variable that does not belong to the given 'doNotSpill' list.  Return the
-/// assembly code that performs the spilling, and the updated codegen
-/// environment.
+/// assembly code that performs the spilling, and the updated codegen environment.
 let internal spillOldestIntVar (env: ANFCodegenEnv) (doNotSpill: List<string>): ANFCodegenResult =
     /// Variables in registers, starting with the ones allocated earlier
     let varsInRegisters, _ = List.unzip (List.rev env.IntVarsInRegs)
@@ -123,10 +121,9 @@ let internal spillOldestIntVar (env: ANFCodegenEnv) (doNotSpill: List<string>): 
     spillVar env selectedVar
 
 
-/// Allocate a position on the stack frame for the given variable, either by
-/// using an available position, or by advancing the stack pointer.  Return the
-/// coddesponding codegen result, with the assembly code to update the stack
-/// pointer (if needed).
+/// Allocate a position on the stack frame for the given variable, either by using
+/// an available position, or by advancing the stack pointer. Return the corresponding
+/// codegen result, with the assembly code to update the stack pointer (if needed).
 let internal allocateVarOnFrame (env: ANFCodegenEnv) (varName: string): ANFCodegenResult =
     /// Find the lowest unused stack position
     let rec selectFramePos (n: int) =
@@ -143,12 +140,11 @@ let internal allocateVarOnFrame (env: ANFCodegenEnv) (varName: string): ANFCodeg
                        FrameSize = max (stackPos+1) env.FrameSize } }
 
 
-/// Allocate a variable that can be stored in an integer register, having the
-/// give name, and using the given code generation environment.  Return the
-/// allocated register, the assembly code needed to allocate that register (if
-/// some other variable was spilled on the stack frame), and the corresponding
-/// updated code generation environment mapping 'varName' to the allocated
-/// register.
+/// Allocate a variable that can be stored in an integer register, having the given name,
+/// and using the given code generation environment. Return the allocated register, the
+/// assembly code needed to allocate that register (if some other variable was spilled
+/// on the stack frame), and the corresponding updated code generation environment
+/// mapping 'varName' to the allocated register.
 let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string) : Reg * ANFCodegenResult =
     /// Codegen result after allocating 'varName' on the frame
     let frameAllocRes = allocateVarOnFrame env varName
@@ -239,8 +235,7 @@ let internal loadVars (env: ANFCodegenEnv)
 
 /// Make available more registers in the given codegen environment, by removing
 /// all variables that are neither in the given set of needed variables, nor in
-/// env.NeededVars, nor env.TargetVar.  Return an updated code generation
-/// environment.
+/// env.NeededVars, nor env.TargetVar. Return an updated code generation environment.
 let internal cleanupUnusedVars (env: ANFCodegenEnv) (neededVars: Set<string>): ANFCodegenEnv =
     /// Set of all needed variables that cannot be removed from storage
     let needed = (Set.union neededVars env.NeededVars).Add(env.TargetVar)
@@ -267,7 +262,7 @@ let internal syncANFCodegenEnvs (fromEnv: ANFCodegenEnv)
                                 (toEnv: ANFCodegenEnv): Asm =
     assert(fromEnv.NeededVars = toEnv.NeededVars)
 
-    // Cleaanup unused variables in the environments
+    // Cleanup unused variables in the environments
     let fromEnv = cleanupUnusedVars fromEnv Set[]
     let toEnv = cleanupUnusedVars toEnv Set[]
 
@@ -338,8 +333,8 @@ let rec internal doCodegen (env: ANFCodegenEnv)
                         ++ Asm(RV.LW(targetReg, Imm12(env.Frame[vname] * -4), Reg.fp),
                                $"%s{env.TargetVar} <- %s{vname}") }
 
-    | Let(vname, init, scope) 
-    | LetT(vname, _, init, scope)->
+    | Let(vname, init, scope)
+    | LetT(vname, _, init, scope) ->
         /// Cleaned-up codegen environment reduced to the variables that are
         /// actually used in the 'let' init and scope
         let initEnv = cleanupUnusedVars env (Set.union (ASTUtil.freeVars init)
@@ -374,6 +369,7 @@ let rec internal doCodegen (env: ANFCodegenEnv)
           Env = scopeCodegenResult.Env }
 
 
+    | LetRec(name, _, init, scope)
     | LetMut(name, init, scope) ->
         // The code generation is the same as 'let...', so we recycle it
         doCodegen env {node with Expr = Let(name, init, scope)}
@@ -390,6 +386,21 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
     | Var _ ->
         doCodegen env init
 
+    | UnitVal -> { Asm = Asm() // Nothing to do
+                   Env = env }
+
+    | StringVal(v) ->
+        /// Label marking the string constant in the data segment
+        let label = Util.genSymbol "string_val"
+        /// Target register to store the string value and code to load it
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
+        /// Code for storing the string at label, and loading its address
+        let strAddressCode = Asm()
+                                 .AddData(label, Alloc.String(v))
+                                 .AddText(RV.LA(targetReg, label))
+        { Asm = targetLoadRes.Asm ++ strAddressCode
+          Env = targetLoadRes.Env }
+
     | BoolVal(value) ->
         /// Target register to store the boolean value and code to load it
         let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
@@ -404,6 +415,11 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Env = targetLoadRes.Env }
 
     | Add(lhs, rhs)
+    | Sub(lhs, rhs)
+    | Div(lhs, rhs)
+    | Mod(lhs, rhs)
+    | Min(lhs, rhs)
+    | Max(lhs, rhs)
     | Mult(lhs, rhs) as expr ->
         /// Names of the variables used by the lhs and rhs of this operation
         let lrVarNames = getVarNames [lhs; rhs]
@@ -412,13 +428,30 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             /// Target register to store the operation result + code to load it
             let targetReg, targetLoadRes =
                 loadIntVar argLoadRes.Env env.TargetVar lrVarNames
+            let label = Util.genSymbol "minmax_exit"
             /// Assembly code for the operation
             let opAsm =
                 match expr with
-                | Add(_,_) -> Asm(RV.ADD(targetReg, lhsReg, rhsReg),
-                                  $"%s{env.TargetVar} <- %s{lrVarNames.[0]} + %s{lrVarNames.[1]}")
-                | Mult(_,_) -> Asm(RV.MUL(targetReg, lhsReg, rhsReg),
-                                   $"%s{env.TargetVar} <- %s{lrVarNames.[0]} * %s{lrVarNames.[1]}")
+                | Add _ -> Asm(RV.ADD(targetReg, lhsReg, rhsReg),
+                                  $"%s{env.TargetVar} <- %s{lrVarNames[0]} + %s{lrVarNames[1]}")
+                | Sub _ -> Asm(RV.SUB(targetReg, lhsReg, rhsReg),
+                                  $"%s{env.TargetVar} <- %s{lrVarNames[0]} + %s{lrVarNames[1]}")
+                | Mult _ -> Asm(RV.MUL(targetReg, lhsReg, rhsReg),
+                                   $"%s{env.TargetVar} <- %s{lrVarNames[0]} * %s{lrVarNames[1]}")
+                | Div _ -> Asm(RV.DIV(targetReg, lhsReg, rhsReg),
+                                   $"%s{env.TargetVar} <- %s{lrVarNames[0]} * %s{lrVarNames[1]}")
+                | Mod _ -> Asm(RV.REM(targetReg, lhsReg, rhsReg),
+                                   $"%s{env.TargetVar} <- %s{lrVarNames[0]} * %s{lrVarNames[1]}")
+                | Min _ -> Asm().AddText([
+                        (RV.BLT(targetReg, rhsReg, label), $"%s{env.TargetVar} <- min(%s{lrVarNames[0]}, %s{lrVarNames[1]})")
+                        (RV.MV(targetReg, rhsReg), "")
+                        (RV.LABEL(label), "")
+                    ])
+                | Max _ -> Asm().AddText([
+                        (RV.BLT(rhsReg, targetReg, label), $"%s{env.TargetVar} <- max(%s{lrVarNames[0]}, %s{lrVarNames[1]})")
+                        (RV.MV(targetReg, rhsReg), "")
+                        (RV.LABEL(label), "")
+                    ])
                 | x -> failwith $"BUG: unexpected operation %O{x}"
             { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ opAsm
               Env = targetLoadRes.Env }
@@ -426,7 +459,10 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             failwith $"BUG: unexpected return value from 'loadVars': %O{x}"
 
     | Eq(lhs, rhs)
-    | Less(lhs, rhs) as expr when (expandType lhs.Env lhs.Type) = TInt ->
+    | Less(lhs, rhs)
+    | LessEq(lhs, rhs)
+    | Greater(lhs, rhs)
+    | GreaterEq(lhs, rhs) as expr when (expandType lhs.Env lhs.Type) = TInt ->
         /// Names of the variables used by the lhs and rhs of this operation
         let lrVarNames = getVarNames [lhs; rhs]
         match (loadVars env [lhs; rhs] []) with
@@ -437,8 +473,11 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             /// Human-readable prefix for jump labels, describing the kind of
             /// relational operation we are compiling
             let labelName = match expr with
-                            | Eq(_,_) -> "eq"
-                            | Less(_,_) -> "less"
+                            | Eq _ -> "eq"
+                            | Less _ -> "less"
+                            | LessEq _ -> "less_eq"
+                            | Greater _ -> "greater"
+                            | GreaterEq _ -> "greater_eq"
                             | x -> failwith $"BUG: unexpected operation %O{x}"
             /// Label to jump to when the comparison is true
             let trueLabel = Util.genSymbol $"%O{labelName}_true"
@@ -448,10 +487,16 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             /// Codegen for the relational operation between lhs and rhs
             let opAsm =
                 match expr with
-                | Eq(_,_) ->
+                | Eq _ ->
                     Asm(RV.BEQ(lhsReg, rhsReg, trueLabel))
-                | Less(_,_) ->
+                | Less _ ->
                     Asm(RV.BLT(lhsReg, rhsReg, trueLabel))
+                | LessEq _ ->
+                    Asm(RV.BLE(lhsReg, rhsReg, trueLabel))
+                | Greater _ ->
+                    Asm(RV.BGT(lhsReg, rhsReg, trueLabel))
+                | GreaterEq _ ->
+                    Asm(RV.BGE(lhsReg, rhsReg, trueLabel))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
 
             /// Generated code where we put everything
@@ -469,6 +514,73 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
 
         | x ->
             failwith $"BUG: unexpected return value from 'loadVars': %O{x}"
+    
+    | Print(arg) ->
+        /// Register holding printing argument, and code to load it
+        let argVarName = getVarName arg
+        let argReg, argLoadRes = loadIntVar env argVarName []
+        // The generated code depends on the `print` argument type
+        match expandType arg.Env arg.Type with
+        | TBool ->
+            let strTrue = Util.genSymbol "true"
+            let strFalse = Util.genSymbol "false"
+            let printFalse = Util.genSymbol "print_false"
+            let printExec = Util.genSymbol "print_execute"
+            /// Printout code for boolean variables
+            let boolPrintCode = argLoadRes.Asm
+                                    .AddData(strTrue, Alloc.String("true"))
+                                    .AddData(strFalse, Alloc.String("false"))
+                                    .AddText([
+                                        (RV.BEQZ(argReg, printFalse), "")
+                                        (RV.LA(Reg.a0, strTrue), "String to print via syscall")
+                                        (RV.J(printExec), "")
+                                        (RV.LABEL(printFalse), "")
+                                        (RV.LA(Reg.a0, strFalse), "String to print via syscall")
+                                        (RV.LABEL(printExec), "")
+                                        (RV.LI(Reg.a7, 4), "RARS syscall: PrintString")
+                                        (RV.ECALL, "")
+                                    ])
+            { Asm = argLoadRes.Asm ++ boolPrintCode
+              Env = argLoadRes.Env }
+        | TInt ->
+            /// Printout code for integer variables
+            let intPrintCode = argLoadRes.Asm
+                                    .AddText([
+                                        (RV.MV(Reg.a0, argReg), "Copy to a0 for printing")
+                                        (RV.LI(Reg.a7, 1), "RARS syscall: PrintInt")
+                                        (RV.ECALL, "")
+                                    ])
+            { Asm = argLoadRes.Asm ++ intPrintCode
+              Env = argLoadRes.Env }
+        | TString ->
+            /// Printout code for string variables
+            let stringPrintCode = argLoadRes.Asm
+                                    .AddText([
+                                        (RV.MV(Reg.a0, argReg), "Copy to a0 for printing")
+                                        (RV.LI(Reg.a7, 4), "RARS syscall: PrintString")
+                                        (RV.ECALL, "")
+                                    ])
+            { Asm = argLoadRes.Asm ++ stringPrintCode
+              Env = argLoadRes.Env }
+        | t -> failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
+        | TFloat -> { Asm = Asm()
+                      Env = env }
+        
+
+    | PrintLn(arg) ->
+        /// Recycle codegen for Print above, then also output a newline token
+        let printRes = doLetInitCodegen env { init with Expr = Print(arg) }
+        
+        /// Add the newline character
+        let newlineAsm = Asm([
+            (RV.LI(Reg.a0, int('\n')), "Character to print (newline)")
+            (RV.LI(Reg.a7, 11), "RARS syscall: PrintChar")
+            (RV.ECALL, "")
+        ])
+        
+        { Asm = printRes.Asm ++ newlineAsm
+          Env = printRes.Env }
+        
 
     | Assertion(arg) ->
         /// Register holding assertion argument, and code to load it
