@@ -662,14 +662,15 @@ For more information on this, and how to apply and follow the GNU AGPL, see
 
 ----------------------------------------------------------------------------------
 
-  Hygge Compiler - Compiler implementation for the didactic language Hygge
+  Hygge Compiler - Compiler implementation for the didactic language Hygge <br>
   Copyright (C) 2025 Technical University of Denmark
 
-  Authors: Adrian Zvizdenco <s204683@dtu.dk>
-           Kornel Gładkowski
-           Mikolaj Jochim
-           Simão Teixeira
-           William Brøchner Søndergaard
+  Authors: 
+  - Adrian Zvizdenco <s204683@dtu.dk>
+  - Kornel Gładkowski
+  - Mikolaj Jochim
+  - Simão Teixeira
+  - William Brøchner Søndergaard
 
   This program is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as published
