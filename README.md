@@ -88,3 +88,50 @@ extensions:
   * [FsYacc Language Service](https://marketplace.visualstudio.com/items?itemName=ijklam.fsyacc-language-service)
     (**NOTE:** this extension _might_ need the .NET 6.0 runtime installed, which
     may be problematic on some operating systems)
+
+## License Notice
+
+  Hygge Compiler - Compiler implementation for the didactic language Hygge <br>
+  Copyright (C) 2025 Technical University of Denmark
+
+  Authors: 
+  - Adrian Zvizdenco <s204683@dtu.dk>
+  - Kornel Gładkowski
+  - Mikolaj Jochim
+  - Simão Teixeira
+  - William Brøchner Søndergaard
+
+  This program is free software: you can redistribute it and/or modify it
+  under the terms of the GNU Affero General Public License as published
+  by the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+----------------------------------------------------------------------------------
+
+Copyright (C) 2023-2025 Technical University of Denmark
+
+Author: Alceste Scalas <alcsc@dtu.dk>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----------------------------------------------------------------------------------
+#### Project completed in course 02267 Software Development of Web Services @ Technical University of Denmark 
+<img src="https://user-images.githubusercontent.com/65953954/120001846-7f05f180-bfd4-11eb-8c11-2379a547dc9f.jpg" alt="drawing" width="100"/>
+
