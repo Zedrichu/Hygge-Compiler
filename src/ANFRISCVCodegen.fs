@@ -17,6 +17,7 @@ open Typechecker
 type internal Storage =
     /// The variable is stored in an integer register.
     | Reg of reg: Reg
+    /// The variable is stored in a floating-point register.
     | FPReg of reg: FPReg
     /// This variable is stored on the stack, at the given offset (in bytes)
     /// from the memory address contained in the frame pointer (fp) register.
