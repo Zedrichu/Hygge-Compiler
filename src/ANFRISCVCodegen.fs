@@ -17,10 +17,16 @@ open Typechecker
 type internal Storage =
     /// The variable is stored in an integer register.
     | Reg of reg: Reg
+    | FPReg of reg: FPReg
     /// This variable is stored on the stack, at the given offset (in bytes)
     /// from the memory address contained in the frame pointer (fp) register.
     | Frame of offset: int
 
+
+type internal FreeRegisters = {
+    Int: List<Reg>
+    Float: List<FPReg>
+}
 
 /// Code generation environment.
 type internal ANFCodegenEnv = {
@@ -34,8 +40,12 @@ type internal ANFCodegenEnv = {
     /// first.  If a variable does not appear here, then it means that it is
     /// allocated on the stack frame.
     IntVarsInRegs: List<string * Reg>
+    /// List of float variables stored in registers, with newest ones coming
+    /// first. If a float variable does not appear here, then it means that
+    /// it is allocated on the stack frame.
+    FloatVarsInRegs: List<string * FPReg>
     /// List of available integer registers.
-    FreeRegs: List<Reg>
+    FreeRegs: FreeRegisters
     /// Set of variables that are needed in the surrounding scope, and should
     /// never be discarded to reuse their storage.
     NeededVars: Set<string>
@@ -70,12 +80,21 @@ let internal getVarNames (nodes: List<TypedAST>): List<string> =
     List.map getVarName nodes
 
 
-/// Optionally return the integer register where the given variable is stored in
-/// the given codegen environment.
+/// Optionally return the integer register where the given variable is stored
+/// within the given codegen environment.
 let rec internal findIntVarRegister (env: ANFCodegenEnv) (varName: string) : Option<Reg> =
     match env.IntVarsInRegs with
     | (v, reg) :: _ when v = varName -> Some(reg)
     | _ :: rest -> findIntVarRegister {env with IntVarsInRegs = rest} varName
+    | [] -> None
+    
+    
+/// Optionally return the floating-point register where the given variable is
+/// stored within the given codegen environment.
+let rec internal findFloatVarRegister (env: ANFCodegenEnv) (varName: string) : Option<FPReg> =
+    match env.FloatVarsInRegs with
+    | (v, fpReg) :: _ when v = varName -> Some(fpReg)
+    | _ :: rest -> findFloatVarRegister {env with FloatVarsInRegs = rest} varName
     | [] -> None
 
 
@@ -85,6 +104,12 @@ let internal getIntVarRegister (env: ANFCodegenEnv) (varName: string): Reg =
     (findIntVarRegister env varName).Value
 
 
+/// Get the floating-point register of 'varName' in the given environment,
+/// failing immediately if 'varName' is not loaded in a register.
+let internal getFloatVarRegister (env: ANFCodegenEnv) (varName: string): FPReg =
+    (findFloatVarRegister env varName).Value
+
+
 /// Spill the variable with the given name onto its stack position assigned in 'env'.
 /// Return the assembly code that performs the spill and the updated codegen environment.
 let internal spillVar (env: ANFCodegenEnv) (varName: string): ANFCodegenResult =
@@ -92,19 +117,31 @@ let internal spillVar (env: ANFCodegenEnv) (varName: string): ANFCodegenResult =
     | Some(reg) ->
         /// Assembly code to spill the variable
         let spillAsm = Asm(RV.SW(reg, Imm12(env.Frame[varName] * -4), Reg.fp),
-                           $"Spill variable %s{varName} from register %O{reg} to stack")
+                           $"Spill int variable %s{varName} from register %O{reg} to stack")
         /// Variables in registers, after excluding variable being spilled
         let intVarsInRegs2 = List.except [(varName, reg)] env.IntVarsInRegs
         { Asm = spillAsm
           Env = { env with IntVarsInRegs = intVarsInRegs2
-                           FreeRegs = reg :: env.FreeRegs} }
+                           FreeRegs = { Int = reg :: env.FreeRegs.Int
+                                        Float = env.FreeRegs.Float }}}
     | None ->
-        { Env = env; Asm = Asm() } // No need to spill this variable
+        match (findFloatVarRegister env varName) with
+        | Some(fpReg) ->
+            /// Assembly code to spill the float variable
+            let spillAsm = Asm(RV.FSW_S(fpReg, Imm12(env.Frame[varName] * -4), Reg.fp),
+                               $"Spill float variable %s{varName} from register %O{fpReg} to stack")
+            /// Variables in registers, after excluding variable being spilled
+            let floatVarsInRegs2 = List.except [(varName, fpReg)] env.FloatVarsInRegs
+            { Asm = spillAsm
+              Env = { env with FloatVarsInRegs = floatVarsInRegs2
+                               FreeRegs.Float = fpReg :: env.FreeRegs.Float }}
+            
+        | None -> { Env = env; Asm = Asm() } // No need to spill this variable
 
 
 /// Spill the integer variable that has been stored in an integer register for
-/// the longest time, saving it in the stack position assigned in 'env'.  Choose
-/// a variable that does not belong to the given 'doNotSpill' list.  Return the
+/// the longest time, saving it in the stack position assigned in 'env'. Choose
+/// a variable that does not belong to the given 'doNotSpill' list. Return the
 /// assembly code that performs the spilling, and the updated codegen environment.
 let internal spillOldestIntVar (env: ANFCodegenEnv) (doNotSpill: List<string>): ANFCodegenResult =
     /// Variables in registers, starting with the ones allocated earlier
@@ -116,6 +153,25 @@ let internal spillOldestIntVar (env: ANFCodegenEnv) (doNotSpill: List<string>): 
         | _ :: rest -> selectVar rest
         | [] ->
             failwith $"BUG: cannot spill any variable from %O{env.IntVarsInRegs} while excluding %O{doNotSpill}"
+    /// Selected variable for spilling
+    let selectedVar = selectVar varsInRegisters
+    spillVar env selectedVar
+
+
+/// Spill the oldest float variable that has been stored in a floating-point register
+/// for the longest time, saving it in the stack position assigned in 'env'. Choose
+/// a variable that does not belong to the given 'doNotSpill' list. Return the
+/// assembly code that performs the spilling, and the updated codegen environment.
+let internal spillOldestFloatVar (env: ANFCodegenEnv) (doNotSpill: List<string>): ANFCodegenResult =
+    /// Variables in registers, starting with the ones allocated earlier
+    let varsInRegisters, _ = List.unzip (List.rev env.FloatVarsInRegs)
+    /// Select the first variable in the given list that is not in 'except'
+    let rec selectVar (varRegs: List<string>): string =
+        match varRegs with
+        | name :: _ when not (List.contains name doNotSpill) -> name
+        | _ :: rest -> selectVar rest
+        | [] ->
+            failwith $"BUG: cannot spill any variable from %O{env.FloatVarsInRegs} while excluding %O{doNotSpill}"
     /// Selected variable for spilling
     let selectedVar = selectVar varsInRegisters
     spillVar env selectedVar
@@ -149,7 +205,7 @@ let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string) : Reg * A
     /// Codegen result after allocating 'varName' on the frame
     let frameAllocRes = allocateVarOnFrame env varName
 
-    match env.FreeRegs with
+    match env.FreeRegs.Int with
     | reg :: rest ->
         /// Updated list of variables in integer registers
         let intVarsInRegs = (varName, reg) :: env.IntVarsInRegs
@@ -157,7 +213,7 @@ let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string) : Reg * A
                         ++ Asm(RV.COMMENT($"Variable %s{varName} allocation: "
                                           + $"register %O{reg}, "
                                           + $"frame pos. %d{frameAllocRes.Env.Frame[varName]} "))
-                Env = {frameAllocRes.Env with FreeRegs = rest
+                Env = {frameAllocRes.Env with FreeRegs.Int = rest
                                               IntVarsInRegs = intVarsInRegs} })
     | [] -> // No free registers available: we spill a variable onto the stack
         /// Assembly code and environment for spilling a variable onto the stack
@@ -174,25 +230,40 @@ let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string) : Reg * A
 let internal loadIntVarIntoRegister (env: ANFCodegenEnv) (varName: string)
                                     (reg: Reg): ANFCodegenResult =
     assert List.forall (fun (v, _) -> v <> varName) env.IntVarsInRegs
-    assert List.contains reg env.FreeRegs
+    assert List.contains reg env.FreeRegs.Int
     /// Remaining free registers after 'varName' is loaded in 'reg'
-    let remainingRegs = List.except [reg] env.FreeRegs
+    let remainingRegs = List.except [reg] env.FreeRegs.Int
     { Asm = Asm(RV.LW(reg, Imm12(env.Frame[varName] * -4), Reg.fp),
                       $"Load variable %s{varName} onto register %O{reg}")
-      Env = {env with FreeRegs = remainingRegs
+      Env = {env with FreeRegs.Int = remainingRegs
                       IntVarsInRegs = (varName, reg) :: env.IntVarsInRegs} }
+    
+
+/// Load the given float variable in the given floating-point register. Return the
+/// updated codegen environment. NOTE: this function assumes that 'varName' is not
+/// already loaded in a register, and that 'fpReg' is a free floating-point register.
+let rec internal loadFloatVarIntoRegister (env: ANFCodegenEnv) (varName: string)
+                                          (fpReg: FPReg): ANFCodegenResult =
+    assert List.forall (fun (v, _) -> v <> varName) env.FloatVarsInRegs
+    assert List.contains fpReg env.FreeRegs.Float
+    /// Remaining free floating-point registers after 'varName' is loaded in 'fpReg'
+    let remainingFPRegs = List.except [fpReg] env.FreeRegs.Float
+    { Asm = Asm(RV.FLW_S(fpReg, Imm12(env.Frame[varName] * -4), Reg.fp),
+                      $"Load float variable %s{varName} onto FP register %O{fpReg}")
+      Env = {env with FreeRegs.Float = remainingFPRegs
+                      FloatVarsInRegs = (varName, fpReg) :: env.FloatVarsInRegs} }
 
 
 /// Load a non-float variable from the stack frame into an available register,
-/// unless the variable is already in a register.  If spilling is needed, do not
-/// spill any variable in the list 'doNotSpill'.  Return the assigned variable
+/// unless the variable is already in a register. If spilling is needed, do not
+/// spill any variable in the list 'doNotSpill'. Return the assigned variable
 /// register and the loading code and updated codegen environment.
 let rec internal loadIntVar (env: ANFCodegenEnv) (varName: string)
                             (doNotSpill: List<string>): Reg * ANFCodegenResult =
     match (findIntVarRegister env varName) with
     | Some(reg) -> (reg, {Asm = Asm(); Env = env})
     | None ->
-        match env.FreeRegs with
+        match env.FreeRegs.Int with
         | reg :: _ ->
             (reg, loadIntVarIntoRegister env varName reg)
         | [] ->
@@ -202,6 +273,28 @@ let rec internal loadIntVar (env: ANFCodegenEnv) (varName: string)
             let reg, loadCodegenRes = loadIntVar spillEnv varName doNotSpill
             (reg, { Asm = spillAsm ++ loadCodegenRes.Asm
                     Env = loadCodegenRes.Env })
+
+
+/// Load a float variable from the stack frame into an available floating-point register,
+/// unless the variable is already in a register. If spilling is needed, do not spill any
+/// variable in the list 'doNotSpill'. Return the assigned variable register and the
+/// loading code and updated codegen environment.
+let rec internal loadFloatVar (env: ANFCodegenEnv) (varName: string)
+                              (doNotSpill: List<string>): FPReg * ANFCodegenResult =
+    match (findFloatVarRegister env varName) with
+    | Some(fpReg) -> (fpReg, {Asm = Asm(); Env = env})
+    | None ->
+        match env.FreeRegs.Float with
+        | fpReg :: _ ->
+            let loadRes = loadFloatVarIntoRegister env varName fpReg
+            (fpReg, loadRes)
+        | [] ->
+            /// Assembly code and environment for spilling a variable onto the stack
+            let spillRes = spillOldestFloatVar env doNotSpill
+            /// Register and codegen env after variable spilling and loading
+            let fpReg, loadCodegenRes = loadFloatVar spillRes.Env varName doNotSpill
+            (fpReg, { Asm = spillRes.Asm ++ loadCodegenRes.Asm
+                      Env = loadCodegenRes.Env })
 
 
 /// Take a codegen environment and list of variable names, and load each
@@ -241,18 +334,27 @@ let internal cleanupUnusedVars (env: ANFCodegenEnv) (neededVars: Set<string>): A
     let needed = (Set.union neededVars env.NeededVars).Add(env.TargetVar)
     /// Cleaned-up frame with unnecessary variables removed
     let cleanFrame = Map.filter (fun v _-> needed.Contains v) env.Frame
-    /// Cleaned-up list of variables in registers
+    /// Cleaned-up list of variables in int registers
     let intVarsInRegs = List.filter (fun (v,_)-> needed.Contains v) env.IntVarsInRegs
+    /// Cleaned-up list of variables in float registers
+    let floatVarsInRegs = List.filter (fun (v,_)-> needed.Contains v) env.FloatVarsInRegs
     /// Folder function to collect all deallocated integer registers
-    let deallocRegs (acc: List<Reg>) (varName: string, reg: Reg) =
+    let deallocIntRegs (acc: List<Reg>) (varName: string, reg: Reg) =
         if not (needed.Contains varName) then reg :: acc else acc
     /// List of deallocated integer registers
-    let deallocatedRegs = List.fold deallocRegs [] env.IntVarsInRegs
-    /// List of free integer registers after the deallocation
-    let freeRegs = deallocatedRegs @ env.FreeRegs
+    let deallocatedRegs = List.fold deallocIntRegs [] env.IntVarsInRegs
+    /// Folder function to collect all deallocated float registers
+    let deallocFloatRegs (acc: List<FPReg>) (varName: string, fpReg: FPReg) =
+        if not (needed.Contains varName) then fpReg :: acc else acc
+    /// List of deallocated float registers
+    let deallocatedFloatRegs = List.fold deallocFloatRegs [] env.FloatVarsInRegs
+    /// List of free registers after the deallocation
+    let freeRegs = { Int = deallocatedRegs @ env.FreeRegs.Int
+                     Float = deallocatedFloatRegs @ env.FreeRegs.Float }
 
     { env with Frame = cleanFrame
                IntVarsInRegs = intVarsInRegs
+               FloatVarsInRegs = floatVarsInRegs
                FreeRegs = freeRegs }
 
 
@@ -383,8 +485,7 @@ let rec internal doCodegen (env: ANFCodegenEnv)
 /// environment.  The expression is expected to be in ANF.
 and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenResult =
     match init.Expr with
-    | Var _ ->
-        doCodegen env init
+    | Var _ -> doCodegen env init
 
     | UnitVal -> { Asm = Asm() // Nothing to do
                    Env = env }
@@ -413,6 +514,34 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
         { Asm = targetLoadRes.Asm ++ Asm(RV.LI(targetReg, value))
           Env = targetLoadRes.Env }
+        
+    | FloatVal(v) ->
+        // We convert the float value into its bytes, and load it as immediate
+        let bytes = System.BitConverter.GetBytes(v)
+        if (not System.BitConverter.IsLittleEndian)
+            then System.Array.Reverse(bytes) // RISC-V is little-endian
+        let word: int32 = System.BitConverter.ToInt32(bytes)
+        
+        /// Temporary int register used for loading (alternate link register - needs to restore)
+        let tempReg = Reg.t0
+        
+        /// Target register to store the float value and code to load it
+        let targetReg, targetLoadRes = loadFloatVar env env.TargetVar []
+        
+        // Current handling of floats writes bytes to t0 then to fpreg, but we use t0 to store the function address.
+        // Solution: We save the contents of the env.Target register before using it to perform the conversion, then it is restored after the float val is loaded into FP reg.
+        let floatLoadingCode = Asm([
+              (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space to save register") // RARS commenting for debugging... if it's annoying you can remove it.
+              (RV.SW(tempReg, Imm12(0), Reg.sp), "Save t0 (temp) register to stack")
+              (RV.LI(tempReg, word), $"Float value %f{v}")
+              (RV.FMV_W_X(targetReg, tempReg), $"Move float value %f{v} to FP register")
+              (RV.LW(tempReg, Imm12(0), Reg.sp), "Restore t0 (temp) register from stack")
+              (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
+        ])
+        
+        { Asm = targetLoadRes.Asm ++ floatLoadingCode
+          Env = targetLoadRes.Env }
+        
 
     | Add(lhs, rhs)
     | Sub(lhs, rhs)
@@ -435,13 +564,13 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                 | Add _ -> Asm(RV.ADD(targetReg, lhsReg, rhsReg),
                                   $"%s{env.TargetVar} <- %s{lrVarNames[0]} + %s{lrVarNames[1]}")
                 | Sub _ -> Asm(RV.SUB(targetReg, lhsReg, rhsReg),
-                                  $"%s{env.TargetVar} <- %s{lrVarNames[0]} + %s{lrVarNames[1]}")
+                                  $"%s{env.TargetVar} <- %s{lrVarNames[0]} - %s{lrVarNames[1]}")
                 | Mult _ -> Asm(RV.MUL(targetReg, lhsReg, rhsReg),
                                    $"%s{env.TargetVar} <- %s{lrVarNames[0]} * %s{lrVarNames[1]}")
                 | Div _ -> Asm(RV.DIV(targetReg, lhsReg, rhsReg),
-                                   $"%s{env.TargetVar} <- %s{lrVarNames[0]} * %s{lrVarNames[1]}")
+                                   $"%s{env.TargetVar} <- %s{lrVarNames[0]} / %s{lrVarNames[1]}")
                 | Mod _ -> Asm(RV.REM(targetReg, lhsReg, rhsReg),
-                                   $"%s{env.TargetVar} <- %s{lrVarNames[0]} * %s{lrVarNames[1]}")
+                                   $"%s{env.TargetVar} <- %s{lrVarNames[0]} %% %s{lrVarNames[1]}")
                 | Min _ -> Asm().AddText([
                         (RV.BLT(targetReg, rhsReg, label), $"%s{env.TargetVar} <- min(%s{lrVarNames[0]}, %s{lrVarNames[1]})")
                         (RV.MV(targetReg, rhsReg), "")
@@ -452,7 +581,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                         (RV.MV(targetReg, rhsReg), "")
                         (RV.LABEL(label), "")
                     ])
-                | x -> failwith $"BUG: unexpected operation %O{x}"
+                | x -> failwith $"BUG: unexpected binary arithmetic operation %O{x}"
             { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ opAsm
               Env = targetLoadRes.Env }
         | x ->
@@ -508,10 +637,8 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                             (RV.LI(targetReg, 1), "Comparison result is true")
                             (RV.LABEL(endLabel), "")
                         ])
-
             { Asm = asm
               Env = targetLoadRes.Env }
-
         | x ->
             failwith $"BUG: unexpected return value from 'loadVars': %O{x}"
     
@@ -666,7 +793,9 @@ let codegen (node: TypedAST) (registers: uint): RISCV.Asm =
                 Frame = Map[(resultVarName, 0)]
                 FrameSize = 1
                 IntVarsInRegs = []
-                FreeRegs = [for i in 0u..(registers - 1u) do yield Reg.r(i)]
+                FloatVarsInRegs = []
+                FreeRegs = { Int = [for i in 0u..(registers - 1u) do yield Reg.r(i)]
+                             Float = [for i in 0u..(registers - 1u) do yield FPReg.r(i)] }
                 NeededVars = Set[resultVarName] }
     let result = doCodegen env node
     Asm(RV.MV(Reg.fp, Reg.sp), "Initialize frame pointer")
