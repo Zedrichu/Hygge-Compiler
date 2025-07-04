@@ -6,6 +6,7 @@
 /// Entry point of the Hygge compiler program, including the main function.
 module Main
 
+open ParserConfig
 /// Tokenize the given file with the given options, and print the result on the
 /// terminal. Return 0 in case of success, non-zero otherwise.
 let internal tokenize (opt: CmdLine.TokenizerOptions): int =
@@ -26,6 +27,7 @@ let internal tokenize (opt: CmdLine.TokenizerOptions): int =
 let internal parse (opt: CmdLine.ParserOptions): int =
     Log.setLogLevel opt.LogLevel
     if opt.Verbose then Log.setLogLevel Log.LogLevel.debug
+    ParserOption.Succinct <- opt.Succinct
     Log.debug $"Parsed command line options:%s{Util.nl}%O{opt}"
     match (Util.parseFile opt.File) with
     | Error(msg) ->
@@ -83,6 +85,7 @@ let internal doInterpret (ast: AST.Node<'E,'T>) (verbose: bool): int =
 let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
     Log.setLogLevel opt.LogLevel
     if opt.Verbose then Log.setLogLevel Log.LogLevel.debug
+    ParserOption.Succinct <- opt.Succinct
     Log.debug $"Parsed command line options:%s{Util.nl}%O{opt}"
     SourceRepository.repository.AddFileIntepreter(opt.File)
     match (Util.parseFile opt.File) with
@@ -164,6 +167,7 @@ let internal generateAsm (filename: string)
 let internal compile (opt: CmdLine.CompilerOptions): int =
     Log.setLogLevel opt.LogLevel
     if opt.Verbose then Log.setLogLevel Log.LogLevel.debug
+    ParserOption.Succinct <- opt.Succinct
     Log.debug $"Parsed command line options:%s{Util.nl}%O{opt}"
 
     match (generateAsm opt.File opt.ANF opt.Registers opt.Optimize) with
@@ -188,6 +192,7 @@ let internal compile (opt: CmdLine.CompilerOptions): int =
 let internal launchRARS (opt: CmdLine.RARSLaunchOptions): int =
     Log.setLogLevel opt.LogLevel
     if opt.Verbose then Log.setLogLevel Log.LogLevel.debug
+    ParserOption.Succinct <- opt.Succinct
     Log.debug $"Parsed command line options:%s{Util.nl}%O{opt}"
 
     match (generateAsm opt.File opt.ANF opt.Registers opt.Optimize) with

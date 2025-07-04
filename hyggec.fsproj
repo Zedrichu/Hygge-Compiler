@@ -22,6 +22,7 @@
     <Compile Include="src/AST.fs" />
     <Compile Include="src/SourceRepository.fs" />
     <Compile Include="src/ASTUtil.fs" />
+    <Compile Include="src\ParserConfig.fs" />
     <!-- Lexer and parser generation -->
     <PackageReference Include="FsLexYacc" Version="11.3.0" />
     <FsYacc Include="src/Parser.fsy">
