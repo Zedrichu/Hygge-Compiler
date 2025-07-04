@@ -4,6 +4,7 @@
 // will be placed on top of the generated parser source code.
 open FSharp.Text.Parsing
 open AST
+open ParserConfig
 
 // Auxiliary function to compute the position of an AST node
 let pos (parseState: IParseState, inputIdx: int): AST.Position =
@@ -39,7 +40,7 @@ let applySelectorsType (lst: 'a list): (string * 'a * bool) list =
 
 let decorateAssertion (node: Node<'E,'T>) =
   match node.Expr with
-  | Assertion(arg) ->
+  | Assertion(arg) when not ParserOption.Succinct ->
     /// Get the last nested expression (last Seq or Let scope)
     /// since it is the expression which effectively decides on the assertion failure
     let rec getKeyNodeFolder (node: Node<'E,'T>) =
@@ -106,6 +107,9 @@ let decorateAssertion (node: Node<'E,'T>) =
 
     // Replace keyNode with the decorated one
     ASTUtil.substExprByRef arg decoration keyNodeRef
+  | _ when ParserOption.Succinct ->
+    // If the succinct mode is enabled, we just return the assertion node
+    node
   | _ ->
     invalidOp $"Fatal error: Assertion expected, but found {node.Expr}"
 

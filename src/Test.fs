@@ -136,13 +136,15 @@ let tests = testList "tests" [
             match (Util.parseFile file) with
             | Error(e) -> failwith $"Parsing failed: %s{e}"
             | Ok(ast) ->
-                let last = Interpreter.reduceFully ast (Some (fun _ -> "")) (Some ignore)
+                let anf = ANF.transform ast
+                let last = Interpreter.reduceFully anf (Some (fun _ -> "")) (Some ignore)
                 Expect.isFalse (Interpreter.isStuck last) "Interpreter reached a stuck expression"
         <| fun file ->
             match (Util.parseFile file) with
             | Error(e) -> failwith $"Parsing failed: %s{e}"
             | Ok(ast) ->
-                let last = Interpreter.reduceFully ast (Some (fun _ -> "")) (Some ignore)
+                let anf = ANF.transform ast
+                let last = Interpreter.reduceFully anf (Some (fun _ -> "")) (Some ignore)
                 Expect.isTrue (Interpreter.isStuck last)
                               "Interpreter should have reached a stuck expression"
     createTestList "codegen"
