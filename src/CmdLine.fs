@@ -36,9 +36,12 @@ type ParserOptions = {
 
     [<Option('v', "verbose", HelpText="Enable verbose output. (Same effect of using option '--log-level debug')")>]
     Verbose: bool;
+    
+    [<Option('s', "succinct", HelpText="Enable succinct assertion printouts in the AST. (Default: false)")>]
+    Succinct: bool;
 
     [<Option('a', "anf", HelpText="Transform the AST into Administrative Normal Form (ANF) after parsing")>]
-    ANF: bool;
+    ANF: bool
 }
 
 
@@ -71,8 +74,11 @@ type InterpreterOptions = {
     [<Option('v', "verbose", HelpText="Enable verbose output. (Same effect of using option '--log-level debug')")>]
     Verbose: bool;
 
+    [<Option('s', "succinct", HelpText="Enable succinct assertion printouts in the AST. (Default: false)")>]
+    Succinct: bool
+    
     [<Option('a', "anf", HelpText="Transform the AST into Administrative Normal Form (ANF) before interpreting")>]
-    ANF: bool;
+    ANF: bool
 }
 
 
@@ -89,7 +95,10 @@ type CompilerOptions = {
     LogLevel: Log.LogLevel;
 
     [<Option('v', "verbose", HelpText="Enable verbose output. (Same effect of using option '--log-level debug')")>]
-    Verbose: bool;
+    Verbose: bool
+    
+    [<Option('s', "succinct", HelpText="Enable succinct assertion printouts in the AST. (Default: false)")>]
+    Succinct: bool;
 
     [<Option('a', "anf", HelpText="Transform the AST into Administrative Normal Form (ANF) before compiling")>]
     ANF: bool;
@@ -112,7 +121,10 @@ type RARSLaunchOptions = {
     LogLevel: Log.LogLevel;
 
     [<Option('v', "verbose", HelpText="Enable verbose output. (Same effect of using option '--log-level debug')")>]
-    Verbose: bool;
+    Verbose: bool
+    
+    [<Option('s', "succinct", HelpText="Enable succinct assertion printouts in the AST. (Default: false)")>]
+    Succinct: bool;
 
     [<Option('a', "anf", HelpText="Transform the AST into Administrative Normal Form (ANF) before compiling")>]
     ANF: bool;
@@ -133,6 +145,9 @@ type TestOptions = {
 
     [<Option('v', "verbose", HelpText="Enable verbose output (including the test names, usable with the '--filter' option).")>]
     Verbose: bool
+    
+    [<Option('s', "succinct", HelpText="Enable succinct assertion printouts in the AST. (Default: false)")>]
+    Succinct: bool;
 }
 
 

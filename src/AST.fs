@@ -26,7 +26,7 @@ type Position =
       ColEnd: int
     }
     with
-        /// Return a comoact string representation of a position in the input
+        /// Return a compact string representation of a position in the input
         /// source file.
         member this.Format =
            $"(%d{this.LineStart}:%d{this.ColStart}-%d{this.LineEnd}:%d{this.ColEnd})"
