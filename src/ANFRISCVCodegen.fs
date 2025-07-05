@@ -202,7 +202,7 @@ let internal allocateVarOnFrame (env: ANFCodegenEnv) (varName: string): ANFCodeg
 /// assembly code needed to allocate that register (if some other variable was spilled
 /// on the stack frame), and the corresponding updated code generation environment
 /// mapping 'varName' to the allocated register.
-let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string) : Reg * ANFCodegenResult =
+let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string): Reg * ANFCodegenResult =
     /// Codegen result after allocating 'varName' on the frame
     let frameAllocRes = allocateVarOnFrame env varName
 
@@ -223,6 +223,29 @@ let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string) : Reg * A
         let reg, {Asm = allocAsm; Env = allocEnv} = allocateIntVar spillEnv varName
         (reg, { Asm = spillAsm ++ allocAsm
                 Env = allocEnv })
+
+
+let rec internal allocateFloatVar (env: ANFCodegenEnv) (varName: string): FPReg * ANFCodegenResult =
+    /// Codegen result after allocating 'varName' on the frame
+    let frameAllocRes = allocateVarOnFrame env varName
+    
+    match env.FreeRegs.Float with
+    | fpReg :: rest ->
+        /// Updated list of variables in float registers
+        let floatVarsInRegs = (varName, fpReg) :: env.FloatVarsInRegs
+        (fpReg, { Asm = frameAllocRes.Asm ++
+                        Asm(RV.COMMENT($"Variable %s{varName} allocation: "
+                                       + $"FP register %O{fpReg}, "
+                                       + $"frame pos. %d{frameAllocRes.Env.Frame[varName]} "))
+                  Env = {frameAllocRes.Env with FreeRegs.Float = rest
+                                                FloatVarsInRegs = floatVarsInRegs} })
+    | [] -> // No free registers available: we spill a variable onto the stack
+        /// Assembly code and environment for spilling a float variable onto the stack
+        let { Asm = spillAsm; Env = spillEnv} = spillOldestFloatVar env []
+        /// Allocated register, assembly code and environment
+        let fpReg, {Asm = allocAsm; Env = allocEnv} = allocateFloatVar spillEnv varName
+        (fpReg, { Asm = spillAsm ++ allocAsm
+                  Env = allocEnv })
 
 
 /// Load the given variable in the given register.  Return the updated codegen
@@ -459,6 +482,21 @@ let rec internal doCodegen (env: ANFCodegenEnv)
                 /// Code generation result for 'init' expression
                 let initCodegenRes = doLetInitCodegen initCodegenEnv init
                 { initCodegenRes with Asm = allocRes.Asm ++ initCodegenRes.Asm }
+            | TFloat ->
+                /// Allocation code for 'vname' + updated codegen environment
+                let _, allocRes = allocateFloatVar initEnv vname
+                /// Code generation environment for the init block of the 'let',
+                /// where all variables used in the 'scope' are marked as
+                /// 'needed' (since they must not be deallocated, although they
+                /// may not be used in the 'init' expression itself)
+                let initCodegenEnv =
+                    { allocRes.Env with TargetVar = vname
+                                        NeededVars = Set.union env.NeededVars
+                                                               (ASTUtil.freeVars scope) }
+                /// Code generation result for 'init' expression
+                let initCodegenRes = doLetInitCodegen initCodegenEnv init
+                { initCodegenRes with Asm = allocRes.Asm ++ initCodegenRes.Asm }
+                
             | t -> failwith $"BUG: unsupported init expression type %O{t}"
         /// Cleaned-up codegen environment reduced to the variables that are
         /// actually used in the 'let' scope
@@ -587,6 +625,17 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
               Env = targetLoadRes.Env }
         | x ->
             failwith $"BUG: unexpected return value from 'loadVars': %O{x}"
+    
+    // | Sqrt(arg) ->
+    //     /// Name of the argument variable for the operation
+    //     let argVarName = getVarName arg
+    //     match arg.Type with
+    //     | TFloat -> failwith "Error |>"
+    //     | TInt ->
+    //         /// Register of the loaded argument variable, and code to load it
+    //         let argReg, argLoadRes = loadIntVar env argVarName []
+    //         failwith "Error |>"
+    //     | _ -> failwith "Error |>"
 
     | Eq(lhs, rhs)
     | Less(lhs, rhs)
@@ -642,6 +691,10 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
               Env = targetLoadRes.Env }
         | x ->
             failwith $"BUG: unexpected return value from 'loadVars': %O{x}"
+    
+    // | Not(p) ->
+    // | And(lhs, rhs) ->
+    // | Or(lhs, rhs) ->
     
     | Print(arg) ->
         /// Register holding printing argument, and code to load it
@@ -705,10 +758,8 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             (RV.LI(Reg.a7, 11), "RARS syscall: PrintChar")
             (RV.ECALL, "")
         ])
-        
         { Asm = printRes.Asm ++ newlineAsm
           Env = printRes.Env }
-        
 
     | Assertion(arg) ->
         /// Register holding assertion argument, and code to load it
