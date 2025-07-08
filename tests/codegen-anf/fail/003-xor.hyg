@@ -1,0 +1,4 @@
+assert(
+    (true xor true) or
+    (true xor true xor true xor true)
+)
