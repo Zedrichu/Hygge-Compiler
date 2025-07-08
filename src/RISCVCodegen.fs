@@ -307,6 +307,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let rfptarget = env.FPTarget + 1u
             /// Generated code for the rhs expression
             let rAsm = doCodegen {env with FPTarget = rfptarget} rhs
+            /// Conversion of rhs int arguments to float (support typer for increment/decrement)
+            let rConv = match rhs.Type with
+                        | t when isSubtypeOf node.Env t TInt ->
+                            Asm(RV.FCVT_S_W(FPReg.r(rfptarget), Reg.r(env.Target)))
+                        | _ -> Asm()
+            
             let label = Util.genSymbol "minmax_done"
             /// Generated code for the numerical operation
             let opAsm =
@@ -335,7 +341,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     Asm(RV.LABEL(label))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
-            lAsm ++ rAsm ++ opAsm
+            lAsm ++ rAsm ++ rConv ++ opAsm
         | t ->
             failwith $"BUG: numerical operation codegen invoked on invalid type %O{t}"
 
