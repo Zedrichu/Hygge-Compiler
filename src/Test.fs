@@ -163,6 +163,7 @@ let tests = testList "tests" [
 /// Run the tests according to command line options
 let run (opts: CmdLine.TestOptions): int =
     let argsDebug = if opts.Verbose then ["--debug"] else []
+    ParserConfig.ParserOption.Succinct <- opts.Succinct
     let argsFilter = match opts.Filter with
                      | null -> []
                      | f -> ["--filter"; $"tests.%s{f}"]

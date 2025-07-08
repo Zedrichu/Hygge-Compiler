@@ -327,27 +327,29 @@ let rec internal loadFloatVar (env: ANFCodegenEnv) (varName: string)
 /// variables, and the updated codegen environment after loading the variables.
 let internal loadVars (env: ANFCodegenEnv)
                       (vars: List<TypedAST>)
-                      (doNotSpill: List<string>): List<Reg> * ANFCodegenResult =
+                      (doNotSpill: List<string>): List<Reg> * List<FPReg> * ANFCodegenResult =
     /// List of variable names and types in the 'vars' AST nodes
     let varNamesTypes = List.map getVarNameAndType vars
     /// List of variable names in the 'vars' AST nodes
     let varNames = getVarNames vars
 
     /// Folder function that accumulates the codegen to load variables
-    let loader (regs: List<Reg>, codegenRes: ANFCodegenResult) (vname, tpe) =
+    let loader (regs: List<Reg>, fpRegs: List<FPReg>, codegenRes: ANFCodegenResult) (vname, tpe) =
         match tpe with
         | TInt ->
-            /// Register and codegen result after loading variable 'vname'. When
-            /// loading the variable, we ensure that none of the variables in
-            /// 'vars' is spilled
-            let reg, loadRes = loadIntVar codegenRes.Env vname
-                                            (doNotSpill @ varNames)
-            (regs @ [reg],
-             {codegenRes with Env = loadRes.Env
-                              Asm = codegenRes.Asm ++ loadRes.Asm})
-        | t -> failwith $"BUG: unsupported variable type %O{t}"
+            /// Register and codegen result after loading variable 'vname'. When loading
+            /// the variable, we ensure that none of the variables in 'vars' is spilled
+            let reg, loadRes = loadIntVar codegenRes.Env vname (doNotSpill @ varNames)
+            (regs @ [reg], fpRegs, {codegenRes with Env = loadRes.Env
+                                                    Asm = codegenRes.Asm ++ loadRes.Asm})
+        | TFloat ->
+            /// Register and codegen result after loading variable 'vnmae'. When loading
+            /// the variable, we ensure that none of the variables in 'vars' is spilled
+            let fpReg, loadRes = loadFloatVar codegenRes.Env vname (doNotSpill @ varNames)
+            (regs, fpRegs @ [fpReg], {codegenRes with Env = loadRes.Env
+                                                      Asm = codegenRes.Asm ++ loadRes.Asm})
 
-    List.fold loader ([], {Asm = Asm(); Env = env}) varNamesTypes
+    List.fold loader ([], [], {Asm = Asm(); Env = env}) varNamesTypes
 
 
 /// Make available more registers in the given codegen environment, by removing
@@ -457,6 +459,20 @@ let rec internal doCodegen (env: ANFCodegenEnv)
             { Env = targetLoadRes.Env
               Asm = targetLoadRes.Asm
                         ++ Asm(RV.LW(targetReg, Imm12(env.Frame[vname] * -4), Reg.fp),
+                               $"%s{env.TargetVar} <- %s{vname}") }
+    | Var(vname) when (expandType node.Env node.Type) = TFloat ->
+        /// Target floating-point register to store the vname's value, and code to load it
+        let targetFPReg, targetLoadRes = loadFloatVar env env.TargetVar [vname]
+        match findFloatVarRegister targetLoadRes.Env vname with
+        | Some(fpReg) ->
+            { Env = targetLoadRes.Env
+              Asm = targetLoadRes.Asm
+                        ++ Asm(RV.FMV_S(targetFPReg, fpReg),
+                                     $"%s{env.TargetVar} <- %s{vname}") }
+        | None ->
+            { Env = targetLoadRes.Env
+              Asm = targetLoadRes.Asm
+                        ++ Asm(RV.FLW_S(targetFPReg, Imm12(env.Frame[vname] * -4), Reg.fp),
                                $"%s{env.TargetVar} <- %s{vname}") }
 
     | Let(vname, init, scope)
@@ -592,7 +608,8 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         /// Names of the variables used by the lhs and rhs of this operation
         let lrVarNames = getVarNames [lhs; rhs]
         match (loadVars env [lhs; rhs] []) with
-        | [lhsReg; rhsReg], argLoadRes ->
+        | [lhsReg; rhsReg], [], argLoadRes
+            when isSubtypeOf init.Env init.Type TInt ->
             /// Target register to store the operation result + code to load it
             let targetReg, targetLoadRes =
                 loadIntVar argLoadRes.Env env.TargetVar lrVarNames
@@ -623,41 +640,124 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                 | x -> failwith $"BUG: unexpected binary arithmetic operation %O{x}"
             { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ opAsm
               Env = targetLoadRes.Env }
+        | [], [lhsFpReg; rhsFpReg], argLoadRes
+            when isSubtypeOf init.Env init.Type TFloat ->
+            /// Target floating-point register to store the operation result + code to load it
+            let targetFPReg, targetLoadRes =
+                loadFloatVar argLoadRes.Env env.TargetVar lrVarNames
+            let labelChoice = Util.genSymbol "minmax_choice"
+            let labelExit = Util.genSymbol "minmax_exit"
+            /// Temporary register
+            let tempReg = Reg.t0
+            /// Assembly code for the floating-point operation
+            let opAsm =
+                match expr with
+                | Add _ ->
+                    Asm(RV.FADD_S(targetFPReg, lhsFpReg, rhsFpReg),
+                         $"%s{env.TargetVar} <- %s{lrVarNames[0]} + %s{lrVarNames[1]}")
+                | Sub _ ->
+                    Asm(RV.FSUB_S(targetFPReg, lhsFpReg, rhsFpReg),
+                         $"%s{env.TargetVar} <- %s{lrVarNames[0]} - %s{lrVarNames[1]}")
+                | Mult _ ->
+                    Asm(RV.FMUL_S(targetFPReg, lhsFpReg, rhsFpReg),
+                         $"%s{env.TargetVar} <- %s{lrVarNames[0]} * %s{lrVarNames[1]}")
+                | Div _ ->
+                    Asm(RV.FDIV_S(targetFPReg, lhsFpReg, rhsFpReg),
+                         $"%s{env.TargetVar} <- %s{lrVarNames[0]} / %s{lrVarNames[1]}")
+                | Mod _ ->
+                    failwith "BUG: remainder operation on floats is not supported"
+                | Min _ ->
+                    Asm([
+                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space to save register") // RARS commenting for debugging... if it's annoying you can remove it.
+                        (RV.SW(tempReg, Imm12(0), Reg.sp), "Save t0 (temp) register to stack")
+                        (RV.FLT_S(tempReg, rhsFpReg, lhsFpReg), "Compare the float arguments")
+                        (RV.BEQ(tempReg, Reg.zero, labelChoice), "")
+                        (RV.FMV_S(targetFPReg, rhsFpReg), "Take rhs argument as the minimum")
+                        (RV.J(labelExit), "")
+                        (RV.LABEL(labelChoice), "")
+                        (RV.FMV_S(targetFPReg, lhsFpReg), "Take lhs argument as the minimum")
+                        (RV.LABEL(labelExit), $"%s{env.TargetVar} <- min(%s{lrVarNames[0]}, %s{lrVarNames[1]})")
+                        (RV.LW(tempReg, Imm12(0), Reg.sp), "Restore t0 (temp) register from stack")
+                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")                        
+                    ])
+                | Max _ ->
+                    Asm([
+                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space to save register") // RARS commenting for debugging... if it's annoying you can remove it.
+                        (RV.SW(tempReg, Imm12(0), Reg.sp), "Save t0 (temp) register to stack")
+                        (RV.FLT_S(tempReg, lhsFpReg, rhsFpReg), "Compare the float arguments")
+                        (RV.BEQ(tempReg, Reg.zero, labelChoice), "")
+                        (RV.FMV_S(targetFPReg, rhsFpReg), "Take rhs argument as the maximum")
+                        (RV.J(labelExit), "")
+                        (RV.LABEL(labelChoice), "")
+                        (RV.FMV_S(targetFPReg, lhsFpReg), "Take lhs argument as the minimum")                        
+                        (RV.LABEL(labelExit), $"%s{env.TargetVar} <- max(%s{lrVarNames[0]}, %s{lrVarNames[1]})")
+                        (RV.LW(tempReg, Imm12(0), Reg.sp), "Restore t0 (temp) register from stack")
+                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")                        
+                    ])
+                | x -> failwith $"BUG: unexpected binary arithmetic operation %O{x}"
+                    
+            { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ opAsm
+              Env = targetLoadRes.Env }
+            
         | x ->
             failwith $"BUG: unexpected return value from 'loadVars': %O{x}"
     
-    // | Sqrt(arg) ->
-    //     /// Name of the argument variable for the operation
-    //     let argVarName = getVarName arg
-    //     match arg.Type with
-    //     | TFloat -> failwith "Error |>"
-    //     | TInt ->
-    //         /// Register of the loaded argument variable, and code to load it
-    //         let argReg, argLoadRes = loadIntVar env argVarName []
-    //         failwith "Error |>"
-    //     | _ -> failwith "Error |>"
+    | Sqrt(arg) ->
+        /// Name of the argument variable for the operation
+        let argVarName = getVarName arg
+        match arg.Type with
+        | TFloat ->
+            /// Register of the loaded float-argument variable, and code to load it
+            let argFpReg, argLoadRes = loadFloatVar env argVarName []
+            
+            /// Target register to store the operation result + code to load it
+            let targetFpReg, targetLoadRes =
+                loadFloatVar argLoadRes.Env env.TargetVar [argVarName]
+                
+            /// Assembly code for the square root operation
+            let sqrtCode = Asm(RV.FSQRT_S(targetFpReg, argFpReg), $"%s{env.TargetVar} <- sqrt(%s{argVarName})")
+            
+            { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ sqrtCode
+              Env = targetLoadRes.Env }
+        | TInt ->
+            /// Register of the loaded argument variable, and code to load it
+            let argReg, argLoadRes = loadIntVar env argVarName []
+            
+            /// Target register to store the operation result + code to load it
+            let targetFpReg, targetLoadRes =
+                loadFloatVar argLoadRes.Env env.TargetVar [argVarName]
+                
+            /// Assembly code for the square root operation
+            let sqrtCode = Asm([
+                (RV.FCVT_S_W(targetFpReg, argReg), "Convert sqrt-argument to float")
+                (RV.FSQRT_S(targetFpReg, targetFpReg), $"%s{env.TargetVar} <- sqrt(%s{argVarName})")
+            ])
+            { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ sqrtCode
+              Env = targetLoadRes.Env }
+        | _ -> failwith "BUG: Sqrt codegen invoked on unsupported type %O{arg.Type}"
 
     | Eq(lhs, rhs)
     | Less(lhs, rhs)
     | LessEq(lhs, rhs)
     | Greater(lhs, rhs)
-    | GreaterEq(lhs, rhs) as expr when (expandType lhs.Env lhs.Type) = TInt ->
+    | GreaterEq(lhs, rhs) as expr ->
         /// Names of the variables used by the lhs and rhs of this operation
         let lrVarNames = getVarNames [lhs; rhs]
+        /// Human-readable prefix for jump labels, describing the kind of
+        /// relational operation we are compiling
+        let labelName = match expr with
+                        | Eq _ -> "eq"
+                        | Less _ -> "less"
+                        | LessEq _ -> "less_eq"
+                        | Greater _ -> "greater"
+                        | GreaterEq _ -> "greater_eq"
+                        | x -> failwith $"BUG: unexpected operation %O{x}"
+
         match (loadVars env [lhs; rhs] []) with
-        | [lhsReg; rhsReg], argLoadRes ->
+        | [lhsReg; rhsReg], [], argLoadRes
+            when (expandType lhs.Env lhs.Type) = TInt  ->
             /// Target register to store the operation result + code to load it
-            let targetReg, targetLoadRes =
-                loadIntVar argLoadRes.Env env.TargetVar lrVarNames
-            /// Human-readable prefix for jump labels, describing the kind of
-            /// relational operation we are compiling
-            let labelName = match expr with
-                            | Eq _ -> "eq"
-                            | Less _ -> "less"
-                            | LessEq _ -> "less_eq"
-                            | Greater _ -> "greater"
-                            | GreaterEq _ -> "greater_eq"
-                            | x -> failwith $"BUG: unexpected operation %O{x}"
+            let targetReg, targetLoadRes = loadIntVar argLoadRes.Env env.TargetVar lrVarNames
             /// Label to jump to when the comparison is true
             let trueLabel = Util.genSymbol $"%O{labelName}_true"
             /// Label to mark the end of the comparison code
@@ -689,12 +789,89 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                         ])
             { Asm = asm
               Env = targetLoadRes.Env }
+        | regs, fpRegs, argLoadRes
+            when not fpRegs.IsEmpty && (expandType lhs.Env lhs.Type) = TFloat ->
+            /// Target register to store the operation result + code to load it
+            let targetReg, targetLoadRes = loadIntVar argLoadRes.Env env.TargetVar lrVarNames
+            
+            let lhsFpReg = fpRegs.Head
+            let rhsFpReg, rhsFLoadRes =
+                match regs with 
+                | [rhsReg] ->
+                    let rhsFpReg, rhsConvRes = loadFloatVar argLoadRes.Env $"{lrVarNames[1]}_f" [lrVarNames.Head]
+                    rhsFpReg, rhsConvRes
+                | _ -> fpRegs[1], { Asm = Asm(); Env = targetLoadRes.Env }
+            
+            /// Codegen to convert the rhs argument to a float, if needed (support typer for increment/decrement)
+            let rhsConv = match regs with
+                          | [rhsReg] ->
+                              { Asm = rhsFLoadRes.Asm ++
+                                      Asm(RV.FCVT_S_W(rhsFpReg, rhsReg), "Convert rhs integer argument to float")
+                                Env = rhsFLoadRes.Env }
+                          | _ -> rhsFLoadRes
+            
+            /// Label to jump to when the comparison is true
+            let trueLabel = Util.genSymbol $"%O{labelName}_true"
+            /// Label to mark the end of the comparison code
+            let endLabel = Util.genSymbol $"%O{labelName}_end"
+            
+            /// Codegen for the relational operation between lhs and rhs
+            let opAsm =
+                match expr with
+                | Eq _ ->
+                    Asm(RV.FEQ_S(targetReg, lhsFpReg, rhsFpReg))
+                | Less _ ->
+                    Asm(RV.FLT_S(targetReg, lhsFpReg, rhsFpReg))
+                | LessEq _ ->
+                    Asm(RV.FLE_S(targetReg, lhsFpReg, rhsFpReg))
+                | Greater _ ->
+                    Asm(RV.FGT_S(targetReg, lhsFpReg, rhsFpReg))
+                | GreaterEq _ ->
+                    Asm(RV.FGE_S(targetReg, lhsFpReg, rhsFpReg))
+                | x -> failwith $"BUG: unexpected operation %O{x}"
+            { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ rhsConv.Asm ++ opAsm
+              Env = rhsConv.Env }
         | x ->
-            failwith $"BUG: unexpected return value from 'loadVars': %O{x}"
+            failwith ($"BUG: unexpected return value from 'loadVars': %O{x}."
+                   + $"Potentially, different types of arguments %O{lhs.Type} and %O{rhs.Type} in relational operation %O{expr}")
     
-    // | Not(p) ->
-    // | And(lhs, rhs) ->
-    // | Or(lhs, rhs) ->
+    | And(lhs, rhs)
+    | Or(lhs, rhs) as expr ->
+        // Code generation for logical 'and' and 'or' is very similar: we
+        // compile the lhs and rhs giving them different target registers, and
+        // then apply the relevant assembly operation(s) on their results.
+        
+        /// Generated code for lhs expression
+        let lhsReg, lhsLoadRes = loadIntVar env (getVarName lhs) []
+        /// Generated code for rhs expression
+        let rhsReg, rhsLoadRes = loadIntVar lhsLoadRes.Env (getVarName rhs) [getVarName lhs]
+        
+        /// Target register to store the operation result + code to load it
+        let targetReg, targetLoadRes =
+            loadIntVar rhsLoadRes.Env env.TargetVar [getVarName lhs; getVarName rhs]
+        
+        /// Generated assembly code for the operation
+        let opAsm =
+            match expr with
+            | And _ ->
+                Asm(RV.AND(targetReg, lhsReg, rhsReg),
+                     $"%s{env.TargetVar} <- %s{getVarName lhs} and %s{getVarName rhs}")
+            | Or _ ->
+                Asm(RV.OR(targetReg, lhsReg, rhsReg),
+                     $"%s{env.TargetVar} <- %s{getVarName lhs} or %s{getVarName rhs}")
+            | x -> failwith $"BUG: unexpected operation %O{x}"
+
+        { Asm = lhsLoadRes.Asm ++ rhsLoadRes.Asm ++ targetLoadRes.Asm ++ opAsm
+          Env = targetLoadRes.Env }
+    
+    | Not(arg) ->
+        /// Generated code and register loading the argument
+        let argReg, argLoadRes = loadIntVar env (getVarName arg) []
+        /// Target register to store the operation result + code to load it
+        let targetReg, targetLoadRes = loadIntVar argLoadRes.Env env.TargetVar [getVarName arg]
+        { Env = targetLoadRes.Env
+          Asm = argLoadRes.Asm ++ targetLoadRes.Asm
+                ++ Asm(RV.SEQZ(targetReg, argReg), $"%s{env.TargetVar} <- not %s{getVarName arg}") }
     
     | Print(arg) ->
         /// Register holding printing argument, and code to load it
