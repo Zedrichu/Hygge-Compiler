@@ -868,6 +868,21 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Asm = argLoadRes.Asm ++ targetLoadRes.Asm
                 ++ Asm(RV.SEQZ(targetReg, argReg), $"%s{env.TargetVar} <- not %s{getVarName arg}") }
     
+    | Print(arg) when (expandType arg.Env arg.Type) = TFloat ->
+        /// Register holding printing argument, and code to load it
+        let argFpReg, argLoadRes = loadFloatVar env (getVarName arg) []
+        
+        /// Printout code for integer variables
+        let floatPrintCode = argLoadRes.Asm ++
+                             (beforeSysCall [] [FPReg.fa0])
+                                 .AddText([
+                                     (RV.FMV_S(FPReg.fa0, argFpReg), "Copy to fa0 for printing")
+                                     (RV.LI(Reg.a7, 1), "RARS syscall: PrintFloat")
+                                     (RV.ECALL, "")
+                                 ])
+                             ++ (afterSysCall [] [FPReg.fa0])
+        { Asm = argLoadRes.Asm ++ floatPrintCode
+          Env = argLoadRes.Env }
     | Print(arg) ->
         /// Register holding printing argument, and code to load it
         let argVarName = getVarName arg
@@ -1004,8 +1019,64 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                         .AddText(RV.LABEL(labelEnd), "End of the 'if' code")
         { Asm = ifAsm
           Env = falseCodegenRes.Env }
+    
+    | Seq nodes ->
+        /// Collect the code of each sequence node assumed in ANF by folding over all children
+        let folder (acc: ANFCodegenResult) (node: TypedAST) =
+            let result = doCodegen acc.Env node
+            { Asm = acc.Asm ++ result.Asm
+              Env = result.Env }
+        List.fold folder { Asm = Asm(); Env = env } nodes
 
-    | _ ->
+    | ReadInt ->
+        /// Target register to store the read integer value + code to load it
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
+        let readCode =
+            (beforeSysCall [Reg.a0] []) ++
+            Asm([
+                (RV.LI(Reg.a7, 5), "RARS syscall: ReadInt")
+                (RV.ECALL, "")
+                (RV.MV(targetReg, Reg.a0), "Move syscall result to target")
+            ])
+            ++ (afterSysCall [Reg.a0] [])
+        { Asm = targetLoadRes.Asm ++ readCode
+          Env = targetLoadRes.Env }
+    | ReadFloat ->
+        /// Target register to store the read float value + code to load it
+        let targetFPReg, targetLoadRes = loadFloatVar env env.TargetVar []
+        let readCode =
+            (beforeSysCall [Reg.a0] []) ++
+            Asm([
+                (RV.LI(Reg.a7, 6), "RARS syscall: ReadFloat")
+                (RV.ECALL, "")
+                (RV.FMV_W_X(targetFPReg, Reg.a0), "Move syscall result to target")
+            ])
+            ++ (afterSysCall [Reg.a0] [])
+        { Asm = targetLoadRes.Asm ++ readCode
+          Env = targetLoadRes.Env }
+
+    | Type _ 
+    | Ascription _
+    | While _ 
+    | DoWhile _
+    | StructCons _
+    | FieldSelect _
+    | Assign _
+    | ArrayCons _
+    | ArrayElem _
+    | ArrayLength _
+    | ArraySlice _
+    | UnionCons _
+    | Match _
+    | Lambda _
+    | Application _
+    | Copy _ -> failwith $"BUG: Feature codegen not implemented for %O{init.Expr}"
+    
+    | Pointer _
+    | LetMut _
+    | LetRec _
+    | LetT _ 
+    | Let _ -> // let-binders are not permitted as initializers of 'let' expressions
         failwith ($"BUG: unsupported AST node for 'let' init, maybe not in ANF:%s{Util.nl}"
                 + $"%s{PrettyPrinter.prettyPrint init}")
 
