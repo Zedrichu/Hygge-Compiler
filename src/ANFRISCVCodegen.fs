@@ -336,18 +336,18 @@ let internal loadVars (env: ANFCodegenEnv)
     /// Folder function that accumulates the codegen to load variables
     let loader (regs: List<Reg>, fpRegs: List<FPReg>, codegenRes: ANFCodegenResult) (vname, tpe) =
         match tpe with
-        | TInt ->
-            /// Register and codegen result after loading variable 'vname'. When loading
-            /// the variable, we ensure that none of the variables in 'vars' is spilled
-            let reg, loadRes = loadIntVar codegenRes.Env vname (doNotSpill @ varNames)
-            (regs @ [reg], fpRegs, {codegenRes with Env = loadRes.Env
-                                                    Asm = codegenRes.Asm ++ loadRes.Asm})
         | TFloat ->
             /// Register and codegen result after loading variable 'vnmae'. When loading
             /// the variable, we ensure that none of the variables in 'vars' is spilled
             let fpReg, loadRes = loadFloatVar codegenRes.Env vname (doNotSpill @ varNames)
             (regs, fpRegs @ [fpReg], {codegenRes with Env = loadRes.Env
                                                       Asm = codegenRes.Asm ++ loadRes.Asm})
+        | _ -> // int-like variables are included
+            /// Register and codegen result after loading variable 'vname'. When loading
+            /// the variable, we ensure that none of the variables in 'vars' is spilled
+            let reg, loadRes = loadIntVar codegenRes.Env vname (doNotSpill @ varNames)
+            (regs @ [reg], fpRegs, {codegenRes with Env = loadRes.Env
+                                                    Asm = codegenRes.Asm ++ loadRes.Asm})
 
     List.fold loader ([], [], {Asm = Asm(); Env = env}) varNamesTypes
 
@@ -520,7 +520,7 @@ let rec internal doCodegen (env: ANFCodegenEnv)
             cleanupUnusedVars {initRes.Env with NeededVars = env.NeededVars
                                                 TargetVar = env.TargetVar }
                               (ASTUtil.freeVars scope)
-        /// Code generation for the 'let' scope
+        /// Code generation for the 'let' scope assumed in ANF
         let scopeCodegenResult = doCodegen scopeEnv scope
         { Asm = initRes.Asm ++ scopeCodegenResult.Asm
           Env = scopeCodegenResult.Env }
@@ -797,7 +797,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             let lhsFpReg = fpRegs.Head
             let rhsFpReg, rhsFLoadRes =
                 match regs with 
-                | [rhsReg] ->
+                | [_] ->
                     let rhsFpReg, rhsConvRes = loadFloatVar argLoadRes.Env $"{lrVarNames[1]}_f" [lrVarNames.Head]
                     rhsFpReg, rhsConvRes
                 | _ -> fpRegs[1], { Asm = Asm(); Env = targetLoadRes.Env }
@@ -809,11 +809,6 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                                       Asm(RV.FCVT_S_W(rhsFpReg, rhsReg), "Convert rhs integer argument to float")
                                 Env = rhsFLoadRes.Env }
                           | _ -> rhsFLoadRes
-            
-            /// Label to jump to when the comparison is true
-            let trueLabel = Util.genSymbol $"%O{labelName}_true"
-            /// Label to mark the end of the comparison code
-            let endLabel = Util.genSymbol $"%O{labelName}_end"
             
             /// Codegen for the relational operation between lhs and rhs
             let opAsm =
@@ -888,6 +883,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             let boolPrintCode = argLoadRes.Asm
                                     .AddData(strTrue, Alloc.String("true"))
                                     .AddData(strFalse, Alloc.String("false"))
+                                    ++ (beforeSysCall [Reg.a0] [])
                                     .AddText([
                                         (RV.BEQZ(argReg, printFalse), "")
                                         (RV.LA(Reg.a0, strTrue), "String to print via syscall")
@@ -898,31 +894,34 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                                         (RV.LI(Reg.a7, 4), "RARS syscall: PrintString")
                                         (RV.ECALL, "")
                                     ])
+                                    ++ (afterSysCall [Reg.a0] [])
             { Asm = argLoadRes.Asm ++ boolPrintCode
               Env = argLoadRes.Env }
         | TInt ->
             /// Printout code for integer variables
-            let intPrintCode = argLoadRes.Asm
+            let intPrintCode = argLoadRes.Asm ++
+                               (beforeSysCall [Reg.a0] [])
                                     .AddText([
                                         (RV.MV(Reg.a0, argReg), "Copy to a0 for printing")
                                         (RV.LI(Reg.a7, 1), "RARS syscall: PrintInt")
                                         (RV.ECALL, "")
                                     ])
+                               ++ (afterSysCall [Reg.a0] [])
             { Asm = argLoadRes.Asm ++ intPrintCode
               Env = argLoadRes.Env }
         | TString ->
             /// Printout code for string variables
-            let stringPrintCode = argLoadRes.Asm
-                                    .AddText([
-                                        (RV.MV(Reg.a0, argReg), "Copy to a0 for printing")
-                                        (RV.LI(Reg.a7, 4), "RARS syscall: PrintString")
-                                        (RV.ECALL, "")
-                                    ])
+            let stringPrintCode = argLoadRes.Asm ++
+                                  (beforeSysCall [Reg.a0] [])
+                                      .AddText([
+                                          (RV.MV(Reg.a0, argReg), "Copy to a0 for printing")
+                                          (RV.LI(Reg.a7, 4), "RARS syscall: PrintString")
+                                          (RV.ECALL, "")
+                                      ])
+                                  ++ (afterSysCall [Reg.a0] [])
             { Asm = argLoadRes.Asm ++ stringPrintCode
               Env = argLoadRes.Env }
-        | t -> failwith $"BUG: Print codegen invoked on unsupported type %O{t}"
-        | TFloat -> { Asm = Asm()
-                      Env = env }
+        | t -> failwith $"BUG: Print int-like codegen invoked on unsupported type %O{t}"
         
 
     | PrintLn(arg) ->
@@ -930,11 +929,14 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         let printRes = doLetInitCodegen env { init with Expr = Print(arg) }
         
         /// Add the newline character
-        let newlineAsm = Asm([
-            (RV.LI(Reg.a0, int('\n')), "Character to print (newline)")
-            (RV.LI(Reg.a7, 11), "RARS syscall: PrintChar")
-            (RV.ECALL, "")
-        ])
+        let newlineAsm =
+            (beforeSysCall [Reg.a0] []) ++        
+            Asm([
+                (RV.LI(Reg.a0, int('\n')), "Character to print (newline)")
+                (RV.LI(Reg.a7, 11), "RARS syscall: PrintChar")
+                (RV.ECALL, "")
+            ])
+            ++ (afterSysCall [Reg.a0] [])
         { Asm = printRes.Asm ++ newlineAsm
           Env = printRes.Env }
 
@@ -976,14 +978,12 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         /// Label to mark the end of the if..then...else code
         let labelEnd = Util.genSymbol "if_end"
 
-        /// Assembly code for the whole 'if' expression. NOTE: this code
-        /// generation is simplified, and it fails if the address of
-        /// 'labelFalse' or 'labelEnd' is more than 2048 bytes far from the
-        /// corresponding J instructions. A better approach would be to load the
-        /// label into a register (using the instruction LA) and then jump using
-        /// the instruction JR: this would be similar to the 'if' compilation in
-        /// RISCVCodegen.fs ---  but this approach would consume one additional
-        /// register, and possibly require the spilling of a variable
+        /// Assembly code for the whole 'if' expression. NOTE: this code generation is simplified,
+        /// and it fails if the address of 'labelFalse' or 'labelEnd' is more than 2048 bytes far
+        /// from the corresponding J instructions. A better approach would be to load the label
+        /// into a register (using the instruction LA) and then jump using  the instruction JR:
+        /// this would be similar to the 'if' compilation in RISCVCodegen.fs ---  but this approach
+        /// would consume one additional register, and possibly require the spilling of a variable
         let ifAsm =
             condLoadRes.Asm
                 .AddText([ (RV.BNEZ(condReg, labelTrue),
@@ -1007,11 +1007,68 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
 
     | _ ->
         failwith ($"BUG: unsupported AST node for 'let' init, maybe not in ANF:%s{Util.nl}"
-                  + $"%s{PrettyPrinter.prettyPrint init}")
+                + $"%s{PrettyPrinter.prettyPrint init}")
 
 
-/// Generate RISC-V assembly for the given AST, using the given number of
-/// registers.
+/// Generate code to save the given registers on the stack, before a RARS system
+/// call. Register a7 (which holds the system call number) is backed-up by
+/// default, so it does not need to be specified when calling this function.
+and internal beforeSysCall (regs: List<Reg>) (fpregs: List<FPReg>): Asm =
+    Asm(RV.COMMENT("Before system call: save registers"))
+        ++ (saveRegisters (Reg.a7 :: regs) fpregs)
+
+/// Generate code to restore the given registers from the stack, after a RARS
+/// system call. Register a7 (which holds the system call number) is restored
+/// by default, so it does not need to be specified when calling this function.
+and internal afterSysCall (regs: List<Reg>) (fpregs: List<FPReg>): Asm =
+    Asm(RV.COMMENT("After system call: restore registers"))
+        ++ (restoreRegisters (Reg.a7 :: regs) fpregs)
+        
+/// Generate code to save the given lists of registers by using increasing
+/// offsets from the stack pointer register (sp).
+and internal saveRegisters (rs: List<Reg>) (fprs: List<FPReg>): Asm =
+    /// Generate code to save standard registers by folding over indexed 'rs'
+    let regSave (asm: Asm) (i, r) = asm.AddText(RV.SW(r, Imm12(i * 4), Reg.sp))
+    /// Code to save standard registers
+    let rsSaveAsm = List.fold regSave (Asm()) (List.indexed rs)
+
+    /// Generate code to save floating point registers by folding over indexed
+    /// 'fprs', and accumulating code on top of 'rsSaveAsm' above. Notice that
+    /// we use the length of 'rs' as offset for saving on the stack, since those
+    /// stack locations are already used to save 'rs' above.
+    let fpRegSave (asm: Asm) (i, r) =
+        asm.AddText(RV.FSW_S(r, Imm12((i + rs.Length) * 4), Reg.sp))
+    /// Code to save both standard and floating point registers
+    let regSaveCode = List.fold fpRegSave rsSaveAsm (List.indexed fprs)
+
+    // Put everything together: update the stack pointer and save the registers
+    Asm(RV.ADDI(Reg.sp, Reg.sp, Imm12(-4 * (rs.Length + fprs.Length))),
+        "Update stack pointer to make room for saved registers")
+      ++ regSaveCode
+
+/// Generate code to restore the given lists of registers, that are assumed to
+/// be saved with increasing offsets from the stack pointer register (sp)
+and internal restoreRegisters (rs: List<Reg>) (fprs: List<FPReg>): Asm =
+    /// Generate code to restore standard registers by folding over indexed 'rs'
+    let regLoad (asm: Asm) (i, r) = asm.AddText(RV.LW(r, Imm12(i * 4), Reg.sp))
+    /// Code to restore standard registers
+    let rsLoadAsm = List.fold regLoad (Asm()) (List.indexed rs)
+
+    /// Generate code to restore floating point registers by folding over
+    /// indexed 'fprs', and accumulating code on top of 'rsLoadAsm' above.
+    /// Notice that we use the length of 'rs' as offset for saving on the stack,
+    /// since those stack locations are already used to save 'rs' above.
+    let fpRegLoad (asm: Asm) (i, r) =
+        asm.AddText(RV.FLW_S(r, Imm12((i + rs.Length) * 4), Reg.sp))
+    /// Code to restore both standard and floating point registers
+    let regRestoreCode = List.fold fpRegLoad rsLoadAsm (List.indexed fprs)
+
+    // Put everything together: restore the registers and then the stack pointer
+    regRestoreCode
+        .AddText(RV.ADDI(Reg.sp, Reg.sp, Imm12(4 * (rs.Length + fprs.Length))),
+                 "Restore stack pointer after register restoration")
+
+/// Generate RISC-V assembly for the given AST, using the given number of registers.
 let codegen (node: TypedAST) (registers: uint): RISCV.Asm =
     /// Name of a special variable used to hold the result of the program
     let resultVarName = "$result"
