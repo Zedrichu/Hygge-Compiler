@@ -398,21 +398,35 @@ let internal syncANFCodegenEnvs (fromEnv: ANFCodegenEnv)
 
     // Variables loaded in a register in 'fromEnv'
     let fromIntVarsInRegs = Set.ofList (fst (List.unzip fromEnv.IntVarsInRegs))
+    let fromFloatVarsInRegs = Set.ofList (fst (List.unzip fromEnv.FloatVarsInRegs))
+    let fromVarsInRegs = Set.union fromIntVarsInRegs fromFloatVarsInRegs
+    
     // Variables loaded in a register in 'toEnv'
     let toIntVarsInRegs = Set.ofList (fst (List.unzip toEnv.IntVarsInRegs))
+    let toFloatVarsInRegs = Set.ofList (fst (List.unzip toEnv.FloatVarsInRegs))
+    let toVarsInRegs = Set.union toIntVarsInRegs toFloatVarsInRegs
 
     /// Variables loaded in a register in 'toEnv' but not in 'fromEnv'
-    let varsToLoad = Set.filter (fun v -> not (fromIntVarsInRegs.Contains v))
-                                toIntVarsInRegs
+    let varsToLoad = Set.filter (fun v -> not (fromVarsInRegs.Contains v))
+                                toVarsInRegs
     /// Variables loaded in a register in 'fromEnv' but not in 'toEnv'
-    let varsToSpill = Set.filter (fun v -> not (toIntVarsInRegs.Contains v))
-                                 fromIntVarsInRegs
+    let varsToSpill = Set.filter (fun v -> not (toVarsInRegs.Contains v))
+                                 fromVarsInRegs
     /// Is 'varName' loaded in different registers in 'fromEnv' and 'toEnv'?
     let needsReload (varName: string): bool =
-        (Set.intersect fromIntVarsInRegs toIntVarsInRegs).Contains varName
-            && (getIntVarRegister fromEnv varName) <> (getIntVarRegister toEnv varName)
+        /// Identify the variable names loaded in registers in both environments
+        let consistentIntVarNames = Set.intersect fromIntVarsInRegs toIntVarsInRegs
+        let consistentFloatVarNames = Set.intersect fromFloatVarsInRegs toFloatVarsInRegs
+        
+        let intNeedsReload = (consistentIntVarNames.Contains varName &&
+            (getIntVarRegister fromEnv varName) <> (getIntVarRegister toEnv varName))
+        let floatNeedsReload = (consistentFloatVarNames.Contains varName &&
+         (getFloatVarRegister fromEnv varName) <> (getFloatVarRegister toEnv varName))
+         
+        intNeedsReload || floatNeedsReload
+
     /// Variables loaded in different registers in 'fromEnv' and 'toEnv'
-    let varsToReload = Set.filter needsReload toIntVarsInRegs
+    let varsToReload = Set.filter needsReload toVarsInRegs
 
     /// Folder function that accumulates code to spill variables
     let spiller (codegenRes: ANFCodegenResult) (varName: string) =
@@ -868,6 +882,33 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Asm = argLoadRes.Asm ++ targetLoadRes.Asm
                 ++ Asm(RV.SEQZ(targetReg, argReg), $"%s{env.TargetVar} <- not %s{getVarName arg}") }
     
+    | ReadInt ->
+        /// Target register to store the read integer value + code to load it
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
+        let readCode =
+            (beforeSysCall [Reg.a0] []) ++
+            Asm([
+                (RV.LI(Reg.a7, 5), "RARS syscall: ReadInt")
+                (RV.ECALL, "")
+                (RV.MV(targetReg, Reg.a0), "Move syscall result to target")
+            ])
+            ++ (afterSysCall [Reg.a0] [])
+        { Asm = targetLoadRes.Asm ++ readCode
+          Env = targetLoadRes.Env }
+    | ReadFloat ->
+        /// Target register to store the read float value + code to load it
+        let targetFPReg, targetLoadRes = loadFloatVar env env.TargetVar []
+        let readCode =
+            (beforeSysCall [Reg.a0] []) ++
+            Asm([
+                (RV.LI(Reg.a7, 6), "RARS syscall: ReadFloat")
+                (RV.ECALL, "")
+                (RV.FMV_W_X(targetFPReg, Reg.a0), "Move syscall result to target")
+            ])
+            ++ (afterSysCall [Reg.a0] [])
+        { Asm = targetLoadRes.Asm ++ readCode
+          Env = targetLoadRes.Env }
+
     | Print(arg) when (expandType arg.Env arg.Type) = TFloat ->
         /// Register holding printing argument, and code to load it
         let argFpReg, argLoadRes = loadFloatVar env (getVarName arg) []
@@ -936,6 +977,46 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                                   ++ (afterSysCall [Reg.a0] [])
             { Asm = argLoadRes.Asm ++ stringPrintCode
               Env = argLoadRes.Env }
+        | TStruct fields ->
+            let nodes = 
+                [{ init with Expr = Print(
+                            { init with Expr = StringVal("struct { "); Type = TString }) }] @
+                (List.collect (fun (name, tpe, _) ->
+                    let strVals = 
+                        match tpe with
+                        | TString -> (name + @" = \"""), @"\""; "
+                        | _ -> (name + " = "), "; "
+                    [
+                        { init with Expr = Print(
+                                { init with Expr = StringVal(fst strVals); Type = TString }) }
+                        { init with Expr = Print(
+                                { init with Expr = FieldSelect(arg, name); Type = tpe }) }
+                        { init with Expr = Print(
+                                { init with Expr = StringVal(snd strVals); Type = TString }) }
+                    ]
+                ) fields) @
+                [{ init with Expr = Print({ init with Expr = StringVal("}"); Type = TString }) }]
+            doLetInitCodegen env { init with Expr = Seq(nodes) }
+        | TArray tpe ->
+            let nodes = [
+                { init with Expr = Print(
+                        { init with Expr = StringVal(
+                                $"Array{{ type: {tpe.ToString()}; length: "); Type = TString }) }
+                { init with Expr = Print({ init with Expr = ArrayLength(arg); Type = TInt }) }
+                { init with Expr = Print({ init with Expr = StringVal(" }"); Type = TString }) }
+            ]
+            doLetInitCodegen env {init with Expr = Seq(nodes)}
+        | TFun _ as t ->
+            doLetInitCodegen env
+                { init with
+                    Expr = Print(
+                        { init with Expr = StringVal(t.ToString()); Type = TString }
+                )}
+        | TUnion _ as t ->
+            doLetInitCodegen env
+                { init with Expr = Print(
+                        { init with Expr = StringVal(t.ToString()); Type = TString }
+                )}
         | t -> failwith $"BUG: Print int-like codegen invoked on unsupported type %O{t}"
         
 
@@ -1007,19 +1088,88 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                             "Jump to the 'false' branch of the 'if' code")
                            (RV.LABEL(labelTrue),
                             "Beginning of the 'true' branch of the 'if' code") ])
-                ++ trueCodegenRes.Asm
-                    .AddText([ (RV.J(labelEnd),
-                                "Jump to skip the 'false' branch of 'if' code")
-                               (RV.LABEL(labelFalse),
-                                "Beginning of the 'false' branch of the 'if' code") ])
-                    ++ falseCodegenRes.Asm
-                    ++ Asm(RV.COMMENT("Branch synchronization code begins here"))
-                    ++ syncAsm
-                    ++ Asm(RV.COMMENT("Branch synchronization code ends here"))
-                        .AddText(RV.LABEL(labelEnd), "End of the 'if' code")
+            ++ trueCodegenRes.Asm
+                .AddText([ (RV.J(labelEnd),
+                            "Jump to skip the 'false' branch of 'if' code")
+                           (RV.LABEL(labelFalse),
+                            "Beginning of the 'false' branch of the 'if' code") ])
+            ++ falseCodegenRes.Asm
+            ++ Asm(RV.COMMENT("Branch synchronization code begins here"))
+            ++ syncAsm
+            ++ Asm(RV.COMMENT("Branch synchronization code ends here"))
+                .AddText(RV.LABEL(labelEnd), "End of the 'if' code")
         { Asm = ifAsm
           Env = falseCodegenRes.Env }
     
+    | While(condition, body) ->
+        /// Register holding 'while' condition, and code to load it
+        let condReg, condLoadRes = loadIntVar env (getVarName condition) []
+        /// Code generation result for the 'while' loop body
+        let bodyCodegenRes = doCodegen condLoadRes.Env body
+        /// Assembly code to spill/load variables after the 'while' body, to get the same
+        /// register allocation obtained after the 'while' condition and body code generation
+        let syncAsm = syncANFCodegenEnvs bodyCodegenRes.Env env
+        
+        /// Label to mark the beginning of the 'while' loop
+        let whileBeginLabel = Util.genSymbol "while_loop_begin"
+        /// Label to mark the beginning of the 'while' loop body
+        let whileBodyBeginLabel = Util.genSymbol "while_body_begin"
+        /// Label to mark the end of the 'while' loop
+        let whileEndLabel = Util.genSymbol "while_loop_end"
+        
+        // Check the 'while' condition, jump to 'whileEndLabel' if it is false.
+        // Here we use a register to load the address of a label (using the
+        // instruction LA) and then jump to it (using the instruction LR): this
+        // way, the label address can be very far from the jump instruction
+        // address --- and this can be important if the compilation of 'body'
+        // produces a large amount of assembly code
+        let whileAsm =
+            Asm(RV.LABEL(whileBeginLabel))
+            ++ condLoadRes.Asm
+                   .AddText([
+                        (RV.BNEZ(condReg, whileBodyBeginLabel),
+                         "Jump to the loop body if the 'while' condition is true")
+                        (RV.J(whileEndLabel),
+                         "Jump to the end of the 'while' loop")
+                        (RV.LABEL(whileBodyBeginLabel),
+                         "Body of the 'while' loop begins here")
+                   ])
+            ++ bodyCodegenRes.Asm
+            ++ Asm(RV.COMMENT("Branch synchronization code begins here"))
+            ++ syncAsm
+            ++ Asm(RV.COMMENT("Branch synchronization code ends here"))
+            ++ Asm([
+                    (RV.J(whileBeginLabel),
+                     "Jump to the the start of the loop construct")
+                    (RV.LABEL(whileEndLabel), "")
+                ])
+        { Asm = whileAsm
+          Env = bodyCodegenRes.Env }
+        
+    | DoWhile(body, condition) ->
+        /// Code generation result for the 'do-while' loop body
+        let bodyCodegenRes = doCodegen env body
+        /// Register holding 'do-while' condition as variable, and code to load it
+        let condReg, condLoadRes = loadIntVar bodyCodegenRes.Env (getVarName condition) []
+        /// Assembly code to spill/load variables after the 'do-while' body, to get the same
+        /// register allocation obtained after the 'do-while' condition and body code generation
+        let syncAsm = syncANFCodegenEnvs condLoadRes.Env env
+    
+        /// Label to mark the beginning of the 'do-while' loop body
+        let doWhileBodyBeginLabel = Util.genSymbol "do_while_body_begin"
+        
+        let doWhileAsm =
+            Asm(RV.LABEL(doWhileBodyBeginLabel))
+            ++ bodyCodegenRes.Asm
+            ++ condLoadRes.Asm
+            ++ Asm(RV.COMMENT("Branch synchronization code begins here"))
+            ++ syncAsm
+            ++ Asm(RV.COMMENT("Branch synchronization code ends here"))
+            ++ Asm(RV.BNEZ(condReg, doWhileBodyBeginLabel),
+                     "Jump to the start of the loop body if the 'do-while' condition is true")
+        { Asm = doWhileAsm
+          Env = condLoadRes.Env }
+
     | Seq nodes ->
         /// Collect the code of each sequence node assumed in ANF by folding over all children
         let folder (acc: ANFCodegenResult) (node: TypedAST) =
@@ -1028,38 +1178,64 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
               Env = result.Env }
         List.fold folder { Asm = Asm(); Env = env } nodes
 
-    | ReadInt ->
-        /// Target register to store the read integer value + code to load it
-        let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
-        let readCode =
-            (beforeSysCall [Reg.a0] []) ++
-            Asm([
-                (RV.LI(Reg.a7, 5), "RARS syscall: ReadInt")
-                (RV.ECALL, "")
-                (RV.MV(targetReg, Reg.a0), "Move syscall result to target")
-            ])
-            ++ (afterSysCall [Reg.a0] [])
-        { Asm = targetLoadRes.Asm ++ readCode
-          Env = targetLoadRes.Env }
-    | ReadFloat ->
-        /// Target register to store the read float value + code to load it
-        let targetFPReg, targetLoadRes = loadFloatVar env env.TargetVar []
-        let readCode =
-            (beforeSysCall [Reg.a0] []) ++
-            Asm([
-                (RV.LI(Reg.a7, 6), "RARS syscall: ReadFloat")
-                (RV.ECALL, "")
-                (RV.FMV_W_X(targetFPReg, Reg.a0), "Move syscall result to target")
-            ])
-            ++ (afterSysCall [Reg.a0] [])
-        { Asm = targetLoadRes.Asm ++ readCode
-          Env = targetLoadRes.Env }
+    | Type(_, _, scope) ->
+        // Type aliases don't produce any code --- but their ANF scope does
+        doCodegen env scope
 
-    | Type _ 
-    | Ascription _
-    | While _ 
-    | DoWhile _
-    | StructCons _
+    | Ascription(_, node) ->
+        // Ascriptions don't produce any code --- but their type-annotated
+        // expression must be a variable, producing code for it
+        doCodegen env node
+        
+    | StructCons fields ->
+        /// Allocate a new struct variable on heap, and get the code to do it
+        let structAddressReg = getIntVarRegister env env.TargetVar
+        let fieldNames, fieldInitNodes = List.unzip fields
+        /// List of variable names associated with the expression in initializers
+        let anfInitLabels = getVarNames fieldInitNodes
+        
+        /// Generate code to initialize a struct field and accumulate the result.
+        /// Function is folded over all indexed struct fields, to initialize all of them.
+        let fieldLoader = fun (acc: ANFCodegenResult) (fieldOffset: int, label: string) ->
+            // Code to initialize a single struct field. Each field is compiled by targeting
+            // the specific variable name of the initilization expression, while perserving the
+            // target variable in registers as the whole struct address.The variable content is
+            // loaded on the heap location with word-aligned offset from the base address.
+            
+            /// Register holding the field initializer variable, and code to load it
+            let (initReg, initLoadRes) = loadIntVar acc.Env label [env.TargetVar]
+            
+            /// Code to set the field at offset heap location with initializer
+            let fieldInitCode =
+                Asm(RV.SW(initReg, Imm12(fieldOffset * 4), structAddressReg),
+                    $"Initialize struct field '{fieldNames[fieldOffset]}' with init label - '{label}'")
+            
+            // Update the accumulator with the code and environment
+            { Asm = acc.Asm ++ initLoadRes.Asm ++ fieldInitCode
+              Env = initLoadRes.Env }
+        
+        /// Code to allocate the whole struct on the heap
+        let fieldsInitRes =
+            List.fold fieldLoader { Asm = Asm(); Env = env } (List.indexed anfInitLabels)
+        
+        /// Assembly code that allocates space on the heap for the new structure.
+        /// Performs a 'Sbrk' system call, with the size of structure: word-aligned
+        /// number of fields - 4 x no. fields
+        let structAllocCode =
+            (beforeSysCall [Reg.a0] [])
+                .AddText([
+                    (RV.LI(Reg.a0, fields.Length * 4),
+                     "Amount of memory to allocate for a struct (bytes)")
+                    (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk") // Register restore by default
+                    (RV.ECALL, "")
+                    (RV.MV(structAddressReg, Reg.a0),
+                     "Move syscall result (struct mem address) to target variable")
+                ])
+                ++ (afterSysCall [Reg.a0] [])
+        
+        { Asm = structAllocCode ++ fieldsInitRes.Asm
+          Env = fieldsInitRes.Env }
+        
     | FieldSelect _
     | Assign _
     | ArrayCons _

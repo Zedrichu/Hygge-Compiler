@@ -952,12 +952,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                      "Body of the 'while' loop starts here")
                 ])
             ++ (doCodegen env body)
-            .AddText([
-                (RV.LA(Reg.r(env.Target), whileBeginLabel),
-                 "Load address of label at the beginning of the 'while' loop")
-                (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
-                (RV.LABEL(whileEndLabel), "")
-            ])
+                .AddText([
+                    (RV.LA(Reg.r(env.Target), whileBeginLabel),
+                     "Load address of label at the beginning of the 'while' loop")
+                    (RV.JR(Reg.r(env.Target)), "Jump to the start of the loop construct")
+                    (RV.LABEL(whileEndLabel), "")
+                ])
 
     | DoWhile(body, cond) ->
         /// Label to mark the beginning of the 'do-while' loop body
