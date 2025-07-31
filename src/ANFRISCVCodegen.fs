@@ -337,7 +337,7 @@ let internal loadVars (env: ANFCodegenEnv)
     let loader (regs: List<Reg>, fpRegs: List<FPReg>, codegenRes: ANFCodegenResult) (vname, tpe) =
         match tpe with
         | TFloat ->
-            /// Register and codegen result after loading variable 'vnmae'. When loading
+            /// Register and codegen result after loading variable vname. When loading
             /// the variable, we ensure that none of the variables in 'vars' is spilled
             let fpReg, loadRes = loadFloatVar codegenRes.Env vname (doNotSpill @ varNames)
             (regs, fpRegs @ [fpReg], {codegenRes with Env = loadRes.Env
@@ -1189,7 +1189,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         
     | StructCons fields ->
         /// Allocate a new struct variable on heap, and get the code to do it
-        let structAddressReg = getIntVarRegister env env.TargetVar
+        let structStorageReg, structStorageCode = loadIntVar env env.TargetVar []
         let fieldNames, fieldInitNodes = List.unzip fields
         /// List of variable names associated with the expression in initializers
         let anfInitLabels = getVarNames fieldInitNodes
@@ -1198,7 +1198,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         /// Function is folded over all indexed struct fields, to initialize all of them.
         let fieldLoader = fun (acc: ANFCodegenResult) (fieldOffset: int, label: string) ->
             // Code to initialize a single struct field. Each field is compiled by targeting
-            // the specific variable name of the initilization expression, while perserving the
+            // the specific variable name of the initialization expression, while preserving the
             // target variable in registers as the whole struct address.The variable content is
             // loaded on the heap location with word-aligned offset from the base address.
             
@@ -1207,7 +1207,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             
             /// Code to set the field at offset heap location with initializer
             let fieldInitCode =
-                Asm(RV.SW(initReg, Imm12(fieldOffset * 4), structAddressReg),
+                Asm(RV.SW(initReg, Imm12(fieldOffset * 4), structStorageReg),
                     $"Initialize struct field '{fieldNames[fieldOffset]}' with init label - '{label}'")
             
             // Update the accumulator with the code and environment
@@ -1215,8 +1215,9 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
               Env = initLoadRes.Env }
         
         /// Code to allocate the whole struct on the heap
-        let fieldsInitRes =
-            List.fold fieldLoader { Asm = Asm(); Env = env } (List.indexed anfInitLabels)
+        let fieldsInitRes = List.fold fieldLoader
+                                { Asm = Asm(); Env = structStorageCode.Env }
+                                (List.indexed anfInitLabels)
         
         /// Assembly code that allocates space on the heap for the new structure.
         /// Performs a 'Sbrk' system call, with the size of structure: word-aligned
@@ -1228,24 +1229,64 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                      "Amount of memory to allocate for a struct (bytes)")
                     (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk") // Register restore by default
                     (RV.ECALL, "")
-                    (RV.MV(structAddressReg, Reg.a0),
+                    (RV.MV(structStorageReg, Reg.a0),
                      "Move syscall result (struct mem address) to target variable")
                 ])
                 ++ (afterSysCall [Reg.a0] [])
         
-        { Asm = structAllocCode ++ fieldsInitRes.Asm
+        { Asm = structStorageCode.Asm ++ structAllocCode ++ fieldsInitRes.Asm
           Env = fieldsInitRes.Env }
         
-    | FieldSelect _
+    | FieldSelect(target, field) ->
+        /// Assembly code for computing the 'target' object stored as a variable for which we
+        /// select the 'field'. The 'target' struct variable is loaded in a register as memory address.
+        let selTargetRes = doCodegen env target
+        /// Retrieve the register number storing the target struct object
+        let selTargetReg = getIntVarRegister selTargetRes.Env env.TargetVar
+        
+        /// Codegen result for performing the field access once the target struct is loaded.
+        let fieldAccessRes =
+            match expandType init.Env target.Type with
+            | TStruct(fields) ->
+                let fieldNames, fieldTypes, _ = List.unzip3 fields
+                /// Compute the offset with respect to the list of fields in the struct
+                let offset = List.findIndex (fun f -> f = field) fieldNames
+                
+                // Based on the type of the selected field perform the computation into the target variable
+                match expandType init.Env fieldTypes[offset] with
+                | TUnit -> { Asm = Asm(); Env = selTargetRes.Env } // Nothing to do
+                | TFloat ->
+                    /// Target register to store the field selection result, and code to load it
+                    let selectFpReg, selectRes = loadFloatVar selTargetRes.Env env.TargetVar []
+                    let selectionCode =
+                            Asm(RV.FLW_S(selectFpReg, Imm12(offset * 4), selTargetReg),
+                            $"Retrieve value of struct field '%s{field}'")
+                    { Asm = selectRes.Asm ++ selectionCode
+                      Env = selectRes.Env }
+                | _ ->
+                    /// Target register to store the field selection result, and code to load it
+                    let selectReg, selectRes = loadIntVar selTargetRes.Env env.TargetVar []
+                    let selectionCode =
+                            Asm(RV.LW(selectReg, Imm12(offset * 4), selTargetReg),
+                            $"Retrieve value of struct field '%s{field}'")
+                    { Asm = selectRes.Asm ++ selectionCode
+                      Env = selectRes.Env }
+            | t -> failwith $"BUG: FieldSelect codegen on invalid target type: %O{t}"
+        { Asm = selTargetRes.Asm ++ fieldAccessRes.Asm
+          Env = fieldAccessRes.Env}
+
     | Assign _
     | ArrayCons _
     | ArrayElem _
     | ArrayLength _
     | ArraySlice _
+    
     | UnionCons _
     | Match _
-    | Lambda _
+    
+    | Lambda _ 
     | Application _
+    
     | Copy _ -> failwith $"BUG: Feature codegen not implemented for %O{init.Expr}"
     
     | Pointer _

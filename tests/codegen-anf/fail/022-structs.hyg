@@ -1,0 +1,5 @@
+let s1: struct {f: int} = struct {f = 0; g = true};
+let s2: struct {g: struct {f: int}; f: int} = struct {g = s1; f = 0};
+
+assert(s2.g.f = 0);
+assert(s2.g.g) // inner struct type does not declare field g, init with subtype
