@@ -1187,6 +1187,8 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         // expression must be a variable, producing code for it
         doCodegen env node
         
+    | Assign(lhs, rhs) -> { Asm = Asm(); Env = env } // #TODO!
+        
     | StructCons fields ->
         /// Allocate a new struct variable on heap, and get the code to do it
         let structStorageReg, structStorageCode = loadIntVar env env.TargetVar []
@@ -1240,9 +1242,9 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
     | FieldSelect(target, field) ->
         /// Assembly code for computing the 'target' object stored as a variable for which we
         /// select the 'field'. The 'target' struct variable is loaded in a register as memory address.
-        let selTargetRes = doCodegen env target
+        let structLoadRes = doCodegen env target
         /// Retrieve the register number storing the target struct object
-        let selTargetReg = getIntVarRegister selTargetRes.Env env.TargetVar
+        let structReg = getIntVarRegister structLoadRes.Env env.TargetVar
         
         /// Codegen result for performing the field access once the target struct is loaded.
         let fieldAccessRes =
@@ -1254,28 +1256,185 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                 
                 // Based on the type of the selected field perform the computation into the target variable
                 match expandType init.Env fieldTypes[offset] with
-                | TUnit -> { Asm = Asm(); Env = selTargetRes.Env } // Nothing to do
+                | TUnit -> { Asm = Asm(); Env = structLoadRes.Env } // Nothing to do
                 | TFloat ->
                     /// Target register to store the field selection result, and code to load it
-                    let selectFpReg, selectRes = loadFloatVar selTargetRes.Env env.TargetVar []
+                    let selectFpReg, selectRes = loadFloatVar structLoadRes.Env env.TargetVar []
                     let selectionCode =
-                            Asm(RV.FLW_S(selectFpReg, Imm12(offset * 4), selTargetReg),
+                            Asm(RV.FLW_S(selectFpReg, Imm12(offset * 4), structReg),
                             $"Retrieve value of struct field '%s{field}'")
                     { Asm = selectRes.Asm ++ selectionCode
                       Env = selectRes.Env }
                 | _ ->
                     /// Target register to store the field selection result, and code to load it
-                    let selectReg, selectRes = loadIntVar selTargetRes.Env env.TargetVar []
+                    let selectReg, selectRes = loadIntVar structLoadRes.Env env.TargetVar []
                     let selectionCode =
-                            Asm(RV.LW(selectReg, Imm12(offset * 4), selTargetReg),
+                            Asm(RV.LW(selectReg, Imm12(offset * 4), structReg),
                             $"Retrieve value of struct field '%s{field}'")
                     { Asm = selectRes.Asm ++ selectionCode
                       Env = selectRes.Env }
             | t -> failwith $"BUG: FieldSelect codegen on invalid target type: %O{t}"
-        { Asm = selTargetRes.Asm ++ fieldAccessRes.Asm
+        { Asm = structLoadRes.Asm ++ fieldAccessRes.Asm
           Env = fieldAccessRes.Env}
+    
+    | Lambda(args, body) ->
+        /// Label to mark the position of the lambda term body
+        let funLabel = Util.genSymbol "lambda"
+        
+        /// Names of the lambda arguments
+        let argNames, _ = List.unzip args
+        
+        /// Types of the lambda arguments - retrieved from type-checker environment
+        let argTypes = List.map (fun a -> body.Env.Vars[a]) argNames
+        
+        /// Perform the ANF closure conversion on the lambda term, for immutable variable closures
+        // closureConversion env funLabel init None args argTypes body
+        failwith "Missing closure conversion implementation"
+        
+    | Application(expr, args) ->
+        /// Integer caller-saved registers to be stored on stack before executing
+        /// the function call, and restored when the function returns.
+        let saveRegs = (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
+                                @ [for i in 0u..6u do yield Reg.t(i)])
+        /// List of FP registers to save as a caller convention - we save `fa` and `ft` here
+        let saveFpRegs = ([for i in 0u..7u do yield FPReg.fa(i)]
+                        @ [for i in 0u..11u do yield FPReg.ft(i)])
+        
+        /// Codegen result for loading the function variable into an active register
+        /// The register is linked to the target variable in the obtained environment.
+        let functionLoadRes = doCodegen env expr
+        let functionReg = getIntVarRegister functionLoadRes.Env env.TargetVar
+        
+        let closurePlainFunAccessCode = Asm(RV.LW(functionReg, Imm12(0), functionReg),
+                                            "Load plain function address `@f` from closure")
+        
+        /// Assembly code for the expression being applied as a function
+        let appTermCode =
+            Asm().AddText(RV.COMMENT("Load expression to be applied as function"))
+            ++ functionLoadRes.Asm
+            ++ closurePlainFunAccessCode
+        
+        /// Indexed list of argument expressions split by type.  We will use the index
+        /// as an offset (above the current target register) to determine the target
+        /// register for compiling each expression.
+        let indexedArgsFloat, indexedArgsInt =
+            [expr] @ args
+            |> List.partition (fun arg -> isSubtypeOf arg.Env arg.Type TFloat)
+            |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
+        
+        /// Function that copies the content of an argument variable from temp registers to
+        /// `a#` registers using the argument index to determine the destination (opt. on stack).
+        /// The assembly code is accumulated over all arguments of the function.
+        let compileCopyArg (acc: ANFCodegenResult) (i: int, arg:TypedAST) (wordOffset: int) =
+            let argVarName = getVarName arg
+            let argOffset = (i - 8 + wordOffset) * 4
+            
+            /// ANF code-generation result for the argument variable
+            let argLoadRes = doCodegen { acc.Env with TargetVar = argVarName } arg
+            
+            match arg.Type with
+            | t when (isSubtypeOf arg.Env t TFloat) ->
+                /// Retrieve the FP register of the argument variable
+                let argFpReg = getFloatVarRegister argLoadRes.Env argVarName
+                
+                if i < 8 then
+                    let loadCopyCode = Asm(RV.FMV_S(FPReg.fa(uint i), argFpReg),
+                                       $"Load float function call argument %d{i+1} to target FP register `fa%d{i}`")
+                    { Asm = acc.Asm ++ argLoadRes.Asm ++ loadCopyCode
+                      Env = argLoadRes.Env }
+                else
+                    let stackStoreCode = Asm(RV.FSW_S(argFpReg, Imm12(argOffset), Reg.sp),
+                                         $"Store float function call argument %d{i+1} to stack at offset {argOffset}")
+                    { Asm = acc.Asm ++ argLoadRes.Asm ++ stackStoreCode
+                      Env = argLoadRes.Env }
+            | _ ->
+                /// Retrieve the int-register of the argument variable
+                let argReg = getIntVarRegister argLoadRes.Env argVarName
+                
+                if i < 8 then
+                    let loadCopyCode = Asm(RV.MV(Reg.a(uint i), argReg),
+                                       $"Load function call argument %d{i+1} to register `a%d{i}`")
+                    { Asm = acc.Asm ++ argLoadRes.Asm ++ loadCopyCode
+                      Env = argLoadRes.Env }
+                else
+                    let stackStoreCode = Asm(RV.SW(argReg, Imm12(argOffset), Reg.sp),
+                                         $"Store function call argument %d{i+1} to stack at offset {argOffset}")
+                    { Asm = acc.Asm ++ argLoadRes.Asm ++ stackStoreCode
+                      Env = argLoadRes.Env }
+        
+        let floatArgsOnStack = max 0 (indexedArgsFloat.Length - 8)
+        let intArgsOnStack = max 0 (indexedArgsInt.Length - 8)
+        
+        /// Code that loads each application argument variable into a register `a`, by copying
+        /// the contents of argument variables. The code folds over the indices of all arguments
+        /// (from 0 to args.Length), using `compileCopyArg` above.
+        let argsLoadCode =
+            /// Calculate the exact number of arguments that overflow to stack (for allocation)
+            let stackAdjustment =
+                let argsOnStack = floatArgsOnStack + intArgsOnStack
+                if argsOnStack > 0 then
+                    { Asm = Asm(RV.ADDI(Reg.sp, Reg.sp, Imm12(-4 * argsOnStack)),
+                            $"Update stack pointer for the overflowing args with overflow of %d{argsOnStack} units")
+                      Env = functionLoadRes.Env } 
+                else
+                    { Asm = Asm()
+                      Env = functionLoadRes.Env }
+            
+            let floatArgsLoadCode = List.fold
+                                        (fun acc arg -> compileCopyArg acc arg 0)
+                                        stackAdjustment
+                                        indexedArgsFloat
+            let floatIntArgsLoadCode =
+                List.fold
+                        (fun acc arg -> compileCopyArg acc arg floatArgsOnStack)
+                        floatArgsLoadCode
+                        indexedArgsInt
 
-    | Assign _
+            floatIntArgsLoadCode
+            
+        /// Assembly code that performs the function call
+        let callCode =
+            appTermCode
+                .AddText(RV.COMMENT("Before function call: save caller-saved registers"))
+               ++ (saveRegisters saveRegs saveFpRegs)
+               ++ argsLoadCode.Asm // Code to load arg values into arg registers
+                  .AddText(RV.JALR(Reg.ra, Imm12(0), functionReg), "Function call")
+        
+        /// Code handling the function return value (if any)
+        /// If a function expression, we check its return type to target the correct
+        /// output register, FPReg for float and Reg for int.
+        let returnCode =
+            match expr.Type with
+            | TFun(_, retType) ->
+                match retType with
+                | TFloat ->
+                    let returnFpReg, returnLoadRes =
+                        loadFloatVar argsLoadCode.Env env.TargetVar [] 
+                    { returnLoadRes with Asm = returnLoadRes.Asm ++
+                                                Asm(RV.FMV_S(returnFpReg, FPReg.fa0),
+                                                $"Copy function return value to return FP register") }
+                | _ ->
+                    let returnReg, returnLoadRes =
+                        loadIntVar argsLoadCode.Env env.TargetVar []
+                    { returnLoadRes with Asm = returnLoadRes.Asm ++
+                                                Asm(RV.MV(returnReg, Reg.a0),
+                                                $"Copy function return value to target register") }
+            | _ -> failwith ""
+        
+        /// Combine everything together, and restore the caller-saved registers
+        let applicationCode =
+            callCode
+                .AddText(RV.COMMENT("After function call"))
+                ++ returnCode.Asm
+                .AddText([
+                       (RV.ADDI(Reg.sp, Reg.sp, Imm12(4 * (floatArgsOnStack + intArgsOnStack))),
+                        $"Restore SP by {floatArgsOnStack + intArgsOnStack} function args after function call")
+                       (RV.COMMENT("Restore caller-saved registers"),"")
+                        ])
+                  ++ (restoreRegisters saveRegs saveFpRegs)
+        { Asm = applicationCode
+          Env = returnCode.Env }
+        
     | ArrayCons _
     | ArrayElem _
     | ArrayLength _
@@ -1283,9 +1442,6 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
     
     | UnionCons _
     | Match _
-    
-    | Lambda _ 
-    | Application _
     
     | Copy _ -> failwith $"BUG: Feature codegen not implemented for %O{init.Expr}"
     

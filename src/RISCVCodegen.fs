@@ -982,10 +982,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let argNames, _ = List.unzip args
 
         /// Types of the Lambda arguments - retrieved from the type-checking environment
-        let targs = List.map (fun a -> body.Env.Vars[a]) argNames
+        let argTypes = List.map (fun a -> body.Env.Vars[a]) argNames
 
         /// Perform closure conversion on the lambda term, for immutable variable closures
-        let closureConversionCode = closureConversion env funLabel node None args targs body
+        let closureConversionCode = closureConversion env funLabel node None args argTypes body
 
         closureConversionCode
 
@@ -1042,7 +1042,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// 'compileArgs' and 'argsCode' above) into an 'a' register, using an
         /// index to determine the source and target registers, and accumulating
         /// the generated assembly code
-        let copyArg (acc: Asm) (i: int, arg: TypedAST) (wordOffset: int)=
+        let copyArg (acc: Asm) (i: int, arg: TypedAST) (wordOffset: int) =
             let argOffset = (i - 8 + wordOffset) * 4
 
             match arg.Type with
@@ -1085,7 +1085,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Code that performs the function call
         let callCode =
             appTermCode
-            //++ argsCode // Code to compute each argument of the function call
             ++ floatArgsCode
             ++ intArgsCode
                .AddText(RV.COMMENT("Before function call: save caller-saved registers"))
@@ -1094,7 +1093,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                   .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
         
         /// Code that handles the function return value (if any)
-        /// We now check if it is a Function then we check the return type to target the correct output register, FPReg for float, Reg for int.
+        /// If the expression is a function then we check the return type
+        /// to target the correct output register, FPReg for float, Reg for int.
         let retCode =
             match expr.Type with
             | TFun (_, retType) -> 
