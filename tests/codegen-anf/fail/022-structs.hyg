@@ -1,6 +1,5 @@
-let s1: struct {f: int} = struct {f = 0; g = true};
-let s2: struct {g: struct {f: int}; f: int} = struct {g = s1; f = 0};
+let s1: struct {f: int; g: bool} = struct {f = 0; g = true};
+let s2: struct {g: struct {f: int; g: bool}; f: int} = struct {g = s1; f = 0};
 
 assert(s2.g.f = 0);
-assert(s1.g); // struct cannot access field g because of type ascription
-assert(s2.g.g) // inner struct type does not declare field g, init with subtype
+assert(not(s2.g.g))

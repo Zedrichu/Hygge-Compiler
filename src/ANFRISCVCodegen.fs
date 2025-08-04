@@ -554,7 +554,17 @@ let rec internal doCodegen (env: ANFCodegenEnv)
 /// environment.  The expression is expected to be in ANF.
 and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenResult =
     match init.Expr with
-    | Var _ -> doCodegen env init
+    | Var vname ->
+        /// Register containing the source variable value and ANF code to load it (if necessary)
+        let sourceReg, loadRes = loadIntVar env vname []
+        /// Register holding the target and ANF codegen result to load it
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar [vname]
+        
+        /// Assembly code to load the source value into the target
+        let moveCode = Asm(RV.MV(targetReg, sourceReg), $"Copy: {vname} <- {env.TargetVar}")
+        
+        { Asm = loadRes.Asm ++ targetLoadRes.Asm ++ moveCode
+          Env = targetLoadRes.Env }
 
     | UnitVal -> { Asm = Asm() // Nothing to do
                    Env = env }
@@ -914,8 +924,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         let argFpReg, argLoadRes = loadFloatVar env (getVarName arg) []
         
         /// Printout code for integer variables
-        let floatPrintCode = argLoadRes.Asm ++
-                             (beforeSysCall [] [FPReg.fa0])
+        let floatPrintCode = (beforeSysCall [] [FPReg.fa0])
                                  .AddText([
                                      (RV.FMV_S(FPReg.fa0, argFpReg), "Copy to fa0 for printing")
                                      (RV.LI(Reg.a7, 1), "RARS syscall: PrintFloat")
@@ -936,7 +945,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             let printFalse = Util.genSymbol "print_false"
             let printExec = Util.genSymbol "print_execute"
             /// Printout code for boolean variables
-            let boolPrintCode = argLoadRes.Asm
+            let boolPrintCode = Asm()
                                     .AddData(strTrue, Alloc.String("true"))
                                     .AddData(strFalse, Alloc.String("false"))
                                     ++ (beforeSysCall [Reg.a0] [])
@@ -951,32 +960,27 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                                         (RV.ECALL, "")
                                     ])
                                     ++ (afterSysCall [Reg.a0] [])
-            { Asm = argLoadRes.Asm ++ boolPrintCode
-              Env = argLoadRes.Env }
+            { argLoadRes with Asm = argLoadRes.Asm ++ boolPrintCode }
         | TInt ->
             /// Printout code for integer variables
-            let intPrintCode = argLoadRes.Asm ++
-                               (beforeSysCall [Reg.a0] [])
+            let intPrintCode = (beforeSysCall [Reg.a0] [])
                                     .AddText([
                                         (RV.MV(Reg.a0, argReg), "Copy to a0 for printing")
                                         (RV.LI(Reg.a7, 1), "RARS syscall: PrintInt")
                                         (RV.ECALL, "")
                                     ])
                                ++ (afterSysCall [Reg.a0] [])
-            { Asm = argLoadRes.Asm ++ intPrintCode
-              Env = argLoadRes.Env }
+            { argLoadRes with Asm = argLoadRes.Asm ++ intPrintCode }
         | TString ->
             /// Printout code for string variables
-            let stringPrintCode = argLoadRes.Asm ++
-                                  (beforeSysCall [Reg.a0] [])
+            let stringPrintCode = (beforeSysCall [Reg.a0] [])
                                       .AddText([
                                           (RV.MV(Reg.a0, argReg), "Copy to a0 for printing")
                                           (RV.LI(Reg.a7, 4), "RARS syscall: PrintString")
                                           (RV.ECALL, "")
                                       ])
                                   ++ (afterSysCall [Reg.a0] [])
-            { Asm = argLoadRes.Asm ++ stringPrintCode
-              Env = argLoadRes.Env }
+            { argLoadRes with Asm = argLoadRes.Asm ++ stringPrintCode }
         | TStruct fields ->
             let nodes = 
                 [{ init with Expr = Print(
@@ -1071,7 +1075,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         let labelTrue = Util.genSymbol "if_true"
         /// Label to jump to when the 'if' condition is false
         let labelFalse = Util.genSymbol "if_false"
-        /// Label to mark the end of the if..then...else code
+        /// Label to mark the end of the `if...then...else` code
         let labelEnd = Util.genSymbol "if_end"
 
         /// Assembly code for the whole 'if' expression. NOTE: this code generation is simplified,
@@ -1102,13 +1106,20 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Env = falseCodegenRes.Env }
     
     | While(condition, body) ->
-        /// Register holding 'while' condition, and code to load it
-        let condReg, condLoadRes = loadIntVar env (getVarName condition) []
-        /// Code generation result for the 'while' loop body
-        let bodyCodegenRes = doCodegen condLoadRes.Env body
+        /// Updated ANF codegen environment for the condition piece of the loop (add needed vars + set cond. target)
+        let conditionEnv = { env with
+                                NeededVars = Set.union env.NeededVars (ASTUtil.freeVars body) }
+        
+        /// Code generation result for the loop condition assumed in ANF
+        let condCodegenRes = doCodegen conditionEnv condition
+        let condReg = getIntVarRegister condCodegenRes.Env env.TargetVar
+        
+        /// Code generation result for the 'while' loop body assumed in ANF
+        let bodyCodegenRes = doCodegen { condCodegenRes.Env with TargetVar = env.TargetVar } body
         /// Assembly code to spill/load variables after the 'while' body, to get the same
-        /// register allocation obtained after the 'while' condition and body code generation
-        let syncAsm = syncANFCodegenEnvs bodyCodegenRes.Env env
+        /// register allocation obtained before entering the 'while' condition.
+        /// Sync the full loop environment back to the condition entry state
+        let syncAsm = syncANFCodegenEnvs bodyCodegenRes.Env conditionEnv
         
         /// Label to mark the beginning of the 'while' loop
         let whileBeginLabel = Util.genSymbol "while_loop_begin"
@@ -1125,7 +1136,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         // produces a large amount of assembly code
         let whileAsm =
             Asm(RV.LABEL(whileBeginLabel))
-            ++ condLoadRes.Asm
+            ++ condCodegenRes.Asm
                    .AddText([
                         (RV.BNEZ(condReg, whileBodyBeginLabel),
                          "Jump to the loop body if the 'while' condition is true")
@@ -1144,7 +1155,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                     (RV.LABEL(whileEndLabel), "")
                 ])
         { Asm = whileAsm
-          Env = bodyCodegenRes.Env }
+          Env = { condCodegenRes.Env with NeededVars = env.NeededVars } }
         
     | DoWhile(body, condition) ->
         /// Code generation result for the 'do-while' loop body
