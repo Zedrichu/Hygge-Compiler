@@ -455,6 +455,24 @@ let internal syncANFCodegenEnvs (fromEnv: ANFCodegenEnv)
     loadRes.Asm
 
 
+let prebindPrintTarget (printNodes: List<TypedAST>): List<TypedAST> =
+    let folder (acc:List<TypedAST>) (elem: TypedAST): List<TypedAST> =
+        /// Generated unique variable name for each print operation
+        let printVarName = Util.genSymbol "$prnt"
+        let unitVarName = Util.genSymbol "$ignr"
+        
+        let printout = { elem with Expr = Print({ elem with Expr = Var(printVarName) }); Type = TUnit }
+        let preBind = { elem with Expr =
+                                    Let(printVarName, elem,
+                                        { elem with Expr =
+                                                    Let(unitVarName, printout,
+                                                        { elem with Expr = Var(unitVarName); Type = TUnit })
+                                        })
+                      }
+        acc @ [preBind]
+    List.fold folder [] printNodes
+
+
 /// Code generation function: compile the expression in the given AST node,
 /// which is expected to be in ANF.
 let rec internal doCodegen (env: ANFCodegenEnv)
@@ -983,24 +1001,26 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             { argLoadRes with Asm = argLoadRes.Asm ++ stringPrintCode }
         | TStruct fields ->
             let nodes = 
-                [{ init with Expr = Print(
-                            { init with Expr = StringVal("struct { "); Type = TString }) }] @
+                [{ init with Expr = StringVal("struct { "); Type = TString }] @
                 (List.collect (fun (name, tpe, _) ->
                     let strVals = 
                         match tpe with
                         | TString -> (name + @" = \"""), @"\""; "
                         | _ -> (name + " = "), "; "
                     [
-                        { init with Expr = Print(
-                                { init with Expr = StringVal(fst strVals); Type = TString }) }
-                        { init with Expr = Print(
-                                { init with Expr = FieldSelect(arg, name); Type = tpe }) }
-                        { init with Expr = Print(
-                                { init with Expr = StringVal(snd strVals); Type = TString }) }
+                        { init with Expr = StringVal(fst strVals); Type = TString }
+                        { init with Expr = FieldSelect(arg, name); Type = TString }
+                        { init with Expr = StringVal(snd strVals); Type = TString }
                     ]
                 ) fields) @
                 [{ init with Expr = Print({ init with Expr = StringVal("}"); Type = TString }) }]
             doLetInitCodegen env { init with Expr = Seq(nodes) }
+                [{ init with Expr = StringVal("}"); Type = TString }]
+            let printoutBinders = prebindPrintTarget nodes
+            // let temp = doLetInitCodegen env { init with Expr = Seq(printoutBinders) }
+            // Skip detailed printout of complex data types in codegen/interpreter
+            // #TODO: move printout AST in an earlier compilation phase - `parser`
+            argLoadRes
         | TArray tpe ->
             let nodes = [
                 { init with Expr = Print(
@@ -1009,18 +1029,25 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                 { init with Expr = Print({ init with Expr = ArrayLength(arg); Type = TInt }) }
                 { init with Expr = Print({ init with Expr = StringVal(" }"); Type = TString }) }
             ]
-            doLetInitCodegen env {init with Expr = Seq(nodes)}
+            let printoutBinders = prebindPrintTarget nodes
+            // let temp = doLetInitCodegen env { init with Expr = Seq(printoutBinders) }
+            // Skip detailed printout of complex data types in codegen/interpreter
+            // #TODO: move printout AST in an earlier compilation phase - `parser`
+            argLoadRes
         | TFun _ as t ->
             doLetInitCodegen env
-                { init with
-                    Expr = Print(
-                        { init with Expr = StringVal(t.ToString()); Type = TString }
-                )}
+                { init with Expr = Let(env.TargetVar,
+                        { init with Expr = StringVal(t.ToString()); Type = TString },
+                        { init with Expr = Print({ init with Expr = Var(env.TargetVar) }) })
+                }
+
         | TUnion _ as t ->
             doLetInitCodegen env
-                { init with Expr = Print(
-                        { init with Expr = StringVal(t.ToString()); Type = TString }
-                )}
+                { init with Expr = Let(env.TargetVar,
+                        { init with Expr = StringVal(t.ToString()); Type = TString },
+                        { init with Expr = Print({ init with Expr = Var(env.TargetVar) }) })
+                }
+                
         | t -> failwith $"BUG: Print int-like codegen invoked on unsupported type %O{t}"
         
 
