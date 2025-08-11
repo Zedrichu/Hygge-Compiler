@@ -2,4 +2,4 @@ let s1: struct {f: int; g: bool} = struct {f = 0; g = true};
 let s2: struct {g: struct {f: int; g: bool}; f: int} = struct {g = s1; f = 0};
 
 assert(s2.g.f = 0);
-assert(not(s2.g.g))
+assert(not(s1.g))

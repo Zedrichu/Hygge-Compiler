@@ -1013,8 +1013,6 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                         { init with Expr = StringVal(snd strVals); Type = TString }
                     ]
                 ) fields) @
-                [{ init with Expr = Print({ init with Expr = StringVal("}"); Type = TString }) }]
-            doLetInitCodegen env { init with Expr = Seq(nodes) }
                 [{ init with Expr = StringVal("}"); Type = TString }]
             let printoutBinders = prebindPrintTarget nodes
             // let temp = doLetInitCodegen env { init with Expr = Seq(printoutBinders) }
@@ -1225,7 +1223,47 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         // expression must be a variable, producing code for it
         doCodegen env node
         
-    | Assign(lhs, rhs) -> { Asm = Asm(); Env = env } // #TODO!
+    | Assign(lhs, rhs) ->
+        match lhs.Expr with
+        | Var(name) ->
+            /// Extracted variable name from rhs
+            let rhsVarName = getVarName rhs
+            
+            
+            
+            match rhs.Type with
+            | t when (isSubtypeOf rhs.Env t TUnit) ->
+                /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
+                let _, rhsLoadCode = loadIntVar env rhsVarName []
+                rhsLoadCode
+            | t when (isSubtypeOf rhs.Env t TFloat) ->
+                /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
+                let rhsReg, rhsLoadCode = loadFloatVar env rhsVarName []
+                match findFloatVarRegister env name with
+                | Some(fpReg) ->
+                    let assignCode = Asm(RV.FMV_S(fpReg, rhsReg),
+                                     $"Assignment to variable %s{name}")
+                    { rhsLoadCode with Asm = rhsLoadCode.Asm ++ assignCode }
+                | None ->
+                    let offset = rhsLoadCode.Env.Frame.Item name
+                    let assignCode = Asm(RV.FSW_S(rhsReg, Imm12(offset * -4), Reg.fp),
+                                     $"Assignment to variable %s{name} on stack at offset %d{offset}")
+                    { rhsLoadCode with Asm = rhsLoadCode.Asm ++ assignCode }
+            | _ ->
+                /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
+                let rhsReg, rhsLoadCode = loadIntVar env rhsVarName []
+                match findIntVarRegister env name with
+                | Some(reg) ->
+                    let assignCode = Asm(RV.MV(reg, rhsReg),
+                                     $"Assignment to variable %s{name}")
+                    { rhsLoadCode with Asm = rhsLoadCode.Asm ++ assignCode }
+                | None ->
+                    let offset = rhsLoadCode.Env.Frame.Item name
+                    let assignCode = Asm(RV.SW(rhsReg, Imm12(offset * -4), Reg.fp),
+                                         $"Assignment to variable %s{name} on stack at offset %d{offset}")
+                    { rhsLoadCode with Asm = rhsLoadCode.Asm ++ assignCode }
+        | _ -> failwith $"ANF Assignment not yet implemented for {lhs.Expr}"
+
         
     | StructCons fields ->
         /// Allocate a new struct variable on heap, and get the code to do it
