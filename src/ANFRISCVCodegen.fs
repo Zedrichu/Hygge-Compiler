@@ -1128,7 +1128,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             ++ Asm(RV.COMMENT("Branch synchronization code ends here"))
                 .AddText(RV.LABEL(labelEnd), "End of the 'if' code")
         { Asm = ifAsm
-          Env = falseCodegenRes.Env }
+          Env = trueCodegenRes.Env }
     
     | While(condition, body) ->
         /// Updated ANF codegen environment for the condition piece of the loop (add needed vars + set cond. target)

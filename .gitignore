@@ -19,6 +19,7 @@ TestResults
 examples/exercise*
 examples/ex*
 examples/test.hyg
+**/bug/
 
 .idea
 .fake
