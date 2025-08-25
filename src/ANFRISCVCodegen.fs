@@ -1229,8 +1229,6 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             /// Extracted variable name from rhs
             let rhsVarName = getVarName rhs
             
-            
-            
             match rhs.Type with
             | t when (isSubtypeOf rhs.Env t TUnit) ->
                 /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
@@ -1239,29 +1237,65 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             | t when (isSubtypeOf rhs.Env t TFloat) ->
                 /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
                 let rhsReg, rhsLoadCode = loadFloatVar env rhsVarName []
+                
+                /// Register holding the target variable with the result of the assignment, and ANF code to load it
+                /// The assignee variable is protected from spilling when loading the target register.
+                let targetFpReg, loadTargetReg = loadFloatVar rhsLoadCode.Env env.TargetVar [rhsVarName]
+                
                 match findFloatVarRegister env name with
                 | Some(fpReg) ->
-                    let assignCode = Asm(RV.FMV_S(fpReg, rhsReg),
-                                     $"Assignment to variable %s{name}")
-                    { rhsLoadCode with Asm = rhsLoadCode.Asm ++ assignCode }
+                    let assignCode = rhsLoadCode.Asm
+                                     ++ Asm(RV.FMV_S(fpReg, rhsReg),
+                                        $"Assignment to variable %s{name}")
+                                     ++ loadTargetReg.Asm
+                                     ++ Asm(RV.FMV_S(targetFpReg, rhsReg),
+                                        $"Output of assignment to target")
+                    { Asm = assignCode
+                      Env = loadTargetReg.Env }
                 | None ->
                     let offset = rhsLoadCode.Env.Frame.Item name
-                    let assignCode = Asm(RV.FSW_S(rhsReg, Imm12(offset * -4), Reg.fp),
-                                     $"Assignment to variable %s{name} on stack at offset %d{offset}")
-                    { rhsLoadCode with Asm = rhsLoadCode.Asm ++ assignCode }
+                    let assignCode = rhsLoadCode.Asm
+                                     ++ Asm(RV.FSW_S(rhsReg, Imm12(offset * -4), Reg.fp),
+                                        $"Assignment to variable %s{name} on stack at offset %d{offset}")
+                                     ++ loadTargetReg.Asm
+                                     ++ Asm(RV.FMV_S(targetFpReg, rhsReg),
+                                        $"Output of assignment to target")
+                    { Asm = assignCode
+                      Env = loadTargetReg.Env }
             | _ ->
                 /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
                 let rhsReg, rhsLoadCode = loadIntVar env rhsVarName []
+                
+                /// Register holding the target variable with the result of the assignment, and ANF code to load it
+                /// The assignee variable is protected from spilling when loading the target register.
+                let targetReg, loadTargetReg = loadIntVar rhsLoadCode.Env env.TargetVar [rhsVarName]
+                
                 match findIntVarRegister env name with
                 | Some(reg) ->
-                    let assignCode = Asm(RV.MV(reg, rhsReg),
-                                     $"Assignment to variable %s{name}")
-                    { rhsLoadCode with Asm = rhsLoadCode.Asm ++ assignCode }
+                    let assignCode = rhsLoadCode.Asm
+                                     ++ Asm(RV.MV(reg, rhsReg),
+                                        $"Assignment to variable %s{name}")
+                                     ++ loadTargetReg.Asm
+                                     ++ Asm(RV.MV(targetReg, rhsReg),
+                                        $"Output of assignment to target")
+                    { Asm = assignCode
+                      Env = loadTargetReg.Env }
                 | None ->
                     let offset = rhsLoadCode.Env.Frame.Item name
-                    let assignCode = Asm(RV.SW(rhsReg, Imm12(offset * -4), Reg.fp),
-                                         $"Assignment to variable %s{name} on stack at offset %d{offset}")
-                    { rhsLoadCode with Asm = rhsLoadCode.Asm ++ assignCode }
+                    let assignCode = rhsLoadCode.Asm
+                                     ++ Asm(RV.SW(rhsReg, Imm12(offset * -4), Reg.fp),
+                                        $"Assignment to variable %s{name} on stack at offset %d{offset}")
+                                     ++ loadTargetReg.Asm
+                                     ++ Asm(RV.MV(targetReg, rhsReg),
+                                        $"Output of assignment to target")
+                    { Asm = assignCode
+                      Env = loadTargetReg.Env }
+
+        | FieldSelect(target, field) ->
+            /// Extracted variable name from rhs
+            let rhsVarName = getVarName rhs
+            failwith ""
+            
         | _ -> failwith $"ANF Assignment not yet implemented for {lhs.Expr}"
 
         
