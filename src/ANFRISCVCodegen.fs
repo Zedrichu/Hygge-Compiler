@@ -945,7 +945,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         let floatPrintCode = (beforeSysCall [] [FPReg.fa0])
                                  .AddText([
                                      (RV.FMV_S(FPReg.fa0, argFpReg), "Copy to fa0 for printing")
-                                     (RV.LI(Reg.a7, 1), "RARS syscall: PrintFloat")
+                                     (RV.LI(Reg.a7, 2), "RARS syscall: PrintFloat")
                                      (RV.ECALL, "")
                                  ])
                              ++ (afterSysCall [] [FPReg.fa0])
@@ -1373,17 +1373,33 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             // target variable in registers as the whole struct address.The variable content is
             // loaded on the heap location with word-aligned offset from the base address.
             
-            /// Register holding the field initializer variable, and code to load it
-            let (initReg, initLoadRes) = loadIntVar acc.Env label [env.TargetVar]
+            /// Record the specific init node at the given offset
+            let fieldInit = fieldInitNodes[fieldOffset]
             
-            /// Code to set the field at offset heap location with initializer
-            let fieldInitCode =
-                Asm(RV.SW(initReg, Imm12(fieldOffset * 4), structStorageReg),
-                    $"Initialize struct field '{fieldNames[fieldOffset]}' with init label - '{label}'")
-            
-            // Update the accumulator with the code and environment
-            { Asm = acc.Asm ++ initLoadRes.Asm ++ fieldInitCode
-              Env = initLoadRes.Env }
+            match fieldInit.Type with
+            | t when isSubtypeOf fieldInit.Env t TFloat ->
+                /// Register holding the field initializer variable, and code to load it
+                let (initFpReg, initLoadRes) = loadFloatVar acc.Env label [env.TargetVar]
+                
+                /// Code to set the field at offset heap location with initializer
+                let fieldInitCode =
+                    Asm(RV.FSW_S(initFpReg, Imm12(fieldOffset * 4), structStorageReg),
+                        $"Initialize struct field '{fieldNames[fieldOffset]}' with init label - '{label}'")
+                
+                { Asm = acc.Asm ++ initLoadRes.Asm ++ fieldInitCode
+                  Env = initLoadRes.Env }
+            | _ ->
+                /// Register holding the field initializer variable, and code to load it
+                let (initReg, initLoadRes) = loadIntVar acc.Env label [env.TargetVar]
+                
+                /// Code to set the field at offset heap location with initializerYo
+                let fieldInitCode =
+                    Asm(RV.SW(initReg, Imm12(fieldOffset * 4), structStorageReg),
+                        $"Initialize struct field '{fieldNames[fieldOffset]}' with init label - '{label}'")
+                
+                // Update the accumulator with the code and environment
+                { Asm = acc.Asm ++ initLoadRes.Asm ++ fieldInitCode
+                  Env = initLoadRes.Env }
         
         /// Code to allocate the whole struct on the heap
         let fieldsInitRes = List.fold fieldLoader
@@ -1414,7 +1430,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         
         /// Register holding the structure variable (memory address of object) and ANF code to load it
         let structReg, structLoadRes = loadIntVar env structVarName []
-        
+
         /// Codegen result for performing the field access once the target struct is loaded.
         let fieldAccessRes =
             match expandType init.Env target.Type with
