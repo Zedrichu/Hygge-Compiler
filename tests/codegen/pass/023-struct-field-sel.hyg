@@ -1,3 +1,4 @@
+print((struct {f = 42.0f; g = true}).f);
 assert((struct {f = 42.0f; g = true}).f = 42.0f);
 assert((struct {f = struct {g = 0; h = 42}; h = 1}).f.h = 42);
 

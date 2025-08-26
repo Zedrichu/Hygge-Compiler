@@ -1224,16 +1224,16 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         doCodegen env node
         
     | Assign(lhs, rhs) ->
+        /// Extracted variable name from rhs
+        let rhsVarName = getVarName rhs
+        
         match lhs.Expr with
         | Var(name) ->
-            /// Extracted variable name from rhs
-            let rhsVarName = getVarName rhs
-            
             match rhs.Type with
             | t when (isSubtypeOf rhs.Env t TUnit) ->
-                /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
-                let _, rhsLoadCode = loadIntVar env rhsVarName []
-                rhsLoadCode
+                // Nothing to perform for unit assignments
+                { Asm = Asm()
+                  Env = env }
             | t when (isSubtypeOf rhs.Env t TFloat) ->
                 /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
                 let rhsReg, rhsLoadCode = loadFloatVar env rhsVarName []
@@ -1277,7 +1277,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                                         $"Assignment to variable %s{name}")
                                      ++ loadTargetReg.Asm
                                      ++ Asm(RV.MV(targetReg, rhsReg),
-                                        $"Output of assignment to target")
+                                        $"Output of assignment value to target")
                     { Asm = assignCode
                       Env = loadTargetReg.Env }
                 | None ->
@@ -1287,14 +1287,73 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                                         $"Assignment to variable %s{name} on stack at offset %d{offset}")
                                      ++ loadTargetReg.Asm
                                      ++ Asm(RV.MV(targetReg, rhsReg),
-                                        $"Output of assignment to target")
+                                        $"Output of assignment value to target")
                     { Asm = assignCode
                       Env = loadTargetReg.Env }
 
-        | FieldSelect(target, field) ->
-            /// Extracted variable name from rhs
-            let rhsVarName = getVarName rhs
-            failwith ""
+        | FieldSelect(structure, field) ->
+            /// Extracted variable name for the structure object
+            let structVarName = getVarName structure
+
+            /// Register holding the structure object (heap memory address)
+            let structReg, structLoadRes = loadIntVar env structVarName []
+            
+            match expandType structure.Env structure.Type with
+            | TStruct(fields) ->
+                /// Names of the struct fields
+                let fieldNames, _, _ = List.unzip3 fields
+                
+                /// Offset of the selected struct field from the beginning of the struct
+                let offset = List.findIndex (fun f -> f = field) fieldNames
+                
+                /// Assembly code that performs the field value assignment
+                let assignResult =
+                    match rhs.Type with
+                    | t when (isSubtypeOf rhs.Env t TUnit) ->
+                        // Nothing to do
+                        { Asm = Asm()
+                          Env = env }
+                    | t when (isSubtypeOf rhs.Env t TFloat) ->
+                        /// Register holding the assignee variable (rhs.) and ANF codegen result to load it
+                        let rhsFpReg, rhsLoadRes = loadFloatVar structLoadRes.Env rhsVarName [structVarName]
+                        
+                        /// Register holding the target variable with the result of the assignment, and ANF code to load it
+                        /// The assignee variable is protected from spilling when loading the target register.
+                        let targetFpReg, loadTargetRes = loadFloatVar rhsLoadRes.Env env.TargetVar [rhsVarName]
+                        
+                        let assignCode =
+                            structLoadRes.Asm
+                            ++ rhsLoadRes.Asm
+                            ++ Asm(RV.FSW_S(rhsFpReg, Imm12(offset * 4), structReg),
+                               $"Assigning value to struct field '%s{field}'")
+                            ++ loadTargetRes.Asm
+                            ++ Asm(RV.FMV_S(targetFpReg, rhsFpReg),
+                               $"Output of assignment value to target")
+                        
+                        { Asm = assignCode
+                          Env = loadTargetRes.Env }
+                        
+                    | _ ->
+                        /// Register holding the assignee variable (rhs.) and ANF codegen result to load it
+                        let rhsReg, rhsLoadRes = loadIntVar structLoadRes.Env rhsVarName [structVarName]
+                        
+                        /// Register holding the target variable with the result of the assignment, and ANF code to load it
+                        /// The assignee variable is protected from spilling when loading the target register.
+                        let targetReg, loadTargetRes = loadIntVar rhsLoadRes.Env env.TargetVar [rhsVarName]
+                        
+                        let assignCode =
+                            structLoadRes.Asm
+                            ++ rhsLoadRes.Asm
+                            ++ Asm(RV.SW(rhsReg, Imm12(offset * 4), structReg),
+                               $"Assigning value to struct field '%s{field}'")
+                            ++ loadTargetRes.Asm
+                            ++ Asm(RV.MV(targetReg, rhsReg),
+                               $"Output of assignment value to target")
+                        { Asm = assignCode
+                          Env = loadTargetRes.Env }
+                assignResult
+            | t ->
+                failwith $"BUG: field selection on invalid object type: %O{t}"
             
         | _ -> failwith $"ANF Assignment not yet implemented for {lhs.Expr}"
 
@@ -1350,11 +1409,11 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Env = fieldsInitRes.Env }
         
     | FieldSelect(target, field) ->
-        /// Assembly code for computing the 'target' object stored as a variable for which we
-        /// select the 'field'. The 'target' struct variable is loaded in a register as memory address.
-        let structLoadRes = doCodegen env target
-        /// Retrieve the register number storing the target struct object
-        let structReg = getIntVarRegister structLoadRes.Env env.TargetVar
+        /// Extract variable name for selected structure
+        let structVarName = getVarName target
+        
+        /// Register holding the structure variable (memory address of object) and ANF code to load it
+        let structReg, structLoadRes = loadIntVar env structVarName []
         
         /// Codegen result for performing the field access once the target struct is loaded.
         let fieldAccessRes =
@@ -1401,7 +1460,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         // closureConversion env funLabel init None args argTypes body
         failwith "Missing closure conversion implementation"
         
-    | Application(expr, args) ->
+    | Application(func, args) ->
         /// Integer caller-saved registers to be stored on stack before executing
         /// the function call, and restored when the function returns.
         let saveRegs = (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
@@ -1410,11 +1469,12 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         let saveFpRegs = ([for i in 0u..7u do yield FPReg.fa(i)]
                         @ [for i in 0u..11u do yield FPReg.ft(i)])
         
-        /// Codegen result for loading the function variable into an active register
-        /// The register is linked to the target variable in the obtained environment.
-        let functionLoadRes = doCodegen env expr
-        let functionReg = getIntVarRegister functionLoadRes.Env env.TargetVar
+        /// Extract variable name for function
+        let funVarName = getVarName func
         
+        /// Register holding the function variable and ANF code to load it
+        let functionReg, functionLoadRes = loadIntVar env funVarName []
+                
         let closurePlainFunAccessCode = Asm(RV.LW(functionReg, Imm12(0), functionReg),
                                             "Load plain function address `@f` from closure")
         
@@ -1428,7 +1488,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         /// as an offset (above the current target register) to determine the target
         /// register for compiling each expression.
         let indexedArgsFloat, indexedArgsInt =
-            [expr] @ args
+            [func] @ args
             |> List.partition (fun arg -> isSubtypeOf arg.Env arg.Type TFloat)
             |> fun (floats, ints) -> (List.indexed floats, List.indexed ints)
         
@@ -1439,13 +1499,11 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             let argVarName = getVarName arg
             let argOffset = (i - 8 + wordOffset) * 4
             
-            /// ANF code-generation result for the argument variable
-            let argLoadRes = doCodegen { acc.Env with TargetVar = argVarName } arg
             
             match arg.Type with
             | t when (isSubtypeOf arg.Env t TFloat) ->
-                /// Retrieve the FP register of the argument variable
-                let argFpReg = getFloatVarRegister argLoadRes.Env argVarName
+                /// Register holding the float argument variable and ANF codegen result to load it
+                let argFpReg, argLoadRes = loadFloatVar acc.Env argVarName []
                 
                 if i < 8 then
                     let loadCopyCode = Asm(RV.FMV_S(FPReg.fa(uint i), argFpReg),
@@ -1458,8 +1516,8 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                     { Asm = acc.Asm ++ argLoadRes.Asm ++ stackStoreCode
                       Env = argLoadRes.Env }
             | _ ->
-                /// Retrieve the int-register of the argument variable
-                let argReg = getIntVarRegister argLoadRes.Env argVarName
+                /// Register holding the float argument variable and ANF codegen result to load it
+                let argReg, argLoadRes = loadIntVar acc.Env argVarName []
                 
                 if i < 8 then
                     let loadCopyCode = Asm(RV.MV(Reg.a(uint i), argReg),
@@ -1514,7 +1572,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         /// If a function expression, we check its return type to target the correct
         /// output register, FPReg for float and Reg for int.
         let returnCode =
-            match expr.Type with
+            match func.Type with
             | TFun(_, retType) ->
                 match retType with
                 | TFloat ->
