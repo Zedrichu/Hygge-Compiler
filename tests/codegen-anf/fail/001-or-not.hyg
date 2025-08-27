@@ -1,0 +1,1 @@
+assert(not (false or not false))

@@ -1,0 +1,8 @@
+let mutable x = 0;
+let mutable y = 1;
+for (x <- 1; x < 5; x <- x + 1) { 
+    println(y); 
+    y <- y * x; 
+    println(x) 
+};
+assert(y = 120)

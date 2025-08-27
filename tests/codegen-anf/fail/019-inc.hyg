@@ -1,0 +1,5 @@
+let mutable x = 1;
+let y = ++ x;
+
+assert(y = 1);
+assert(x = 1)

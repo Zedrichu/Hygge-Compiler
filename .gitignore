@@ -16,9 +16,12 @@ bin
 .ionide/
 TestResults
 
+CLAUDE.md
+
 examples/exercise*
 examples/ex*
 examples/test.hyg
+**/bug/
 
 .idea
 .fake

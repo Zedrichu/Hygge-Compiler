@@ -307,6 +307,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let rfptarget = env.FPTarget + 1u
             /// Generated code for the rhs expression
             let rAsm = doCodegen {env with FPTarget = rfptarget} rhs
+            /// Conversion of rhs int arguments to float (support typer for increment/decrement)
+            let rConv = match rhs.Type with
+                        | t when isSubtypeOf node.Env t TInt ->
+                            Asm(RV.FCVT_S_W(FPReg.r(rfptarget), Reg.r(env.Target)))
+                        | _ -> Asm()
+            
             let label = Util.genSymbol "minmax_done"
             /// Generated code for the numerical operation
             let opAsm =
@@ -335,7 +341,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     Asm(RV.LABEL(label))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
-            lAsm ++ rAsm ++ opAsm
+            lAsm ++ rAsm ++ rConv ++ opAsm
         | t ->
             failwith $"BUG: numerical operation codegen invoked on invalid type %O{t}"
 
@@ -946,12 +952,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                      "Body of the 'while' loop starts here")
                 ])
             ++ (doCodegen env body)
-            .AddText([
-                (RV.LA(Reg.r(env.Target), whileBeginLabel),
-                 "Load address of label at the beginning of the 'while' loop")
-                (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
-                (RV.LABEL(whileEndLabel), "")
-            ])
+                .AddText([
+                    (RV.LA(Reg.r(env.Target), whileBeginLabel),
+                     "Load address of label at the beginning of the 'while' loop")
+                    (RV.JR(Reg.r(env.Target)), "Jump to the start of the loop construct")
+                    (RV.LABEL(whileEndLabel), "")
+                ])
 
     | DoWhile(body, cond) ->
         /// Label to mark the beginning of the 'do-while' loop body
@@ -976,10 +982,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let argNames, _ = List.unzip args
 
         /// Types of the Lambda arguments - retrieved from the type-checking environment
-        let targs = List.map (fun a -> body.Env.Vars[a]) argNames
+        let argTypes = List.map (fun a -> body.Env.Vars[a]) argNames
 
         /// Perform closure conversion on the lambda term, for immutable variable closures
-        let closureConversionCode = closureConversion env funLabel node None args targs body
+        let closureConversionCode = closureConversion env funLabel node None args argTypes body
 
         closureConversionCode
 
@@ -1036,7 +1042,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// 'compileArgs' and 'argsCode' above) into an 'a' register, using an
         /// index to determine the source and target registers, and accumulating
         /// the generated assembly code
-        let copyArg (acc: Asm) (i: int, arg: TypedAST) (wordOffset: int)=
+        let copyArg (acc: Asm) (i: int, arg: TypedAST) (wordOffset: int) =
             let argOffset = (i - 8 + wordOffset) * 4
 
             match arg.Type with
@@ -1079,7 +1085,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Code that performs the function call
         let callCode =
             appTermCode
-            //++ argsCode // Code to compute each argument of the function call
             ++ floatArgsCode
             ++ intArgsCode
                .AddText(RV.COMMENT("Before function call: save caller-saved registers"))
@@ -1088,7 +1093,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                   .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
         
         /// Code that handles the function return value (if any)
-        /// We now check if it is a Function then we check the return type to target the correct output register, FPReg for float, Reg for int.
+        /// If the expression is a function then we check the return type
+        /// to target the correct output register, FPReg for float, Reg for int.
         let retCode =
             match expr.Type with
             | TFun (_, retType) -> 
@@ -1249,14 +1255,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         /// Code to store the length of the array at the beginning of the array struct memory
         let instanceFieldSetCode =
-            match expandType node.Env length.Type with
-            | TInt -> Asm().AddText([
-                            (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
-                            "Store array length at the beginning of the array memory (1st field)")
-                            (RV.SW(Reg.r(env.Target + 2u), Imm12(4), Reg.r(env.Target)),
-                            "Store array container pointer in data (2nd struct field)")
-                        ])
-            | _ -> failwith $"BUG: array length initialised with invalid type: %O{length.Type}"
+            Asm().AddText([
+                (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
+                "Store array length at the beginning of the array memory (1st field)")
+                (RV.SW(Reg.r(env.Target + 2u), Imm12(4), Reg.r(env.Target)),
+                "Store array container pointer in data (2nd struct field)")
+            ])
 
         /// Compiled code for initialisation value, targeting the register `target+3`
         let initCode = doCodegen {env with Target = env.Target + 3u} init
@@ -1373,13 +1377,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// heap memory at `target` (the beginning of the array) to retrieve the length value.
         let targetCode = doCodegen env target
         let lengthAccessCode =
-            match expandType node.Env target.Type with
-            | TArray _ ->
-                Asm().AddText(
-                    RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
-                    "Load array length from base pointer in memory"
-                )
-            | _ -> failwith $"BUG: array length access on invalid target: %O{target.Type}"
+            Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+                "Load array length from base pointer in memory")
         targetCode ++ lengthAccessCode
 
     | ArraySlice(parent, startIdx, endIdx) ->
