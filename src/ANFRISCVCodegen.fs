@@ -1619,9 +1619,164 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         { Asm = applicationCode
           Env = returnCode.Env }
         
-    | ArrayCons _
+    | ArrayCons(length, node) ->
+        // To compile an array constructor, we allocate heap space for the whole array instance
+        // (struct + container), and then compile its initialisation once and for all elements,
+        // storing each result in the corresponding heap location. The struct heap address will
+        // end up in the 'target' register - i.e. the register will contain a pointer to the
+        // first element of the allocated structure.
+        
+        /// Extract the length variable name
+        let lengthVarName = getVarName length
+        
+        /// Register holding the array length variable, and ANF code to load it
+        let lengthReg, lengthLoadRes = loadIntVar env lengthVarName []
+        
+        /// Register holding the array base address (heap memory address), and ANF code to load it
+        let arrayStructReg, arrayStructLoadRes = loadIntVar lengthLoadRes.Env env.TargetVar [lengthVarName]
+        
+        /// Assembly code that allocates space on the heap for the new array sequence, through `Sbrk`
+        /// system call. The size of the structure is word-aligned for the no. of elements: 4 x length (bytes)
+        let arrayAllocCode =
+            (beforeSysCall [Reg.a0] [])
+                .AddText([
+                    (RV.LI(Reg.a0, 4), "Store word size")
+                    (RV.MUL(Reg.a0, Reg.a0, lengthReg),
+                     "Amount of memory to allocate for the array sequence (in bytes)")
+                    (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                    (RV.ECALL, "")
+                    (RV.MV(arrayStructReg, Reg.a0),
+                     "Move syscall result (data container point) to target")
+                ])
+            ++ (afterSysCall [Reg.a0] [])
+            ++ Asm([
+                // Store data container pointer on stack temporarily
+                (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)),
+                 "Allocate stack space: sp[0]=array base address")
+                (RV.SW(arrayStructReg, Imm12(0), Reg.sp),
+                 "Save data container pointer on stack")
+            ])
+        
+        /// Allocation of heap space for the new array struct through a 'Sbrk'
+        /// system call. The size of the structure is 8 bytes (2 fields x 4 bytes)
+        let structAllocCode =
+            (beforeSysCall [Reg.a0] [])
+                .AddText([
+                    (RV.ADDI(Reg.a0, Reg.zero, Imm12(8)),
+                     "Amount of memory to allocate for array struct (2 fields, in bytes)")
+                    (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                    (RV.ECALL, "")
+                    (RV.MV(arrayStructReg, Reg.a0),
+                     "Move syscall result (struct mem address) to target")
+                ])
+            ++ (afterSysCall [Reg.a0] [])
+            ++ Asm([
+                (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)),
+                 "Allocate stack space: sp[4]=array data container; sp[0]=array struct")
+                (RV.SW(arrayStructReg, Imm12(0), Reg.sp),
+                 "Save array struct pointer on stack")
+            ])
+        
+        /// Assembly code to store the length of the array and data pointer in the array struct fields
+        let instanceFieldSetCode = Asm([
+            (RV.SW(lengthReg, Imm12(0), arrayStructReg),
+            "Store array length at the beginning of the array memory (1st struct field)")
+            (RV.LW(Reg.a0, Imm12(4), Reg.sp),
+             "Load data container pointer from stack sp[4]")
+            (RV.SW(Reg.a0, Imm12(4), arrayStructReg),
+            "Store array container pointer in data (2nd struct field)")
+        ])
+        
+        /// Setup code for loading the initialization variable and element assignment code
+        let elementSetupCode: ANFCodegenResult * Asm = 
+            match expandType init.Env init.Type with
+            | TUnit -> { Asm = Asm(); Env = arrayStructLoadRes.Env }, Asm() // Nothing to do for unit initializers
+            | TFloat ->
+                /// Register holding the initialization variable, and ANF code to load it
+                let initFpReg, initLoadRes =
+                    loadFloatVar arrayStructLoadRes.Env (getVarName node) [lengthVarName; env.TargetVar]
+
+                /// Assembly code that initializes float array elements by assigning the pre-computed
+                /// initialisation variable in `initReg` to the heap location of the next array element in `lengthReg`.
+                let elemInitCode =
+                    Asm(RV.FSW_S(initFpReg, Imm12(0), arrayStructReg),
+                    $"Initialize next array element")
+
+                initLoadRes, elemInitCode
+            | _ ->
+                /// Register holding the initialization variable, and ANF code to load it
+                let initReg, initLoadRes =
+                    loadIntVar arrayStructLoadRes.Env (getVarName node) [lengthVarName; env.TargetVar]
+                
+                /// Assembly code that initializes float array elements by assigning the pre-computed
+                /// initialisation variable in `initReg` to the heap location of the next array element in `lengthReg`.
+                let elemInitCode =
+                    Asm(RV.SW(initReg, Imm12(0), arrayStructReg),
+                    $"Initialize next array element")
+                
+                initLoadRes, elemInitCode
+
+        /// Extract the results of element setup code: loading initialisation variable and element assignments
+        let initLoadRes, elemInitCode = elementSetupCode
+        
+        /// Assembly code for initialising each element of the array container with pre-computed init,
+        /// by looping through the array length and storing the value on heap. The element offset from data
+        /// pointer computed in register `target+2` and the element value in register `target+3`.
+        let initArrayLoopRes =
+            /// Label for array loop start
+            let loopStartLabel = Util.genSymbol "array_init_loop_start"
+            /// Label for array loop end
+            let loopEndLabel = Util.genSymbol "array_init_loop_end"
+
+            { Asm = Asm([
+                        (RV.LW(arrayStructReg, Imm12(4), Reg.sp), "Load data container pointer from stack sp[4]")
+                        (RV.LABEL(loopStartLabel), "Start of array initialisation loop")
+                        (RV.BEQZ(lengthReg, loopEndLabel), "Exit loop if remaining length is 0")
+                    ])
+                    ++ elemInitCode ++
+                    Asm([
+                        (RV.ADDI(arrayStructReg, arrayStructReg, Imm12(4)),
+                         "Increment element address by word size")
+                        (RV.ADDI(lengthReg, lengthReg, Imm12(-1)), "Decrement remaining length")
+                        (RV.BNEZ(lengthReg, loopStartLabel), "Loop back if remaining length is not 0")
+                        (RV.LABEL(loopEndLabel), "End of array initialisation loop")
+                    ])
+              Env = initLoadRes.Env }
+            
+        let targetSetupCode = Asm([
+            (RV.LW(arrayStructReg, Imm12(0), Reg.sp), "Load array struct pointer from stack sp[0]")
+            (RV.ADDI(Reg.sp, Reg.sp, Imm12(8)), "Deallocated used stack space during array constructor")
+        ])
+
+        // Glue all phases of the array construction together
+        { Asm = lengthLoadRes.Asm
+                  ++ arrayStructLoadRes.Asm
+                  ++ initLoadRes.Asm
+                  ++ arrayAllocCode
+                  ++ structAllocCode
+                  ++ instanceFieldSetCode
+                  ++ initArrayLoopRes.Asm
+                  ++ targetSetupCode
+          Env = initArrayLoopRes.Env }
+
+    | ArrayLength arrTarget ->
+        /// Extract the targeted array variable name
+        let arrayVarName = getVarName arrTarget
+        
+        /// Register holding the pointer to the array structure and ANF code to load it
+        let arrayReg, arrayLoadRes = loadIntVar env arrayVarName []
+        
+        /// Register holding the target register
+        let targetReg, targetLoadRes = loadIntVar arrayLoadRes.Env env.TargetVar [arrayVarName]
+        
+        /// Access the length field at offset 0 of the array structure object
+        let lengthAccessCode = Asm(RV.LW(targetReg, Imm12(0), arrayReg),
+                                "Load array length from base pointer in memory")
+        
+        { Asm = arrayLoadRes.Asm ++ targetLoadRes.Asm ++ lengthAccessCode
+          Env = targetLoadRes.Env }
+
     | ArrayElem _
-    | ArrayLength _
     | ArraySlice _
     
     | UnionCons _

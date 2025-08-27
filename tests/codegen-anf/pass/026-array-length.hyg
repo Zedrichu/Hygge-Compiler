@@ -1,0 +1,3 @@
+let x = 2;
+let y = array(3, x);
+assert(arrayLength(y) = 3)

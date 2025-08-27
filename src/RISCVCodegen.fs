@@ -1255,14 +1255,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         /// Code to store the length of the array at the beginning of the array struct memory
         let instanceFieldSetCode =
-            match expandType node.Env length.Type with
-            | TInt -> Asm().AddText([
-                            (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
-                            "Store array length at the beginning of the array memory (1st field)")
-                            (RV.SW(Reg.r(env.Target + 2u), Imm12(4), Reg.r(env.Target)),
-                            "Store array container pointer in data (2nd struct field)")
-                        ])
-            | _ -> failwith $"BUG: array length initialised with invalid type: %O{length.Type}"
+            Asm().AddText([
+                (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
+                "Store array length at the beginning of the array memory (1st field)")
+                (RV.SW(Reg.r(env.Target + 2u), Imm12(4), Reg.r(env.Target)),
+                "Store array container pointer in data (2nd struct field)")
+            ])
 
         /// Compiled code for initialisation value, targeting the register `target+3`
         let initCode = doCodegen {env with Target = env.Target + 3u} init
@@ -1379,13 +1377,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// heap memory at `target` (the beginning of the array) to retrieve the length value.
         let targetCode = doCodegen env target
         let lengthAccessCode =
-            match expandType node.Env target.Type with
-            | TArray _ ->
-                Asm().AddText(
-                    RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
-                    "Load array length from base pointer in memory"
-                )
-            | _ -> failwith $"BUG: array length access on invalid target: %O{target.Type}"
+            Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+                "Load array length from base pointer in memory")
         targetCode ++ lengthAccessCode
 
     | ArraySlice(parent, startIdx, endIdx) ->
