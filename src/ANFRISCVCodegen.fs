@@ -1131,6 +1131,8 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Env = trueCodegenRes.Env }
     
     | While(condition, body) ->
+        // #TODO: See mut_array_bug for environment synchronization issues around while-loops
+        
         /// Updated ANF codegen environment for the condition piece of the loop (add needed vars + set cond. target)
         let conditionEnv = { env with
                                 NeededVars = Set.union env.NeededVars (ASTUtil.freeVars body) }
@@ -1144,7 +1146,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         /// Assembly code to spill/load variables after the 'while' body, to get the same
         /// register allocation obtained before entering the 'while' condition.
         /// Sync the full loop environment back to the condition entry state
-        let syncAsm = syncANFCodegenEnvs bodyCodegenRes.Env conditionEnv
+        let syncAsm = syncANFCodegenEnvs bodyCodegenRes.Env condCodegenRes.Env
         
         /// Label to mark the beginning of the 'while' loop
         let whileBeginLabel = Util.genSymbol "while_loop_begin"
@@ -1354,16 +1356,143 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                 assignResult
             | t ->
                 failwith $"BUG: field selection on invalid object type: %O{t}"
+        
+        | ArrayElem(arrTarget, index) ->
+            /// Extract the targeted array & index variable name
+            let arrayVarName = getVarName arrTarget
+            let indexVarName = getVarName index
             
+            /// Register holding the array variable (memory address of structure) and ANF code to load it
+            let arrayReg, arrayLoadRes = loadIntVar env arrayVarName []
+            
+            /// Register holding the selected index for writing the array element and ANF code to load it
+            let indexReg, indexLoadRes = loadIntVar arrayLoadRes.Env indexVarName [arrayVarName]
+            
+            let boundErrorLabel = Util.genSymbol "index_out_of_bound_error"
+            let checkPassLabel = Util.genSymbol "bound_check_pass"
+        
+            /// Assembly code for verifying index bounds
+            let boundsCheckCode = Asm([
+                (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space")
+                (RV.SW(arrayReg, Imm12(0), Reg.sp), "Save array pointer on stack")
+                (RV.LW(arrayReg, Imm12(0), arrayReg), "Load length from array struct (1st field)")
+                (RV.BGE(indexReg, arrayReg, boundErrorLabel), "Check index >= length")
+                (RV.BLTZ(indexReg, boundErrorLabel), "Check index < 0")
+                (RV.J(checkPassLabel), "Continue if bound checks are satisfied")
+                (RV.LABEL(boundErrorLabel), "")
+                (RV.LI(Reg.a7, 93), "RARS syscall: Exit2")
+                (RV.LI(Reg.a0, RISCVCodegen.assertExitCode), "Assertion violation exit code")
+                (RV.ECALL, "")
+                (RV.LABEL(checkPassLabel), "")
+                (RV.LW(arrayReg, Imm12(0), Reg.sp), "Restore array pointer from stack")
+                (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
+            ])
+            
+            /// ANF codegen result for modifying the selected array element
+            let elementModifyRes =
+                match expandType arrTarget.Env arrTarget.Type with
+                | TArray t when isSubtypeOf arrTarget.Env t TUnit ->
+                    { Asm = Asm(); Env = env } // Nothing to do
+                | TArray t when isSubtypeOf arrTarget.Env t TInt ->
+                    /// Offset of the selected index from the beginning of the array data container on heap
+                    let offsetCode = Asm([
+                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space")
+                        (RV.SW(arrayReg, Imm12(0), Reg.sp), "Save array struct pointer on stack")
+                        (RV.LW(arrayReg, Imm12(4), arrayReg),
+                         "Load data container pointer from array struct (2nd field)")
+                        
+                        // Array element address
+                        (RV.SLLI(indexReg, indexReg, Shamt(2u)),
+                         "Calculate offset of selected element = index * 4")
+                        (RV.ADD(arrayReg, arrayReg, indexReg),
+                         "Element address = container base address + word-aligned offset")
+                        
+                        (RV.SRLI(indexReg, indexReg, Shamt(2u)),
+                         "Restore index value by dividing it by word size")
+                    ])
+                    
+                    /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
+                    let rhsReg, rhsLoadRes = loadIntVar indexLoadRes.Env rhsVarName [arrayVarName]
+                    
+                    /// Register holding the target assigned value and ANF code to load it
+                    let targetReg, targetLoadRes = loadIntVar rhsLoadRes.Env env.TargetVar [arrayVarName]
+                    
+                    /// Assembly code that performs the array element assignment
+                    let assignmentCode = Asm([
+                        (RV.SW(rhsReg, Imm12(0), arrayReg),
+                         "Store assigned value into selected array element")
+                        (RV.LW(arrayReg, Imm12(0), Reg.sp), "Restore array struct pointer from stack")
+                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
+                        (RV.MV(targetReg, rhsReg),
+                         "Output of assignment value to target")
+                    ])
+                    
+                    { Asm = offsetCode
+                            ++ targetLoadRes.Asm
+                            ++ rhsLoadRes.Asm
+                            ++ assignmentCode
+                      Env = targetLoadRes.Env }
+                    
+                | TArray t when isSubtypeOf arrTarget.Env t TFloat ->
+                    /// Offset of the selected index from the beginning of the array data container on heap
+                    let offsetCode = Asm([
+                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space")
+                        (RV.SW(arrayReg, Imm12(0), Reg.sp), "Save array struct pointer on stack")
+                        (RV.LW(arrayReg, Imm12(4), arrayReg),
+                         "Load data container pointer from array struct (2nd field)")
+                        
+                        // Word-aligned index offset
+                        (RV.SLLI(indexReg, indexReg, Shamt(2u)),
+                         "Calculate offset of selected element = index * 4")
+                        
+                        // Address of selected element
+                        (RV.ADD(arrayReg, arrayReg, indexReg),
+                         "Element address = container base address + word-aligned offset")
+                    ])
+                    
+                    /// Register holding the target assigned value and ANF code to load it
+                    let targetFpReg, targetLoadRes =
+                        loadFloatVar indexLoadRes.Env env.TargetVar [arrayVarName; indexVarName]                    
+                    
+                    /// Register holding the assigning variable (rhs.) and ANF codegen result to load it
+                    let rhsFpReg, rhsLoadRes = loadFloatVar targetLoadRes.Env rhsVarName [arrayVarName; env.TargetVar]
+                    
+                    /// Assembly code that performs the array element assignment
+                    let assignmentCode = Asm([
+                        (RV.FSW_S(rhsFpReg, Imm12(0), arrayReg),
+                         "Store assigned value into selected array element")
+                        (RV.FMV_S(targetFpReg, rhsFpReg),
+                         "Output of assignment value to target")
+                        
+                        // Restore index and array struct pointer values
+                        (RV.SRLI(indexReg, indexReg, Shamt(2u)),
+                         "Restore index value by dividing it by word size")
+                        (RV.LW(arrayReg, Imm12(0), Reg.sp), "Restore array struct pointer from stack")
+                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
+                    ])
+                    
+                    { Asm = targetLoadRes.Asm
+                            ++ offsetCode
+                            ++ rhsLoadRes.Asm
+                            ++ assignmentCode
+                      Env = rhsLoadRes.Env }
+                    
+                | _ -> failwith $"BUG: array element writing on invalid array type: %O{arrTarget.Type}"
+            
+            { Asm = arrayLoadRes.Asm
+                    ++ indexLoadRes.Asm
+                    ++ boundsCheckCode
+                    ++ elementModifyRes.Asm
+              Env = elementModifyRes.Env }
         | _ -> failwith $"ANF Assignment not yet implemented for {lhs.Expr}"
 
-        
+           
     | StructCons fields ->
         /// Allocate a new struct variable on heap, and get the code to do it
         let structStorageReg, structStorageCode = loadIntVar env env.TargetVar []
         let fieldNames, fieldInitNodes = List.unzip fields
         /// List of variable names associated with the expression in initializers
-        let anfInitLabels = getVarNames fieldInitNodes
+        let anfInitLabels = getVarNames fieldInitNodes 
         
         /// Generate code to initialize a struct field and accumulate the result.
         /// Function is folded over all indexed struct fields, to initialize all of them.
@@ -1619,7 +1748,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         { Asm = applicationCode
           Env = returnCode.Env }
         
-    | ArrayCons(length, node) ->
+    | ArrayCons(length, arrInit) ->
         // To compile an array constructor, we allocate heap space for the whole array instance
         // (struct + container), and then compile its initialisation once and for all elements,
         // storing each result in the corresponding heap location. The struct heap address will
@@ -1640,8 +1769,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         let arrayAllocCode =
             (beforeSysCall [Reg.a0] [])
                 .AddText([
-                    (RV.LI(Reg.a0, 4), "Store word size")
-                    (RV.MUL(Reg.a0, Reg.a0, lengthReg),
+                    (RV.SLLI(Reg.a0, lengthReg, Shamt(2u)),
                      "Amount of memory to allocate for the array sequence (in bytes)")
                     (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
                     (RV.ECALL, "")
@@ -1689,12 +1817,12 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         
         /// Setup code for loading the initialization variable and element assignment code
         let elementSetupCode: ANFCodegenResult * Asm = 
-            match expandType init.Env init.Type with
+            match expandType arrInit.Env arrInit.Type with
             | TUnit -> { Asm = Asm(); Env = arrayStructLoadRes.Env }, Asm() // Nothing to do for unit initializers
             | TFloat ->
                 /// Register holding the initialization variable, and ANF code to load it
                 let initFpReg, initLoadRes =
-                    loadFloatVar arrayStructLoadRes.Env (getVarName node) [lengthVarName; env.TargetVar]
+                    loadFloatVar arrayStructLoadRes.Env (getVarName arrInit) [lengthVarName; env.TargetVar]
 
                 /// Assembly code that initializes float array elements by assigning the pre-computed
                 /// initialisation variable in `initReg` to the heap location of the next array element in `lengthReg`.
@@ -1706,7 +1834,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             | _ ->
                 /// Register holding the initialization variable, and ANF code to load it
                 let initReg, initLoadRes =
-                    loadIntVar arrayStructLoadRes.Env (getVarName node) [lengthVarName; env.TargetVar]
+                    loadIntVar arrayStructLoadRes.Env (getVarName arrInit) [lengthVarName; env.TargetVar]
                 
                 /// Assembly code that initializes float array elements by assigning the pre-computed
                 /// initialisation variable in `initReg` to the heap location of the next array element in `lengthReg`.
@@ -1776,12 +1904,108 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         { Asm = arrayLoadRes.Asm ++ targetLoadRes.Asm ++ lengthAccessCode
           Env = targetLoadRes.Env }
 
-    | ArrayElem _
-    | ArraySlice _
+    | ArrayElem(arrTarget, index) ->       
+        /// Extract the targeted array & index variable name
+        let arrayVarName = getVarName arrTarget
+        let indexVarName = getVarName index
+        
+        /// Register holding the pointer to the array structure and ANF code to load it
+        let arrayReg, arrayLoadRes = loadIntVar env arrayVarName []
+        
+        /// Register holding the selected index for reading the array element and ANF code to load it
+        let indexReg, indexLoadRes = loadIntVar arrayLoadRes.Env indexVarName [arrayVarName]
+        
+        let boundErrorLabel = Util.genSymbol "index_out_of_bound_error"
+        let checkPassLabel = Util.genSymbol "bound_check_pass"
+        
+        /// Assembly code for verifying index bounds
+        let boundsCheckCode = Asm([
+            (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space")
+            (RV.SW(arrayReg, Imm12(0), Reg.sp), "Save array pointer on stack")
+            (RV.LW(arrayReg, Imm12(0), arrayReg), "Load length from array struct (1st field)")
+            (RV.BGE(indexReg, arrayReg, boundErrorLabel), "Check index >= length")
+            (RV.BLTZ(indexReg, boundErrorLabel), "Check index < 0")
+            (RV.J(checkPassLabel), "Continue if bound checks are satisfied")
+            (RV.LABEL(boundErrorLabel), "")
+            (RV.LI(Reg.a7, 93), "RARS syscall: Exit2")
+            (RV.LI(Reg.a0, RISCVCodegen.assertExitCode), "Assertion violation exit code")
+            (RV.ECALL, "")
+            (RV.LABEL(checkPassLabel), "")
+            (RV.LW(arrayReg, Imm12(0), Reg.sp), "Restore array pointer from stack")
+            (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
+        ])
+        
+        let elementLoadRes, elementAccessCode =
+            match expandType arrTarget.Env arrTarget.Type with
+            | TArray t when isSubtypeOf arrTarget.Env t TUnit ->
+                { Asm = Asm(); Env = indexLoadRes.Env }, Asm() // Nothing to do for unit arrays
+                
+            | TArray t when isSubtypeOf arrTarget.Env t TInt ->
+                /// Register (final container) holding the selected element and ANF code to load it
+                let elemReg, elemLoadRes = loadIntVar indexLoadRes.Env env.TargetVar [arrayVarName; indexVarName]        
+                
+                /// Assembly code for array element access
+                let elementAccessCode = Asm([
+                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space")
+                    (RV.SW(arrayReg, Imm12(0), Reg.sp), "Save array struct pointer on stack")
+                    (RV.LW(arrayReg, Imm12(4), arrayReg),
+                     "Load data container pointer from array struct (2nd field)")
+                    (RV.SLLI(indexReg, indexReg, Shamt(2u)),
+                     "Calculate offset of selected element = index * 4")
+                    (RV.ADD(arrayReg, arrayReg, indexReg),
+                     "Element address = container base pointer + word-aligned offset")
+                    (RV.LW(elemReg, Imm12(0), arrayReg),
+                     "Load selected element value into target")
+                    (RV.LW(arrayReg, Imm12(0), Reg.sp), "Restore array struct pointer from stack")
+                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
+                    (RV.SRLI(indexReg, indexReg, Shamt(2u)),
+                     "Restore index value by dividing it by word size")
+                ])
+                elemLoadRes, elementAccessCode
+            
+            | TArray t when isSubtypeOf arrTarget.Env t TFloat ->
+                /// Register (final container) holding the selected element and ANF code to load it
+                let elemFpReg, elemLoadRes = loadFloatVar indexLoadRes.Env env.TargetVar [arrayVarName; indexVarName]
+                
+                /// Assembly code for array element access
+                let elementAccessCode = Asm([
+                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space")
+                    (RV.SW(arrayReg, Imm12(0), Reg.sp), "Save array struct pointer on stack")
+                    (RV.LW(arrayReg, Imm12(4), arrayReg),
+                     "Load data container pointer from array struct (2nd field)")
+                    
+                    // Word-aligned index offset
+                    (RV.SLLI(indexReg, indexReg, Shamt(2u)),
+                     "Calculate offset of selected element = index * 4")
+                    
+                    // Address of selected element
+                    (RV.ADD(arrayReg, arrayReg, indexReg),
+                     "Element address = container base pointer + word-aligned offset")
+                    
+                    // Read selected array element
+                    (RV.FLW_S(elemFpReg, Imm12(0), arrayReg),
+                     "Load selected element value into target")
+                    // Restore index and array struct pointer values
+                    (RV.SRLI(indexReg, indexReg, Shamt(2u)),
+                     "Restore index value by dividing it by word size")
+                    (RV.LW(arrayReg, Imm12(0), Reg.sp), "Restore array struct pointer from stack")
+                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
+                ])
+                
+                elemLoadRes, elementAccessCode
+                
+            | _ -> failwith $"BUG: array element reading on invalid array type: %O{arrTarget.Type}"
+        
+        { Asm = arrayLoadRes.Asm
+                ++ indexLoadRes.Asm
+                ++ boundsCheckCode
+                ++ elementLoadRes.Asm
+                ++ elementAccessCode
+          Env = elementLoadRes.Env }
     
+    | ArraySlice _ 
     | UnionCons _
     | Match _
-    
     | Copy _ -> failwith $"BUG: Feature codegen not implemented for %O{init.Expr}"
     
     | Pointer _

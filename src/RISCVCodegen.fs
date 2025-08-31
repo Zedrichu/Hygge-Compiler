@@ -892,18 +892,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | TArray _ ->
                 /// Offset of the selected index from the beginning of the array container region on heap
                 let offsetCode = Asm([
-                                     (RV.LW(Reg.r(env.Target), Imm12(4), Reg.r(env.Target)),
-                                      "Load the array container pointer from 2nd array instance field (~data)")
-                                     (RV.ADDI(Reg.r(env.Target + 2u), Reg.zero, Imm12(4)),
-                                      "Load word size for array element offset computation")
-                                     (RV.MUL(Reg.r(env.Target + 1u),
-                                                      Reg.r(env.Target + 1u),
-                                                      Reg.r(env.Target + 2u)),
-                                     "Compute offset of the selected array element 4 x index")
-                                     (RV.ADD(Reg.r(env.Target),
-                                                     Reg.r(env.Target),
-                                                     Reg.r(env.Target + 1u)),
-                                     "Add offset to the array container address")])
+                     (RV.LW(Reg.r(env.Target), Imm12(4), Reg.r(env.Target)),
+                      "Load the array container pointer from 2nd array instance field (~data)")
+                     (RV.SLLI(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Shamt(2u)),
+                      "Multiply index by 4 to get byte offset of the selected element")
+                     (RV.ADD(Reg.r(env.Target),
+                                     Reg.r(env.Target),
+                                     Reg.r(env.Target + 1u)),
+                     "Add offset to the array container address")
+                ])
                 /// Assembly code that performs the field value assignment
                 let assignCode =
                     match expandType node.Env rhs.Type with
@@ -922,7 +919,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 // Put everything together
                 arrTargetCode ++ indexCode ++ indexOutBoundsCode ++ offsetCode ++ rhsCode ++ assignCode
             | t ->
-                failwith $"BUG: array length retrieved on invalid object type: %O{t}"
+                failwith $"BUG: array element modified on invalid object type: %O{t}"
         | _ ->
             failwith ($"BUG: assignment to invalid target:%s{Util.nl}"
                       + $"%s{PrettyPrinter.prettyPrint lhs}")
@@ -1229,9 +1226,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let arrayAllocCode =
             (beforeSysCall [Reg.a0] [])
                 .AddText([
-                    (RV.LI(Reg.r(env.Target), 4), "Store word size")
-                    (RV.MUL(Reg.a0, Reg.r(env.Target), Reg.r(env.Target + 1u)),
-                     "Amount of memory to allocate for the array sequence (in bytes)")
+                    (RV.SLLI(Reg.a0, Reg.r(env.Target + 1u), Shamt(2u)),
+                     "Amount of memory to allocate for array sequence: length x word size")
                     (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
                     (RV.ECALL, "")
                     (RV.MV(Reg.r(env.Target + 2u), Reg.a0),
@@ -1337,9 +1333,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             // The data pointer (field) in the array instance can be loaded from `target` with offset 4 (2nd field)
             (RV.LW(Reg.r(env.Target), Imm12(4), Reg.r(env.Target)),
              "Load the container base address into target register from instance data pointer")
-            (RV.LI(Reg.r(env.Target + 2u), 4),
-             "Load word size for array element offset computation")
-            (RV.MUL(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Reg.r(env.Target + 2u)),
+            (RV.SLLI(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Shamt(2u)),
              "Compute offset of the selected array element as 4 x index")
             (RV.ADD(Reg.r(env.Target + 1u), Reg.r(env.Target), Reg.r(env.Target + 1u)),
              "Memory address of the selected array element (container pointer + offset)")
@@ -1417,9 +1411,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 Asm().AddText([
                     (RV.LW(Reg.r(env.Target + 2u), Imm12(4), Reg.r(env.Target + 2u)),
                      "Load the parent array data pointer in register `target+2`")
-                    (RV.LI(Reg.r(env.Target + 3u), 4),
-                     "Store word size in register for word-aligned slice start computation")
-                    (RV.MUL(Reg.r(env.Target + 3u), Reg.r(env.Target), Reg.r(env.Target + 3u)),
+                    (RV.SLLI(Reg.r(env.Target + 3u), Reg.r(env.Target), Shamt(2u)),
                      "Multiply the slice start offset by 4 for word-alignment ( 4 x startIdx )")
                     (RV.ADD(Reg.r(env.Target + 2u), Reg.r(env.Target + 3u), Reg.r(env.Target + 2u)),
                      "Update data pointer from parent array with start index offset")
