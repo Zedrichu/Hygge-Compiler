@@ -11,4 +11,5 @@ i <- 0;
 while(i < arrayLength(arr)) do {
     assert(arrayElem(arr, i) = 42 + i);
     i <- i + 1
-}
+};
+assert(arrayLength(arr) = 8)

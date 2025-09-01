@@ -1135,18 +1135,21 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         
         /// Updated ANF codegen environment for the condition piece of the loop (add needed vars + set cond. target)
         let conditionEnv = { env with
-                                NeededVars = Set.union env.NeededVars (ASTUtil.freeVars body) }
+                                NeededVars = Set.add env.TargetVar (Set.union env.NeededVars (ASTUtil.freeVars body)) }
         
         /// Code generation result for the loop condition assumed in ANF
         let condCodegenRes = doCodegen conditionEnv condition
         let condReg = getIntVarRegister condCodegenRes.Env env.TargetVar
         
+        let condNeededVars = Set.union condCodegenRes.Env.NeededVars (ASTUtil.freeVars condition)
         /// Code generation result for the 'while' loop body assumed in ANF
-        let bodyCodegenRes = doCodegen { condCodegenRes.Env with TargetVar = env.TargetVar } body
+        let bodyCodegenRes = doCodegen { condCodegenRes.Env with
+                                            TargetVar = env.TargetVar
+                                            NeededVars = condNeededVars } body
         /// Assembly code to spill/load variables after the 'while' body, to get the same
         /// register allocation obtained before entering the 'while' condition.
         /// Sync the full loop environment back to the condition entry state
-        let syncAsm = syncANFCodegenEnvs bodyCodegenRes.Env condCodegenRes.Env
+        let syncAsm = syncANFCodegenEnvs bodyCodegenRes.Env conditionEnv
         
         /// Label to mark the beginning of the 'while' loop
         let whileBeginLabel = Util.genSymbol "while_loop_begin"
