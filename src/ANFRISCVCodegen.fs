@@ -1948,30 +1948,7 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
             match expandType arrTarget.Env arrTarget.Type with
             | TArray t when isSubtypeOf arrTarget.Env t TUnit ->
                 { Asm = Asm(); Env = indexLoadRes.Env }, Asm() // Nothing to do for unit arrays
-                
-            | TArray t when isSubtypeOf arrTarget.Env t TInt ->
-                /// Register (final container) holding the selected element and ANF code to load it
-                let elemReg, elemLoadRes = loadIntVar indexLoadRes.Env env.TargetVar [arrayVarName; indexVarName]        
-                
-                /// Assembly code for array element access
-                let elementAccessCode = Asm([
-                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space")
-                    (RV.SW(arrayReg, Imm12(0), Reg.sp), "Save array struct pointer on stack")
-                    (RV.LW(arrayReg, Imm12(4), arrayReg),
-                     "Load data container pointer from array struct (2nd field)")
-                    (RV.SLLI(indexReg, indexReg, Shamt(2u)),
-                     "Calculate offset of selected element = index * 4")
-                    (RV.ADD(arrayReg, arrayReg, indexReg),
-                     "Element address = container base pointer + word-aligned offset")
-                    (RV.LW(elemReg, Imm12(0), arrayReg),
-                     "Load selected element value into target")
-                    (RV.LW(arrayReg, Imm12(0), Reg.sp), "Restore array struct pointer from stack")
-                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
-                    (RV.SRLI(indexReg, indexReg, Shamt(2u)),
-                     "Restore index value by dividing it by word size")
-                ])
-                elemLoadRes, elementAccessCode
-            
+
             | TArray t when isSubtypeOf arrTarget.Env t TFloat ->
                 /// Register (final container) holding the selected element and ANF code to load it
                 let elemFpReg, elemLoadRes = loadFloatVar indexLoadRes.Env env.TargetVar [arrayVarName; indexVarName]
@@ -2003,6 +1980,29 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                 
                 elemLoadRes, elementAccessCode
                 
+            | TArray _ ->
+                /// Register (final container) holding the selected element and ANF code to load it
+                let elemReg, elemLoadRes = loadIntVar indexLoadRes.Env env.TargetVar [arrayVarName; indexVarName]        
+                
+                /// Assembly code for array element access
+                let elementAccessCode = Asm([
+                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(-4)), "Allocate stack space")
+                    (RV.SW(arrayReg, Imm12(0), Reg.sp), "Save array struct pointer on stack")
+                    (RV.LW(arrayReg, Imm12(4), arrayReg),
+                     "Load data container pointer from array struct (2nd field)")
+                    (RV.SLLI(indexReg, indexReg, Shamt(2u)),
+                     "Calculate offset of selected element = index * 4")
+                    (RV.ADD(arrayReg, arrayReg, indexReg),
+                     "Element address = container base pointer + word-aligned offset")
+                    (RV.LW(elemReg, Imm12(0), arrayReg),
+                     "Load selected element value into target")
+                    (RV.LW(arrayReg, Imm12(0), Reg.sp), "Restore array struct pointer from stack")
+                    (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space")
+                    (RV.SRLI(indexReg, indexReg, Shamt(2u)),
+                     "Restore index value by dividing it by word size")
+                ])
+                elemLoadRes, elementAccessCode
+
             | _ -> failwith $"BUG: array element reading on invalid array type: %O{arrTarget.Type}"
         
         { Asm = arrayLoadRes.Asm
