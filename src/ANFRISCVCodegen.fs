@@ -444,11 +444,24 @@ let internal syncANFCodegenEnvs (fromEnv: ANFCodegenEnv)
 
     /// Folder function that accumulates code to load variables
     let loader (codegenRes: ANFCodegenResult) (varName: string) =
-        /// Variable loading codegen result
-        let loadRes = loadIntVarIntoRegister codegenRes.Env varName
-                                             (getIntVarRegister toEnv varName)
-        { codegenRes with Env = loadRes.Env
-                          Asm = codegenRes.Asm ++ loadRes.Asm }
+        let varType =
+            match toEnv.FloatVarsInRegs |> List.tryFind (fun (v, _) -> v = varName) with
+            | Some _ -> TFloat
+            | None -> TInt
+            
+        match varType with
+        | TFloat ->
+            /// Variable loading codegen result
+            let loadRes = loadFloatVarIntoRegister codegenRes.Env varName
+                                                   (getFloatVarRegister toEnv varName)
+            { codegenRes with Env = loadRes.Env
+                              Asm = codegenRes.Asm ++ loadRes.Asm }
+        | _ ->
+            /// Variable loading codegen result
+            let loadRes = loadIntVarIntoRegister codegenRes.Env varName
+                                                 (getIntVarRegister toEnv varName)
+            { codegenRes with Env = loadRes.Env
+                              Asm = codegenRes.Asm ++ loadRes.Asm }
 
     /// Code generation result for spilling variables
     let spillRes = Set.fold spiller {Asm = Asm(); Env = fromEnv}
@@ -579,9 +592,23 @@ let rec internal doCodegen (env: ANFCodegenEnv)
 /// environment.  The expression is expected to be in ANF.
 and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenResult =
     match init.Expr with
+    | Var vname when (expandType init.Env init.Type) = TFloat ->
+        /// Register containing the source variable value and ANF code to load it (if necessary)
+        let sourceFPReg, loadRes = loadFloatVar env vname []
+
+        /// Register holding the target and ANF codegen result to load it
+        let targetFPReg, targetLoadRes = loadFloatVar env env.TargetVar [vname]
+        
+        /// Assembly code to load the source value into the target
+        let moveCode = Asm(RV.FMV_S(targetFPReg, sourceFPReg), $"Copy: {vname} <- {env.TargetVar}")
+        
+        { Asm = loadRes.Asm ++ targetLoadRes.Asm ++ moveCode
+          Env = targetLoadRes.Env }
+
     | Var vname ->
         /// Register containing the source variable value and ANF code to load it (if necessary)
         let sourceReg, loadRes = loadIntVar env vname []
+
         /// Register holding the target and ANF codegen result to load it
         let targetReg, targetLoadRes = loadIntVar env env.TargetVar [vname]
         
