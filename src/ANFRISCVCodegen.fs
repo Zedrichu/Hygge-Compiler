@@ -318,6 +318,79 @@ let internal syncANFCodegenEnvs (fromEnv: ANFCodegenEnv)
     loadRes.Asm
 
 
+/// Helper function to add a variable to a typing environment node
+let internal addVarToNode (node: TypedAST) (varName: string) (varType: Type): TypedAST =
+    let newEnv = { node.Env with Vars = node.Env.Vars.Add(varName, varType) }
+    { node with Env = newEnv }
+
+
+/// Generate code for lambda expression with closure conversion (adapted for ANF)
+let internal doLambdaCodegen (env: ANFCodegenEnv) (lambdaNode: TypedAST) 
+                             (args: List<string * PretypeNode>) (body: TypedAST): ANFCodegenResult =
+    /// Generate a unique label for this lambda function
+    let funLabel = Util.genSymbol "anf_lambda"
+    
+    /// Target register to store the result
+    let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
+    
+    /// For now, create a simplified version that just loads a dummy closure pointer
+    /// TODO: Implement full closure conversion similar to RISCVCodegen.fs:
+    /// 1. Analyze captured variables using ASTUtil.capturedVars
+    /// 2. Create closure environment type with captured variables
+    /// 3. Transform lambda body to use field selections for captured vars
+    /// 4. Generate plain function with closure environment as first parameter
+    /// 5. Create closure structure with function pointer and captured values
+    /// 6. Return pointer to closure structure
+    let loadAsm = Asm([
+        (RV.LA(targetReg, funLabel), "Load lambda function address as closure")
+        (RV.COMMENT("TODO: Implement full closure conversion"), "")
+    ])
+    
+    /// Generate a simple function stub
+    /// TODO: Replace with proper function implementation that:
+    /// 1. Sets up function prologue (save registers, set up frame)
+    /// 2. Compiles the lambda body with proper variable mapping
+    /// 3. Handles return value correctly
+    /// 4. Implements function epilogue (restore registers, return)
+    let functionStub = 
+        (Asm(RV.LABEL(funLabel), "ANF Lambda function stub")
+            .AddText([
+                (RV.COMMENT("TODO: Function prologue"), "")
+                (RV.LI(Reg.a0, 42), "Placeholder return value")
+                (RV.JR(Reg.ra), "Return from lambda function")
+            ])).TextToPostText
+    
+    { Asm = targetLoadRes.Asm ++ loadAsm ++ functionStub
+      Env = targetLoadRes.Env }
+
+
+/// Generate code for function application (adapted for ANF)  
+let internal doApplicationCodegen (env: ANFCodegenEnv) (appNode: TypedAST) 
+                                  (expr: TypedAST) (args: List<TypedAST>): ANFCodegenResult =
+    /// Target register for result
+    let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
+    
+    /// For now, create a simplified function call that just returns a placeholder
+    /// TODO: Implement proper function calling:
+    /// 1. Load function closure from expr variable
+    /// 2. Extract plain function pointer from closure structure
+    /// 3. Load all arguments into appropriate registers/stack according to calling convention
+    /// 4. Set up closure environment as first argument
+    /// 5. Perform the actual function call (jalr)
+    /// 6. Handle return value based on function return type
+    /// 7. Clean up stack if arguments were passed on stack
+    let callAsm = Asm([
+        (RV.COMMENT("TODO: Load function and arguments"), "")
+        (RV.COMMENT("TODO: Extract function pointer from closure"), "")
+        (RV.COMMENT("TODO: Set up arguments"), "")
+        (RV.COMMENT("TODO: Perform function call"), "")
+        (RV.LI(targetReg, 42), "Placeholder function call result")
+    ])
+    
+    { Asm = targetLoadRes.Asm ++ callAsm
+      Env = targetLoadRes.Env }
+
+
 /// Code generation function: compile the expression in the given AST node,
 /// which is expected to be in ANF.
 let rec internal doCodegen (env: ANFCodegenEnv)
@@ -390,6 +463,12 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
     | Var _ ->
         doCodegen env init
 
+    | UnitVal ->
+        /// Target register to store the unit value and code to load it
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
+        { Asm = targetLoadRes.Asm ++ Asm(RV.LI(targetReg, 0), "Unit value (0)")
+          Env = targetLoadRes.Env }
+
     | BoolVal(value) ->
         /// Target register to store the boolean value and code to load it
         let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
@@ -401,6 +480,16 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         /// Target register to store the integer value and code to load it
         let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
         { Asm = targetLoadRes.Asm ++ Asm(RV.LI(targetReg, value))
+          Env = targetLoadRes.Env }
+
+    | StringVal(value) ->
+        /// Target register to store the string address and code to load it
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
+        /// Label for the string constant in the data segment
+        let label = Util.genSymbol "anf_string_val"
+        { Asm = targetLoadRes.Asm ++ 
+                 Asm().AddData(label, Alloc.String(value))
+                      .AddText(RV.LA(targetReg, label), $"Load string address")
           Env = targetLoadRes.Env }
 
     | Add(lhs, rhs)
@@ -536,6 +625,54 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                         .AddText(RV.LABEL(labelEnd), "End of the 'if' code")
         { Asm = ifAsm
           Env = falseCodegenRes.Env }
+
+    | Print(arg) ->
+        /// Register holding the argument to print
+        let argReg, argLoadRes = loadIntVar env (getVarName arg) []
+        /// Target register for the result (Print returns unit)
+        let targetReg, targetLoadRes = loadIntVar argLoadRes.Env env.TargetVar [getVarName arg]
+        
+        /// For now, create a simplified print operation
+        /// In a full implementation, this would need to handle different types
+        let printAsm = Asm([
+            (RV.COMMENT("TODO: Type-specific printing"), "")
+            (RV.LI(Reg.a7, 1), "RARS syscall: PrintInt")
+            (RV.MV(Reg.a0, argReg), "Move argument to print")
+            (RV.ECALL, "")
+            (RV.LI(targetReg, 0), "Unit result")
+        ])
+        
+        { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ printAsm
+          Env = targetLoadRes.Env }
+
+    | PrintLn(arg) ->
+        /// Register holding the argument to print
+        let argReg, argLoadRes = loadIntVar env (getVarName arg) []
+        /// Target register for the result (PrintLn returns unit)
+        let targetReg, targetLoadRes = loadIntVar argLoadRes.Env env.TargetVar [getVarName arg]
+        
+        /// For now, create a simplified println operation
+        let printlnAsm = Asm([
+            (RV.COMMENT("TODO: Type-specific printing"), "")
+            (RV.LI(Reg.a7, 1), "RARS syscall: PrintInt")
+            (RV.MV(Reg.a0, argReg), "Move argument to print")
+            (RV.ECALL, "")
+            (RV.LI(Reg.a7, 11), "RARS syscall: PrintChar")
+            (RV.LI(Reg.a0, int('\n')), "Print newline")
+            (RV.ECALL, "")
+            (RV.LI(targetReg, 0), "Unit result")
+        ])
+        
+        { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ printlnAsm
+          Env = targetLoadRes.Env }
+
+    | Lambda(args, body) ->
+        /// Generate assembly for lambda expression with closure conversion
+        doLambdaCodegen env init args body
+
+    | Application(expr, args) ->
+        /// Generate assembly for function application
+        doApplicationCodegen env init expr args
 
     | _ ->
         failwith ($"BUG: unsupported AST node for 'let' init, maybe not in ANF:%s{Util.nl}"
