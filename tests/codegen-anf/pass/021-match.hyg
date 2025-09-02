@@ -13,4 +13,3 @@ let res: int =
       baz{y} -> y * 2
   };
 assert(res = 138)
-

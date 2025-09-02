@@ -2012,9 +2012,192 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                 ++ elementAccessCode
           Env = elementLoadRes.Env }
     
+    | UnionCons(label, expr) ->
+        /// Extract the variable name labelled by the union constructor
+        let tagVarName = getVarName expr
+        
+        /// Register holding the union label address and ANF coodegen to load it
+        let unionReg, unionLoadRes = loadIntVar env env.TargetVar []
+
+        /// Allocate space for the union instance on heap (label ID + value = 2 words).
+        /// Contains a struct with fields storing the tagged value and the union label. 
+        let unionAllocCode =
+            (beforeSysCall [Reg.a0] [])
+                .AddText([
+                    (RV.ADDI(Reg.a0, Reg.zero, Imm12(8)),
+                     "Amount of memory to allocate for union instance (2 fields, in bytes)")
+                    (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                    (RV.ECALL, "")
+                    (RV.MV(unionReg, Reg.a0),
+                     "Move syscall result (union mem address) to target")
+                ])
+            ++ (afterSysCall [Reg.a0] [])
+
+        let tempVarName = Util.genSymbol "temp"
+        /// Temp register loading the union label ID and ANF code to load it
+        let tempReg, tempLoadRes = allocateIntVar unionLoadRes.Env tempVarName [env.TargetVar]
+        
+        /// Generate an unique identifier for the union label
+        let labelId = Util.genSymbolId label
+        /// Assembly code for storing the union label ID in the first field of the union struct
+        let labelIdCode =
+            Asm([
+                (RV.LI(tempReg, labelId), $"Load integer ID for label '%s{label}'") 
+                (RV.SW(tempReg, Imm12(0), unionReg), 
+                    $"Store label ID for '%s{label}' at base union address (1st field)")
+            ])
+
+        /// Assembly code for storing the tagged value in the second field of the union struct
+        let taggedStoreRes =
+            match expr.Type with
+            | t when (isSubtypeOf expr.Env t TUnit) ->
+                { Asm = Asm(); Env = tempLoadRes.Env } // Unit value - nothing to store yay
+            | t when (isSubtypeOf expr.Env t TFloat) ->
+                /// Register holding the tagged value variable, and ANF code to load it
+                let tagFpReg, tagFpLoadRes = loadFloatVar tempLoadRes.Env tagVarName [env.TargetVar]
+                
+                /// Assembly code for storing the tagged value in the second field of the union struct
+                let storeCode = Asm(RV.FSW_S(tagFpReg, Imm12(4), unionReg),
+                                    "Store tagged float value in union struct (2nd field)")
+                { tagFpLoadRes with Asm = tagFpLoadRes.Asm ++ storeCode }
+            | _ ->
+                /// Register holding the tagged value variable, and ANF code to load it
+                let tagExprReg, tagExprLoadRes = loadIntVar tempLoadRes.Env tagVarName [env.TargetVar]
+                
+                let storeCode = Asm(RV.SW(tagExprReg, Imm12(4), unionReg),
+                                    "Store tagged int value in union struct (2nd field)")
+                { tagExprLoadRes with Asm = tagExprLoadRes.Asm ++ storeCode }
+                
+        { Asm = unionLoadRes.Asm
+                ++ unionAllocCode
+                ++ tempLoadRes.Asm
+                ++ labelIdCode
+                ++ taggedStoreRes.Asm
+          Env = taggedStoreRes.Env }
+        
+    | Match(expr, cases) ->
+        /// Extract the matched variable name
+        let matchVarName = getVarName expr
+        
+        /// Register holding the address of the matched union, and ANF code to load it
+        let matchReg, matchLoadRes = loadIntVar env matchVarName []
+        
+        /// Generate unique temporary variables for tags
+        let actualTagVarName = Util.genSymbol "actual_tag"
+        let expectedTagVarName = Util.genSymbol "expected_tag"
+
+        /// Generate the necessary symbols
+        let endLabelSym = Util.genSymbol "match_end"
+        let caseLabelSyms =
+            cases |> List.mapi
+                        (fun i (caseLabel, _, _) ->
+                            (caseLabel, Util.genSymbol $"case_{i}_{caseLabel}"))
+        
+        /// Register holding the actual tag of the matched union, and ANF code to load it
+        let actualTagReg, actualTagLoadRes = allocateIntVar matchLoadRes.Env actualTagVarName [matchVarName]
+        
+        /// Assembly code for loading the actual tag from the union struct (1st field)
+        let loadTagCode = Asm(RV.LW(actualTagReg, Imm12(0), matchReg),
+                              "Load union tag for pattern matching (1st field)")
+        
+        /// ANF result for comparison between the actual tag and possible union labels
+        let generateCaseComparison (caseName, _, _) (caseLabel: string) (env: ANFCodegenEnv): ANFCodegenResult =
+            /// Register holding the expected tag for the current case, and ANF code to load it
+            let expectedTagReg, expectedTagLoadRes =
+                allocateIntVar env expectedTagVarName [matchVarName; actualTagVarName]
+            
+            /// Generate an unique identifier for the union label
+            let caseLabelId = Util.genSymbolId caseName
+            
+            let comparisonCode = Asm([
+                (RV.LI(expectedTagReg, caseLabelId),
+                 $"Load integer ID for expected match label '{caseName}'")
+                (RV.BEQ(actualTagReg, expectedTagReg, caseLabel),
+                 $"Branch to case '{caseName}' if union tags match")
+            ])
+            
+            { Asm = expectedTagLoadRes.Asm ++ comparisonCode
+              Env = expectedTagLoadRes.Env }
+        
+        let buildCaseComparisonChain (acc: ANFCodegenResult) (patternCase, caseLabel): ANFCodegenResult =
+            let caseComparisonRes = generateCaseComparison patternCase caseLabel acc.Env
+            { Asm = acc.Asm ++ caseComparisonRes.Asm
+              Env = caseComparisonRes.Env }
+        
+        /// Assembly code for comparing the actual tag against all possible union labels
+        let patternMatchRes =
+            List.fold buildCaseComparisonChain
+                          { actualTagLoadRes with Asm = actualTagLoadRes.Asm ++ loadTagCode }
+                          (List.zip cases (List.map snd caseLabelSyms))
+
+        /// Enforce the environment obtained from comparison as the synchronization point
+        /// between all possible match bodies - the "entry state" of any pattern body.                          
+        let canonicalSyncEnv = patternMatchRes.Env
+        
+        let generateCaseBody (label: string, caseVar: string, body: Node<TypingEnv, Type>) caseLabel =
+            /// Determine the type of the selected case variable
+            let caseVarType =
+                match expandType expr.Env expr.Type with
+                | TUnion cases ->
+                    match List.tryFind (fun (l, _) -> l = label) cases with
+                    | Some(_, t) -> t
+                    | None -> failwith $"BUG: Missing union case label '%s{label}' in type %O{expr.Type}"
+                | _ -> failwith $"BUG: Match expression on non-union type: %O{expr.Type}"
+            
+            let caseVarLoadRes =
+                match caseVarType with
+                | t when (isSubtypeOf expr.Env t TUnit) ->
+                    { Asm = Asm(); Env = canonicalSyncEnv } // Nothing to do for unit values
+                | t when (isSubtypeOf expr.Env t TFloat) ->
+                    let caseVarFpReg, caseVarLoadRes =
+                        allocateFloatVar canonicalSyncEnv caseVar [matchVarName; actualTagVarName]
+                    
+                    let loadCode = caseVarLoadRes.Asm ++
+                                    Asm(RV.FLW_S(caseVarFpReg, Imm12(4), matchReg),
+                                        $"Load tagged value from matched union (2nd field) for '{label}'")
+                    
+                    { caseVarLoadRes with Asm = loadCode }
+                | _ ->
+                    let caseVarReg, caseVarLoadRes =
+                        allocateIntVar canonicalSyncEnv caseVar [matchVarName; actualTagVarName]
+                        
+                    let loadCode = caseVarLoadRes.Asm ++
+                                    Asm(RV.LW(caseVarReg, Imm12(4), matchReg),
+                                        $"Load tagged value from matched union (2nd field) for '{label}'")
+                                    
+                    { caseVarLoadRes with Asm = loadCode }
+
+            /// ANF compiled code for the body of the match case
+            let bodyResult = doCodegen caseVarLoadRes.Env body
+            
+            /// Synchronization assembly code to ensure the register allocation in the canonical env
+            let syncCode = syncANFCodegenEnvs bodyResult.Env canonicalSyncEnv
+            
+            /// Assembly code for the body of the match case, with a jump to the end label
+            let bodyCode = Asm(RV.LABEL(caseLabel), $"Start of match case '{label}'")
+                            ++ caseVarLoadRes.Asm
+                            ++ bodyResult.Asm
+                            ++ Asm(RV.COMMENT("Canonical register synchronization for pattern body"))
+                            ++ syncCode
+                            .AddText(RV.J(endLabelSym), $"Jump to end of match after case '{label}'")
+            
+            { Asm = bodyCode; Env = bodyResult.Env }
+        
+        /// Assembly code collecting all possible match bodies in ANF format
+        let patternBodiesCode =
+            cases |> List.mapi (fun i case -> generateCaseBody case (snd caseLabelSyms.[i]))
+                  |> List.fold (fun acc bodyRes ->
+                                    { Asm = acc.Asm ++ bodyRes.Asm
+                                      Env = bodyRes.Env }) 
+                                { Asm = Asm(); Env = canonicalSyncEnv }
+        
+        { Asm = matchLoadRes.Asm
+                ++ patternMatchRes.Asm
+                ++ patternBodiesCode.Asm
+                ++ Asm(RV.LABEL(endLabelSym), "End of match expression")
+          Env = canonicalSyncEnv }
+
     | ArraySlice _ 
-    | UnionCons _
-    | Match _
     | Copy _ -> failwith $"BUG: Feature codegen not implemented for %O{init.Expr}"
     
     | Pointer _

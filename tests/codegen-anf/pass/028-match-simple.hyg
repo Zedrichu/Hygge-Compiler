@@ -1,0 +1,22 @@
+type U = union {
+  foo: int; 
+  bar: string
+};
+
+let x: U = foo{42};
+let d: U = bar{"uwu"};
+
+let t1: int = 
+  match x with {
+      bar{y} -> 2;
+      foo{y} -> y + 1
+  };
+  
+let t2: int =
+    match d with {
+        bar{y} -> 2;
+        foo{y} -> y + 1
+    };
+
+assert(t1 = 43);
+assert(t2 = 2)
