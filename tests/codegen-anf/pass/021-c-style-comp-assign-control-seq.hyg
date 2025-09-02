@@ -1,0 +1,34 @@
+// Test compute-assignment operators with assertions
+
+
+// In control structures
+let mutable i = 0;
+let mutable sum = 0;
+while (i < 5) do {
+    i += 1;
+    sum += i
+};
+assert(i = 5);
+assert(sum = 15); // 1 + 2 + 3 + 4 + 5 = 15
+
+
+// Nested expressions
+let mutable z = 20;
+let x = 15;
+let y = 75;
+
+z -= (x + y) * 2;
+assert(z = 20 - (15 + 75) * 2);
+assert(z = 20 - 180);
+assert(z = -160);
+
+
+// Multiple operations in sequence
+let mutable counter = 1;
+counter *= 5;    // 5
+counter += 3;    // 8
+counter -= 1;    // 7
+counter *= 2;    // 14
+counter /= 2;    // 7
+counter %= 5;    // 2
+assert(counter = 2)
