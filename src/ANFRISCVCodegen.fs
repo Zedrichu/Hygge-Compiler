@@ -334,13 +334,24 @@ let internal doLambdaCodegen (env: ANFCodegenEnv) (lambdaNode: TypedAST)
     let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
     
     /// For now, create a simplified version that just loads a dummy closure pointer
-    /// This is a placeholder implementation to get the basic structure working
+    /// TODO: Implement full closure conversion similar to RISCVCodegen.fs:
+    /// 1. Analyze captured variables using ASTUtil.capturedVars
+    /// 2. Create closure environment type with captured variables
+    /// 3. Transform lambda body to use field selections for captured vars
+    /// 4. Generate plain function with closure environment as first parameter
+    /// 5. Create closure structure with function pointer and captured values
+    /// 6. Return pointer to closure structure
     let loadAsm = Asm([
         (RV.LA(targetReg, funLabel), "Load lambda function address as closure")
         (RV.COMMENT("TODO: Implement full closure conversion"), "")
     ])
     
     /// Generate a simple function stub
+    /// TODO: Replace with proper function implementation that:
+    /// 1. Sets up function prologue (save registers, set up frame)
+    /// 2. Compiles the lambda body with proper variable mapping
+    /// 3. Handles return value correctly
+    /// 4. Implements function epilogue (restore registers, return)
     let functionStub = 
         (Asm(RV.LABEL(funLabel), "ANF Lambda function stub")
             .AddText([
@@ -360,6 +371,14 @@ let internal doApplicationCodegen (env: ANFCodegenEnv) (appNode: TypedAST)
     let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
     
     /// For now, create a simplified function call that just returns a placeholder
+    /// TODO: Implement proper function calling:
+    /// 1. Load function closure from expr variable
+    /// 2. Extract plain function pointer from closure structure
+    /// 3. Load all arguments into appropriate registers/stack according to calling convention
+    /// 4. Set up closure environment as first argument
+    /// 5. Perform the actual function call (jalr)
+    /// 6. Handle return value based on function return type
+    /// 7. Clean up stack if arguments were passed on stack
     let callAsm = Asm([
         (RV.COMMENT("TODO: Load function and arguments"), "")
         (RV.COMMENT("TODO: Extract function pointer from closure"), "")
