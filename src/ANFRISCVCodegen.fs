@@ -463,6 +463,16 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         { Asm = targetLoadRes.Asm ++ Asm(RV.LI(targetReg, value))
           Env = targetLoadRes.Env }
 
+    | StringVal(value) ->
+        /// Target register to store the string address and code to load it
+        let targetReg, targetLoadRes = loadIntVar env env.TargetVar []
+        /// Label for the string constant in the data segment
+        let label = Util.genSymbol "anf_string_val"
+        { Asm = targetLoadRes.Asm ++ 
+                 Asm().AddData(label, Alloc.String(value))
+                      .AddText(RV.LA(targetReg, label), $"Load string address")
+          Env = targetLoadRes.Env }
+
     | Add(lhs, rhs)
     | Mult(lhs, rhs) as expr ->
         /// Names of the variables used by the lhs and rhs of this operation
@@ -596,6 +606,46 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                         .AddText(RV.LABEL(labelEnd), "End of the 'if' code")
         { Asm = ifAsm
           Env = falseCodegenRes.Env }
+
+    | Print(arg) ->
+        /// Register holding the argument to print
+        let argReg, argLoadRes = loadIntVar env (getVarName arg) []
+        /// Target register for the result (Print returns unit)
+        let targetReg, targetLoadRes = loadIntVar argLoadRes.Env env.TargetVar [getVarName arg]
+        
+        /// For now, create a simplified print operation
+        /// In a full implementation, this would need to handle different types
+        let printAsm = Asm([
+            (RV.COMMENT("TODO: Type-specific printing"), "")
+            (RV.LI(Reg.a7, 1), "RARS syscall: PrintInt")
+            (RV.MV(Reg.a0, argReg), "Move argument to print")
+            (RV.ECALL, "")
+            (RV.LI(targetReg, 0), "Unit result")
+        ])
+        
+        { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ printAsm
+          Env = targetLoadRes.Env }
+
+    | PrintLn(arg) ->
+        /// Register holding the argument to print
+        let argReg, argLoadRes = loadIntVar env (getVarName arg) []
+        /// Target register for the result (PrintLn returns unit)
+        let targetReg, targetLoadRes = loadIntVar argLoadRes.Env env.TargetVar [getVarName arg]
+        
+        /// For now, create a simplified println operation
+        let printlnAsm = Asm([
+            (RV.COMMENT("TODO: Type-specific printing"), "")
+            (RV.LI(Reg.a7, 1), "RARS syscall: PrintInt")
+            (RV.MV(Reg.a0, argReg), "Move argument to print")
+            (RV.ECALL, "")
+            (RV.LI(Reg.a7, 11), "RARS syscall: PrintChar")
+            (RV.LI(Reg.a0, int('\n')), "Print newline")
+            (RV.ECALL, "")
+            (RV.LI(targetReg, 0), "Unit result")
+        ])
+        
+        { Asm = argLoadRes.Asm ++ targetLoadRes.Asm ++ printlnAsm
+          Env = targetLoadRes.Env }
 
     | Lambda(args, body) ->
         /// Generate assembly for lambda expression with closure conversion
