@@ -202,7 +202,8 @@ let internal allocateVarOnFrame (env: ANFCodegenEnv) (varName: string): ANFCodeg
 /// assembly code needed to allocate that register (if some other variable was spilled
 /// on the stack frame), and the corresponding updated code generation environment
 /// mapping 'varName' to the allocated register.
-let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string): Reg * ANFCodegenResult =
+let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string)
+                                (doNotSpill: List<string>): Reg * ANFCodegenResult =
     /// Codegen result after allocating 'varName' on the frame
     let frameAllocRes = allocateVarOnFrame env varName
 
@@ -218,14 +219,15 @@ let rec internal allocateIntVar (env: ANFCodegenEnv) (varName: string): Reg * AN
                                               IntVarsInRegs = intVarsInRegs} })
     | [] -> // No free registers available: we spill a variable onto the stack
         /// Assembly code and environment for spilling a variable onto the stack
-        let { Asm = spillAsm; Env = spillEnv} = spillOldestIntVar env []
+        let { Asm = spillAsm; Env = spillEnv} = spillOldestIntVar env doNotSpill
         /// Allocated register, assembly code and environment
-        let reg, {Asm = allocAsm; Env = allocEnv} = allocateIntVar spillEnv varName
+        let reg, {Asm = allocAsm; Env = allocEnv} = allocateIntVar spillEnv varName doNotSpill
         (reg, { Asm = spillAsm ++ allocAsm
                 Env = allocEnv })
 
 
-let rec internal allocateFloatVar (env: ANFCodegenEnv) (varName: string): FPReg * ANFCodegenResult =
+let rec internal allocateFloatVar (env: ANFCodegenEnv) (varName: string)
+                                  (doNotSpill: List<string>): FPReg * ANFCodegenResult =
     /// Codegen result after allocating 'varName' on the frame
     let frameAllocRes = allocateVarOnFrame env varName
     
@@ -241,9 +243,9 @@ let rec internal allocateFloatVar (env: ANFCodegenEnv) (varName: string): FPReg 
                                                 FloatVarsInRegs = floatVarsInRegs} })
     | [] -> // No free registers available: we spill a variable onto the stack
         /// Assembly code and environment for spilling a float variable onto the stack
-        let { Asm = spillAsm; Env = spillEnv} = spillOldestFloatVar env []
+        let { Asm = spillAsm; Env = spillEnv} = spillOldestFloatVar env doNotSpill
         /// Allocated register, assembly code and environment
-        let fpReg, {Asm = allocAsm; Env = allocEnv} = allocateFloatVar spillEnv varName
+        let fpReg, {Asm = allocAsm; Env = allocEnv} = allocateFloatVar spillEnv varName doNotSpill
         (fpReg, { Asm = spillAsm ++ allocAsm
                   Env = allocEnv })
 
@@ -278,15 +280,17 @@ let rec internal loadFloatVarIntoRegister (env: ANFCodegenEnv) (varName: string)
                       FloatVarsInRegs = (varName, fpReg) :: env.FloatVarsInRegs} }
 
 
-/// Load a non-float variable from the stack frame into an available register,
-/// unless the variable is already in a register. If spilling is needed, do not
-/// spill any variable in the list 'doNotSpill'. Return the assigned variable
-/// register and the loading code and updated codegen environment.
+/// Load a non-float variable from the stack frame into an available register, unless the variable
+/// is already in a register. If spilling is needed, do not spill any variable in the list 'doNotSpill'.
+/// Return the assigned variable register and the loading code and updated codegen environment.
 let rec internal loadIntVar (env: ANFCodegenEnv) (varName: string)
                             (doNotSpill: List<string>): Reg * ANFCodegenResult =
     match (findIntVarRegister env varName) with
     | Some(reg) -> (reg, {Asm = Asm(); Env = env})
     | None ->
+        // The requested variable for loading should exist in the stack frame of the environment, if not in registers
+        assert Map.containsKey varName env.Frame
+        
         match env.FreeRegs.Int with
         | reg :: _ ->
             (reg, loadIntVarIntoRegister env varName reg)
@@ -308,6 +312,9 @@ let rec internal loadFloatVar (env: ANFCodegenEnv) (varName: string)
     match (findFloatVarRegister env varName) with
     | Some(fpReg) -> (fpReg, {Asm = Asm(); Env = env})
     | None ->
+        // The requested variable for loading should exist in the stack frame of the environment, if not in registers
+        assert Map.containsKey varName env.Frame
+        
         match env.FreeRegs.Float with
         | fpReg :: _ ->
             let loadRes = loadFloatVarIntoRegister env varName fpReg
@@ -518,7 +525,7 @@ let rec internal doCodegen (env: ANFCodegenEnv)
             match (expandType init.Env init.Type) with
             | t when t <> TFloat ->
                 /// Allocation code for 'vname' + updated codegen environment
-                let _, allocRes = allocateIntVar initEnv vname
+                let _, allocRes = allocateIntVar initEnv vname []
                 /// Code generation environment for the init block of the 'let',
                 /// where all variables used in the 'scope' are marked as
                 /// 'needed' (since they must not be deallocated, although they
@@ -532,7 +539,7 @@ let rec internal doCodegen (env: ANFCodegenEnv)
                 { initCodegenRes with Asm = allocRes.Asm ++ initCodegenRes.Asm }
             | TFloat ->
                 /// Allocation code for 'vname' + updated codegen environment
-                let _, allocRes = allocateFloatVar initEnv vname
+                let _, allocRes = allocateFloatVar initEnv vname []
                 /// Code generation environment for the init block of the 'let',
                 /// where all variables used in the 'scope' are marked as
                 /// 'needed' (since they must not be deallocated, although they
@@ -638,7 +645,6 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
         
         { Asm = targetLoadRes.Asm ++ floatLoadingCode
           Env = targetLoadRes.Env }
-        
 
     | Add(lhs, rhs)
     | Sub(lhs, rhs)
@@ -1131,11 +1137,10 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Env = trueCodegenRes.Env }
     
     | While(condition, body) ->
-        // #TODO: See mut_array_bug for environment synchronization issues around while-loops
-        
         /// Updated ANF codegen environment for the condition piece of the loop (add needed vars + set cond. target)
         let conditionEnv = { env with
-                                NeededVars = Set.add env.TargetVar (Set.union env.NeededVars (ASTUtil.freeVars body)) }
+                                NeededVars = Set.add env.TargetVar
+                                                 (Set.union env.NeededVars (ASTUtil.freeVars body)) }
         
         /// Code generation result for the loop condition assumed in ANF
         let condCodegenRes = doCodegen conditionEnv condition
@@ -1488,7 +1493,6 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
                     ++ elementModifyRes.Asm
               Env = elementModifyRes.Env }
         | _ -> failwith $"ANF Assignment not yet implemented for {lhs.Expr}"
-
            
     | StructCons fields ->
         /// Allocate a new struct variable on heap, and get the code to do it
@@ -1595,6 +1599,8 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Env = fieldAccessRes.Env}
     
     | Lambda(args, body) ->
+        // # TODO: Implement closure conversion!
+        
         /// Label to mark the position of the lambda term body
         let funLabel = Util.genSymbol "lambda"
         
