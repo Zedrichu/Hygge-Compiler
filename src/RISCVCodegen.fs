@@ -1464,8 +1464,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         failwith "BUG: pointers cannot be compiled (by design!)"
 
     | UnionCons(label, expr) ->
-        // Allocate space for the union instance (label ID + value = 2 words = 8 bytes)
-        // kind of like in struct, but with only one field - the union label
+        /// Allocate space for the union instance (label ID + value = 2 words = 8 bytes)
+        /// kind of like in struct, but with two fields - the union label and the expression.
         let unionAllocCode =
             (beforeSysCall [Reg.a0] []) 
                 .AddText([
@@ -1476,16 +1476,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     (RV.MV(Reg.r(env.Target), Reg.a0), 
                         "Move syscall result (Union mem address) to target")
                 ])
-                ++ (afterSysCall [Reg.a0] [])
+            ++ (afterSysCall [Reg.a0] [])
 
-        // Instead of saving the string, we use genSymbolId to generate a unique int from a string
+        /// Instead of saving the string, we use genSymbolId to generate a unique int from a string
         let labelId = Util.genSymbolId label
         let labelIdCode =
-            Asm().AddText([
-                    (RV.LI(Reg.r(env.Target + 1u), labelId), $"Load integer ID for label '%s{label}'") 
-                    (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)), 
-                        $"Store label ID for '%s{label}' at base address")
-                ])
+            Asm([
+                (RV.LI(Reg.r(env.Target + 1u), labelId), $"Load integer ID for label '%s{label}'") 
+                (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)), 
+                    $"Store label ID for '%s{label}' at base address")
+            ])
 
         // Finally save the expr at an offset of 4
         let exprCompileAndStoreCode =
