@@ -1164,20 +1164,22 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Env = trueCodegenRes.Env }
     
     | While(condition, body) ->
-        /// Updated ANF codegen environment for the condition piece of the loop (add needed vars + set cond. target)
-        let conditionEnv = { env with
-                                NeededVars = Set.add env.TargetVar
-                                                 (Set.union env.NeededVars (ASTUtil.freeVars body)) }
+        /// Extend needed vars with free variables required in the loop condition and body (incl. target variable)
+        let loopNeededVars = Set.unionMany [ env.NeededVars
+                                             ASTUtil.freeVars condition
+                                             ASTUtil.freeVars body
+                                             Set.singleton env.TargetVar ]
+        
+        /// Updated ANF codegen environment for the condition piece of the loop 
+        let conditionEnv = { env with NeededVars = loopNeededVars }
         
         /// Code generation result for the loop condition assumed in ANF
         let condCodegenRes = doCodegen conditionEnv condition
         let condReg = getIntVarRegister condCodegenRes.Env env.TargetVar
         
-        let condNeededVars = Set.union condCodegenRes.Env.NeededVars (ASTUtil.freeVars condition)
         /// Code generation result for the 'while' loop body assumed in ANF
-        let bodyCodegenRes = doCodegen { condCodegenRes.Env with
-                                            TargetVar = env.TargetVar
-                                            NeededVars = condNeededVars } body
+        let bodyCodegenRes = doCodegen condCodegenRes.Env body
+        
         /// Assembly code to spill/load variables after the 'while' body, to get the same
         /// register allocation obtained before entering the 'while' condition.
         /// Sync the full loop environment back to the condition entry state
@@ -1220,28 +1222,43 @@ and internal doLetInitCodegen (env: ANFCodegenEnv) (init: TypedAST): ANFCodegenR
           Env = { condCodegenRes.Env with NeededVars = env.NeededVars } }
         
     | DoWhile(body, condition) ->
+        let conditionVar = Util.genSymbol "$cond"
+        
+        /// Allocate an integer register for the condition variable and ANF code to load it
+        let condReg, conditionAlloc = allocateIntVar env conditionVar []
+        
+        /// Extend needed vars with free variables required in the loop condition and body + target variable
+        let loopNeededVars = Set.unionMany [ env.NeededVars
+                                             (ASTUtil.freeVars condition)
+                                             (ASTUtil.freeVars body)
+                                             Set.singleton env.TargetVar
+                                             Set.singleton conditionVar ]
+        
         /// Code generation result for the 'do-while' loop body
-        let bodyCodegenRes = doCodegen env body
-        /// Register holding 'do-while' condition as variable, and code to load it
-        let condReg, condLoadRes = loadIntVar bodyCodegenRes.Env (getVarName condition) []
+        let bodyCodegenRes = doCodegen { conditionAlloc.Env with NeededVars = loopNeededVars } body
+        
+        /// Code generation result for the loop condition assumed in ANF
+        let condCodegenRes = doCodegen { bodyCodegenRes.Env with TargetVar = conditionVar } condition
+        
         /// Assembly code to spill/load variables after the 'do-while' body, to get the same
         /// register allocation obtained after the 'do-while' condition and body code generation
-        let syncAsm = syncANFCodegenEnvs condLoadRes.Env env
-    
+        let syncAsm = syncANFCodegenEnvs condCodegenRes.Env { conditionAlloc.Env with NeededVars = loopNeededVars }
+  
         /// Label to mark the beginning of the 'do-while' loop body
         let doWhileBodyBeginLabel = Util.genSymbol "do_while_body_begin"
         
         let doWhileAsm =
-            Asm(RV.LABEL(doWhileBodyBeginLabel))
+            conditionAlloc.Asm
+            ++ Asm(RV.LABEL(doWhileBodyBeginLabel))
             ++ bodyCodegenRes.Asm
-            ++ condLoadRes.Asm
+            ++ condCodegenRes.Asm
             ++ Asm(RV.COMMENT("Branch synchronization code begins here"))
             ++ syncAsm
             ++ Asm(RV.COMMENT("Branch synchronization code ends here"))
             ++ Asm(RV.BNEZ(condReg, doWhileBodyBeginLabel),
                      "Jump to the start of the loop body if the 'do-while' condition is true")
         { Asm = doWhileAsm
-          Env = condLoadRes.Env }
+          Env = conditionAlloc.Env }
 
     | Seq nodes ->
         /// Collect the code of each sequence node assumed in ANF by folding over all children
