@@ -307,6 +307,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let rfptarget = env.FPTarget + 1u
             /// Generated code for the rhs expression
             let rAsm = doCodegen {env with FPTarget = rfptarget} rhs
+            /// Conversion of rhs int arguments to float (support typer for increment/decrement)
+            let rConv = match rhs.Type with
+                        | t when isSubtypeOf node.Env t TInt ->
+                            Asm(RV.FCVT_S_W(FPReg.r(rfptarget), Reg.r(env.Target)))
+                        | _ -> Asm()
+            
             let label = Util.genSymbol "minmax_done"
             /// Generated code for the numerical operation
             let opAsm =
@@ -335,7 +341,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     Asm(RV.LABEL(label))
                 | x -> failwith $"BUG: unexpected operation %O{x}"
             // Put everything together
-            lAsm ++ rAsm ++ opAsm
+            lAsm ++ rAsm ++ rConv ++ opAsm
         | t ->
             failwith $"BUG: numerical operation codegen invoked on invalid type %O{t}"
 
@@ -886,18 +892,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | TArray _ ->
                 /// Offset of the selected index from the beginning of the array container region on heap
                 let offsetCode = Asm([
-                                     (RV.LW(Reg.r(env.Target), Imm12(4), Reg.r(env.Target)),
-                                      "Load the array container pointer from 2nd array instance field (~data)")
-                                     (RV.ADDI(Reg.r(env.Target + 2u), Reg.zero, Imm12(4)),
-                                      "Load word size for array element offset computation")
-                                     (RV.MUL(Reg.r(env.Target + 1u),
-                                                      Reg.r(env.Target + 1u),
-                                                      Reg.r(env.Target + 2u)),
-                                     "Compute offset of the selected array element 4 x index")
-                                     (RV.ADD(Reg.r(env.Target),
-                                                     Reg.r(env.Target),
-                                                     Reg.r(env.Target + 1u)),
-                                     "Add offset to the array container address")])
+                     (RV.LW(Reg.r(env.Target), Imm12(4), Reg.r(env.Target)),
+                      "Load the array container pointer from 2nd array instance field (~data)")
+                     (RV.SLLI(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Shamt(2u)),
+                      "Multiply index by 4 to get byte offset of the selected element")
+                     (RV.ADD(Reg.r(env.Target),
+                                     Reg.r(env.Target),
+                                     Reg.r(env.Target + 1u)),
+                     "Add offset to the array container address")
+                ])
                 /// Assembly code that performs the field value assignment
                 let assignCode =
                     match expandType node.Env rhs.Type with
@@ -916,7 +919,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 // Put everything together
                 arrTargetCode ++ indexCode ++ indexOutBoundsCode ++ offsetCode ++ rhsCode ++ assignCode
             | t ->
-                failwith $"BUG: array length retrieved on invalid object type: %O{t}"
+                failwith $"BUG: array element modified on invalid object type: %O{t}"
         | _ ->
             failwith ($"BUG: assignment to invalid target:%s{Util.nl}"
                       + $"%s{PrettyPrinter.prettyPrint lhs}")
@@ -946,12 +949,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                      "Body of the 'while' loop starts here")
                 ])
             ++ (doCodegen env body)
-            .AddText([
-                (RV.LA(Reg.r(env.Target), whileBeginLabel),
-                 "Load address of label at the beginning of the 'while' loop")
-                (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
-                (RV.LABEL(whileEndLabel), "")
-            ])
+                .AddText([
+                    (RV.LA(Reg.r(env.Target), whileBeginLabel),
+                     "Load address of label at the beginning of the 'while' loop")
+                    (RV.JR(Reg.r(env.Target)), "Jump to the start of the loop construct")
+                    (RV.LABEL(whileEndLabel), "")
+                ])
 
     | DoWhile(body, cond) ->
         /// Label to mark the beginning of the 'do-while' loop body
@@ -976,10 +979,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let argNames, _ = List.unzip args
 
         /// Types of the Lambda arguments - retrieved from the type-checking environment
-        let targs = List.map (fun a -> body.Env.Vars[a]) argNames
+        let argTypes = List.map (fun a -> body.Env.Vars[a]) argNames
 
         /// Perform closure conversion on the lambda term, for immutable variable closures
-        let closureConversionCode = closureConversion env funLabel node None args targs body
+        let closureConversionCode = closureConversion env funLabel node None args argTypes body
 
         closureConversionCode
 
@@ -1036,7 +1039,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// 'compileArgs' and 'argsCode' above) into an 'a' register, using an
         /// index to determine the source and target registers, and accumulating
         /// the generated assembly code
-        let copyArg (acc: Asm) (i: int, arg: TypedAST) (wordOffset: int)=
+        let copyArg (acc: Asm) (i: int, arg: TypedAST) (wordOffset: int) =
             let argOffset = (i - 8 + wordOffset) * 4
 
             match arg.Type with
@@ -1079,7 +1082,6 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Code that performs the function call
         let callCode =
             appTermCode
-            //++ argsCode // Code to compute each argument of the function call
             ++ floatArgsCode
             ++ intArgsCode
                .AddText(RV.COMMENT("Before function call: save caller-saved registers"))
@@ -1088,7 +1090,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                   .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
         
         /// Code that handles the function return value (if any)
-        /// We now check if it is a Function then we check the return type to target the correct output register, FPReg for float, Reg for int.
+        /// If the expression is a function then we check the return type
+        /// to target the correct output register, FPReg for float, Reg for int.
         let retCode =
             match expr.Type with
             | TFun (_, retType) -> 
@@ -1223,9 +1226,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let arrayAllocCode =
             (beforeSysCall [Reg.a0] [])
                 .AddText([
-                    (RV.LI(Reg.r(env.Target), 4), "Store word size")
-                    (RV.MUL(Reg.a0, Reg.r(env.Target), Reg.r(env.Target + 1u)),
-                     "Amount of memory to allocate for the array sequence (in bytes)")
+                    (RV.SLLI(Reg.a0, Reg.r(env.Target + 1u), Shamt(2u)),
+                     "Amount of memory to allocate for array sequence: length x word size")
                     (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
                     (RV.ECALL, "")
                     (RV.MV(Reg.r(env.Target + 2u), Reg.a0),
@@ -1249,14 +1251,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         /// Code to store the length of the array at the beginning of the array struct memory
         let instanceFieldSetCode =
-            match expandType node.Env length.Type with
-            | TInt -> Asm().AddText([
-                            (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
-                            "Store array length at the beginning of the array memory (1st field)")
-                            (RV.SW(Reg.r(env.Target + 2u), Imm12(4), Reg.r(env.Target)),
-                            "Store array container pointer in data (2nd struct field)")
-                        ])
-            | _ -> failwith $"BUG: array length initialised with invalid type: %O{length.Type}"
+            Asm().AddText([
+                (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
+                "Store array length at the beginning of the array memory (1st field)")
+                (RV.SW(Reg.r(env.Target + 2u), Imm12(4), Reg.r(env.Target)),
+                "Store array container pointer in data (2nd struct field)")
+            ])
 
         /// Compiled code for initialisation value, targeting the register `target+3`
         let initCode = doCodegen {env with Target = env.Target + 3u} init
@@ -1333,9 +1333,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             // The data pointer (field) in the array instance can be loaded from `target` with offset 4 (2nd field)
             (RV.LW(Reg.r(env.Target), Imm12(4), Reg.r(env.Target)),
              "Load the container base address into target register from instance data pointer")
-            (RV.LI(Reg.r(env.Target + 2u), 4),
-             "Load word size for array element offset computation")
-            (RV.MUL(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Reg.r(env.Target + 2u)),
+            (RV.SLLI(Reg.r(env.Target + 1u), Reg.r(env.Target + 1u), Shamt(2u)),
              "Compute offset of the selected array element as 4 x index")
             (RV.ADD(Reg.r(env.Target + 1u), Reg.r(env.Target), Reg.r(env.Target + 1u)),
              "Memory address of the selected array element (container pointer + offset)")
@@ -1373,13 +1371,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// heap memory at `target` (the beginning of the array) to retrieve the length value.
         let targetCode = doCodegen env target
         let lengthAccessCode =
-            match expandType node.Env target.Type with
-            | TArray _ ->
-                Asm().AddText(
-                    RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
-                    "Load array length from base pointer in memory"
-                )
-            | _ -> failwith $"BUG: array length access on invalid target: %O{target.Type}"
+            Asm(RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
+                "Load array length from base pointer in memory")
         targetCode ++ lengthAccessCode
 
     | ArraySlice(parent, startIdx, endIdx) ->
@@ -1418,9 +1411,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 Asm().AddText([
                     (RV.LW(Reg.r(env.Target + 2u), Imm12(4), Reg.r(env.Target + 2u)),
                      "Load the parent array data pointer in register `target+2`")
-                    (RV.LI(Reg.r(env.Target + 3u), 4),
-                     "Store word size in register for word-aligned slice start computation")
-                    (RV.MUL(Reg.r(env.Target + 3u), Reg.r(env.Target), Reg.r(env.Target + 3u)),
+                    (RV.SLLI(Reg.r(env.Target + 3u), Reg.r(env.Target), Shamt(2u)),
                      "Multiply the slice start offset by 4 for word-alignment ( 4 x startIdx )")
                     (RV.ADD(Reg.r(env.Target + 2u), Reg.r(env.Target + 3u), Reg.r(env.Target + 2u)),
                      "Update data pointer from parent array with start index offset")
@@ -1473,8 +1464,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         failwith "BUG: pointers cannot be compiled (by design!)"
 
     | UnionCons(label, expr) ->
-        // Allocate space for the union instance (label ID + value = 2 words = 8 bytes)
-        // kind of like in struct, but with only one field - the union label
+        /// Allocate space for the union instance (label ID + value = 2 words = 8 bytes)
+        /// kind of like in struct, but with two fields - the union label and the expression.
         let unionAllocCode =
             (beforeSysCall [Reg.a0] []) 
                 .AddText([
@@ -1485,16 +1476,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     (RV.MV(Reg.r(env.Target), Reg.a0), 
                         "Move syscall result (Union mem address) to target")
                 ])
-                ++ (afterSysCall [Reg.a0] [])
+            ++ (afterSysCall [Reg.a0] [])
 
-        // Instead of saving the string, we use genSymbolId to generate a unique int from a string
+        /// Instead of saving the string, we use genSymbolId to generate a unique int from a string
         let labelId = Util.genSymbolId label
         let labelIdCode =
-            Asm().AddText([
-                    (RV.LI(Reg.r(env.Target + 1u), labelId), $"Load integer ID for label '%s{label}'") 
-                    (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)), 
-                        $"Store label ID for '%s{label}' at base address")
-                ])
+            Asm([
+                (RV.LI(Reg.r(env.Target + 1u), labelId), $"Load integer ID for label '%s{label}'") 
+                (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)), 
+                    $"Store label ID for '%s{label}' at base address")
+            ])
 
         // Finally save the expr at an offset of 4
         let exprCompileAndStoreCode =

@@ -1,0 +1,4 @@
+let a: ref{int} = ref{2 + 2};
+let b: ref{int} = a;
+a.value <- 2;
+assert(b.value = 2)

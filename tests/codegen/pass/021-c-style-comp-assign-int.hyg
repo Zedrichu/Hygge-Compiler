@@ -1,0 +1,43 @@
+// Test compute-assignment operators with assertions
+
+// Integer compute-assign basic operations
+let mutable a = 10;
+
+a += 5;
+assert(a = 15);
+
+a -= 3;
+assert(a = 12);
+
+a *= 2;
+assert(a = 24);
+
+a /= 4;
+assert(a = 6);
+
+a %= 4;
+assert(a = 2);
+
+// With expressions on the right side
+let mutable b = 7;
+
+b += a * 2;    // b = 7 + (2 * 2) = 11
+assert(b = 11);
+
+b -= a / 2;    // b = 11 - (2 / 2) = 10
+assert(b = 10);
+
+b *= a - 1;    // b = 10 * (2 - 1) = 10
+assert(b = 10);
+
+// Using variables on both sides
+let mutable x = 10;
+let mutable y = 5;
+
+x += y;
+assert(x = 15);
+
+y *= x;
+assert(y = 75); // 5 * 15 = 75
+
+()

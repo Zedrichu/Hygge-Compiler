@@ -152,17 +152,18 @@ let tests = testList "tests" [
             testCodegen file 0
         <| fun file ->
             testCodegen file RISCVCodegen.assertExitCode
-    // createTestList "codegen-anf"
-    //     <| fun file ->
-    //         testANFCodegen file 0
-    //     <| fun file ->
-    //         testANFCodegen file RISCVCodegen.assertExitCode
+    createTestList "codegen-anf"
+        <| fun file ->
+            testANFCodegen file 0
+        <| fun file ->
+            testANFCodegen file RISCVCodegen.assertExitCode
 ]
 
 
 /// Run the tests according to command line options
 let run (opts: CmdLine.TestOptions): int =
     let argsDebug = if opts.Verbose then ["--debug"] else []
+    ParserConfig.ParserOption.Succinct <- opts.Succinct
     let argsFilter = match opts.Filter with
                      | null -> []
                      | f -> ["--filter"; $"tests.%s{f}"]

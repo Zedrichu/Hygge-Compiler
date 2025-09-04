@@ -622,7 +622,7 @@ let rec internal doCopyProp
                 match Map.tryFind copiedV varMutabilityMap with
                 | Some isMutableFlag -> not isMutableFlag
                 | None ->
-                    printf "Warning: ANF.doCopyProp: Mutability of copied variable '%s' not found in map. Assuming immutable for safety of propagation." copiedV
+                    printf $"Warning: ANF.doCopyProp: Mutability of copied variable '{copiedV}' not found in map. Assuming immutable for safety of propagation."
                     true 
 
             // Helper to check if variable is redefined (shadowed by let/let mutable) in remaining definitions
@@ -717,7 +717,7 @@ let verifyANF (node: Node<'E,'T>) =
                 | Sub(a, b)
                 | Mult(a, b) 
                 | And(a, b) 
-                | Or(a, b) 
+                | Or(a, b)
                 | Eq(a, b)
                 | Less(a, b) 
                 | LessEq(a, b) 
@@ -838,7 +838,7 @@ let verifyANF (node: Node<'E,'T>) =
                     List.map visit nodes |> ignore
                     true
                 
-                | _ -> false // Other expressions are not allowed in ANF
+                | _ -> false // Other expressions are not allowed in ANF initialisations
             
             if not check then
                 isValid <- false
@@ -859,7 +859,7 @@ let verifyANF (node: Node<'E,'T>) =
     if isValid then
         printfn "ANF verification complete: Valid ANF"
     else
-        printfn "ANF verification failed with %d violations:" violations.Length
+        printfn $"ANF verification failed with {violations.Length} violations:"
         List.iter (printfn "- %s") violations
     
 

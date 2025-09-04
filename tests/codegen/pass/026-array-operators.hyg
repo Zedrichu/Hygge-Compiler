@@ -1,0 +1,9 @@
+let n = 4;
+let x = 3.0f;
+let arr: array {float} = array(n, x);
+let x0 = 0;
+let x1 = arrayLength(arr) - 1;
+assert(arrayElem(arr, x0) = arrayElem(arr, x1));
+
+arrayElem(arr, 1) <- 1.0f + 2.3f;
+assert(arrayElem(arr, 1) - arrayElem(arr, 0) - 0.3f < 0.00001f)
