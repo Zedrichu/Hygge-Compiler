@@ -16,9 +16,37 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
     // a direct `addi` operation instead
     | (RV.LI(rd1, value), comment1) ::
       (RV.ADD(rd2, rs1, rs2), comment2) ::
-      rest                                 when rd1 = rs2 && (isImm12 value) ->
+      rest when rd1 = rs2 && (isImm12 value) ->
         (RV.LI(rd1, value), comment1) ::
         (RV.ADDI(rd2, rs1, Imm12(value)), comment2) ::
+        optimizeText rest
+
+    // Strength reduction
+    | (RV.LI(rd1, value), comment1) ::
+      (RV.MUL(rd2, rs1, rs2), comment2) ::
+      rest when value = 2 && rd1 = rs2 ->
+        (RV.LI(rd1, value), comment1) ::
+        (RV.SLLI(rd2, rs1, Shamt(1u)), comment2) ::
+        optimizeText rest
+
+    | (RV.LI(rd1, value), comment1) ::
+      (RV.DIV(rd2, rs1, rs2), comment2) ::
+      rest when value = 64 && rd1 = rs2 ->
+        (RV.LI(rd1, value), comment1) ::
+        (RV.SRAI(rd2, rs1, Shamt(6u)), comment2) ::
+        optimizeText rest
+
+    // Removal of redundant assignments
+    | (RV.MV(rd1, rs1), comment1) ::
+      (RV.MV(rd2, rs2), comment2) ::
+      rest when rd1 = rs2 && rd2 = rs1 ->
+        (RV.MV(rd1, rd2), $"{comment1} {comment2}") ::
+        optimizeText rest
+
+    | (RV.MV(rd1, rs1), comment1) ::
+      (RV.LI(rd2, value), comment2) ::
+      rest when rd1 = rd2 && (isImm12 value) ->
+        (RV.LI(rd1, value), $"{comment1} {comment2}") ::
         optimizeText rest
 
     | stmt :: rest ->
@@ -33,7 +61,7 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
 let optimize (asm: Asm): Asm =
     Log.info "Starting peephole optimization"
     /// Recursively perform peephole optimization, until the result stops
-    /// changing (i.e. there is nothning more we can optimize).
+    /// changing (i.e. there is nothing more we can optimize).
     let rec optimizeRec (text: List<TextStmt>): List<TextStmt> =
         /// Optimized assembly code
         let optText = optimizeText text

@@ -61,5 +61,6 @@
     <Content Include="lib\rars.jar" />
     <Content Include="lib\README.md" />
     <Content Include="README.md" />
+    <Content Include=".editorconfig" />
   </ItemGroup>
 </Project>
