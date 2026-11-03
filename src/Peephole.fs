@@ -21,6 +21,50 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
         (RV.ADDI(rd2, rs1, Imm12(value)), comment2) ::
         optimizeText rest
 
+    // Self-move Elimination
+    | (RV.MV(rd, rs), comment) :: rest when rd = rs ->
+        optimizeText rest
+
+    // Store-forwarding / Reload Elimination
+    | (RV.SW(rs0, imm1, rs1), comment) ::
+      (RV.LW(rd, imm2, rs2), comment1) ::
+      rest when imm1 = imm2 && rs1 = rs2 ->
+        if rs0 = rd then
+            (RV.SW(rs0, imm1, rs1), comment) :: optimizeText rest
+        else (RV.SW(rs0, imm1, rs1), comment) ::
+                    (RV.MV(rd, rs0), comment1) :: optimizeText rest
+
+    // Stack Pointer Adjustment Fusion and Cancellation
+    | (RV.ADDI(rd1, rs1, imm1), comment1) ::
+      (RV.ADDI(rd2, rs2, imm2), comment2) ::
+      rest when rd1 = rs1 && rd1 = Reg.sp &&
+                 rd2 = rs2 && rd2 = Reg.sp ->
+        let newValue = imm1.Value + imm2.Value
+        let potentialStatements =
+            match newValue with
+            | 0 -> [] // Cancellation
+            | x when isImm12 x -> // Fusion
+                [RV.ADDI(rd1, rs1, Imm12(x)), $"{comment1} {comment2}"]
+        potentialStatements @ optimizeText rest
+
+    // Algebraic Identity: Adding / Subtracting Zero
+    
+    // Algebraic Identity: Multiplying / Dividing Unit
+
+    // Zero Multiplication
+
+    // General Strength Reduction for Powers of 2 (2^k)
+
+    // Branch / Jump to the Immediately Following Label
+
+    // Inverting Conditional Branches over Unconditional Jumps
+
+    // Boolean Comparison & Branch Fusion
+
+    // Dead Store Elimination (Consecutive Stores to Same Address)
+
+    // Self-Substraction & Self-XOR (Yield Loaded Zero)
+
     // Strength reduction
     | (RV.LI(rd1, value), comment1) ::
       (RV.MUL(rd2, rs1, rs2), comment2) ::
