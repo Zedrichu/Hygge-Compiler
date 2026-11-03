@@ -48,10 +48,45 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
         potentialStatements @ optimizeText rest
 
     // Algebraic Identity: Adding / Subtracting Zero
+    | (RV.ADDI(rd, rs, imm), comment) :: rest when imm.Value = 0 ->
+        if rd = rs then optimizeText rest
+        else (RV.MV(rd, rs), comment) :: optimizeText rest
+    | (RV.ADD(rd, rs1, rs2), comment) :: rest when rs2 = Reg.zero ->
+        if rd = rs1 then optimizeText rest
+        else (RV.MV(rd, rs1), comment) :: optimizeText rest
+    | (RV.ADD(rd, rs1, rs2), comment) :: rest when rs1 = Reg.zero ->
+        if rd = rs2 then optimizeText rest
+        else (RV.MV(rd, rs2), comment) :: optimizeText rest
+    | (RV.SUB(rd, rs1, rs2), comment) :: rest when rs2 = Reg.zero ->
+        if rd = rs1 then optimizeText rest
+        else (RV.MV(rd, rs1), comment) :: optimizeText rest
     
-    // Algebraic Identity: Multiplying / Dividing Unit
+    // Algebraic Identity: Multiplying / Dividing Identity & Zero
+    // Multiplication by 1 (identity) -> result is the other register
+    | (RV.LI(rd1, 1), comment1) ::
+      (RV.MUL(rd2, rs1, rs2), comment2) ::
+      rest when rd1 = rs2 ->
+        (RV.LI(rd1, 1), comment1) ::
+        (RV.MV(rd2, rs1), $"{comment2} (reduced * 1)") :: optimizeText rest
+    | (RV.LI(rd1, 1), comment1) ::
+      (RV.MUL(rd2, rs1, rs2), comment2) ::
+      rest when rd1 = rs1 ->
+        (RV.LI(rd1, 1), comment1) ::
+        (RV.MV(rd2, rs2), $"{comment2} (reduced * 1)") :: optimizeText rest
 
-    // Zero Multiplication
+    // Multiplication by 0 (zero) -> result is null
+    | (RV.LI(rd1, 0), comment1) ::
+      (RV.MUL(rd2, rs1, rs2), comment2) ::
+      rest when rd1 = rs2 || rd1 = rs1 ->
+        (RV.LI(rd1, 0), comment1) ::
+        (RV.MV(rd2, Reg.zero), $"{comment2} (reduced * 0)") :: optimizeText rest
+
+    // Division by 1 (identity) -> result is the dividend register
+    | (RV.LI(rd1, 1), comment1) ::
+      (RV.DIV(rd2, rs1, rs2), comment2) ::
+      rest when rd1 = rs2 ->
+        (RV.LI(rd1, 1), comment1) ::
+        (RV.MV(rd2, rs1), $"{comment2} (reduced / 1)") :: optimizeText rest
 
     // General Strength Reduction for Powers of 2 (2^k)
 
