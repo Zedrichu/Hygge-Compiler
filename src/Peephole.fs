@@ -19,6 +19,66 @@ let private log2 (n: int32) : uint32 =
 /// Optimize a list of Text segment statements.
 let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
     match text with
+    // _____________________Optimization Tier 1_______________________
+    // Multi-instruction Control Flow Patterns (3-instruction window)
+    // _______________________________________________________________
+
+    // --- Inverting Conditional Branches over Unconditional Jumps
+    // BEQ/BEQZ over J to immediate label -> BNE/BEQZ
+    | (RV.BEQ(rs1, rs2, target1), comment1) ::
+      (RV.J(target2), _) ::
+      (RV.LABEL(label), comment3) :: rest
+      when label = target1 ->
+        (RV.BNE(rs1, rs2, target2), $"{comment1} (inverted branch over jump)") ::
+        (RV.LABEL(label), comment3) :: optimizeText rest
+    | (RV.BEQZ(rs1, target1), comment1) ::
+      (RV.J(target2), _) ::
+      (RV.LABEL(label), comment3) :: rest
+      when label = target1 ->
+        (RV.BNEZ(rs1, target2), $"{comment1} (inverted branch over jump)") ::
+        (RV.LABEL(label), comment3) :: optimizeText rest
+    // BNE/BNEZ over J to immediate label -> BEQ/BEQZ
+    | (RV.BNE(rs1, rs2, target1), comment1) ::
+      (RV.J(target2), _) ::
+      (RV.LABEL(label), comment3) :: rest
+      when label = target1 ->
+        (RV.BEQ(rs1, rs2, target2), $"{comment1} (inverted branch over jump)") ::
+        (RV.LABEL(label), comment3) :: optimizeText rest
+    | (RV.BNEZ(rs1, target1), comment1) ::
+      (RV.J(target2), _) ::
+      (RV.LABEL(label), comment3) :: rest
+      when label = target1 ->
+        (RV.BEQZ(rs1, target2), $"{comment1} (inverted branch over jump)") ::
+        (RV.LABEL(label), comment3) :: optimizeText rest
+
+    // _____________________Optimization Tier 2_______________________
+    // Redundant Branching & Control Flow Fallthrough (2-instruction window)
+    // _______________________________________________________________
+
+    // --- Branch / Jump to the Immediately Following Label
+    // Eliminate unconditional jump to the next line (labeled instruction)
+    | (RV.J(label1), _) :: (RV.LABEL(label2), comment) ::
+      rest when label1 = label2 ->
+        (RV.LABEL(label1), comment) :: optimizeText rest
+    // Eliminate conditional branches jumping to the next line (labeled instruction)
+    | (RV.BEQ(_, _, label1), _) :: (RV.LABEL(label2), comment) ::
+      rest when label1 = label2 ->
+        (RV.LABEL(label1), comment) :: optimizeText rest
+    | (RV.BNE(_, _, label1), _) :: (RV.LABEL(label2), comment) ::
+      rest when label1 = label2 ->
+        (RV.LABEL(label1), comment) :: optimizeText rest
+
+    // --- Boolean Comparison Bypass & Branch Fusion
+    // Fuse boolean test with conditional branch
+    | (RV.SNEZ(rd, rs), comment1) ::
+      (RV.BNEZ(rt, label), comment2) ::
+      rest when rd = rt ->
+        (RV.BNEZ(rs, label), $"{comment1} {comment2} (bypass SNEZ, fuse in BNEZ)") :: optimizeText rest
+    | (RV.SEQZ(rd, rs), comment1) ::
+      (RV.BNEZ(rt, label), comment2) ::
+      rest when rd = rt ->
+        (RV.BEQZ(rs, label), $"{comment1} {comment2} (bypass SEQZ, fuse in BEQZ)") :: optimizeText rest
+
     // If a small-enough constant integer is loaded and then added, perform
     // a direct `addi` operation instead
     | (RV.LI(rd1, value), comment1) ::
@@ -36,10 +96,11 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
     | (RV.SW(rs0, imm1, rs1), comment) ::
       (RV.LW(rd, imm2, rs2), comment1) ::
       rest when imm1 = imm2 && rs1 = rs2 ->
-        if rs0 = rd then
+        if rs0 = rd then // forward store
             (RV.SW(rs0, imm1, rs1), comment) :: optimizeText rest
-        else (RV.SW(rs0, imm1, rs1), comment) ::
-                    (RV.MV(rd, rs0), comment1) :: optimizeText rest
+        else // eliminate reload
+            (RV.SW(rs0, imm1, rs1), comment) ::
+            (RV.MV(rd, rs0), comment1) :: optimizeText rest
 
     // Stack Pointer Adjustment Fusion and Cancellation
     | (RV.ADDI(rd1, rs1, imm1), comment1) ::
@@ -94,12 +155,6 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
       rest when rd1 = rs2 ->
         (RV.LI(rd1, 1), comment1) ::
         (RV.MV(rd2, rs1), $"{comment2} (reduced / 1)") :: optimizeText rest
-
-    // Branch / Jump to the Immediately Following Label
-
-    // Inverting Conditional Branches over Unconditional Jumps
-
-    // Boolean Comparison & Branch Fusion
 
     // Dead Store Elimination (Consecutive Stores to Same Address)
 
