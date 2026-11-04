@@ -8,6 +8,13 @@ module Peephole
 
 open RISCV
 
+/// Check if an integer is a positive power of 2
+let private isPositivePowerOfTwo (n: int32) : bool =
+    n > 0 && (n &&& (n - 1)) = 0
+
+/// Compute log2 of a positive power of 2
+let private log2 (n: int32) : uint32 =
+    uint32 (System.Numerics.BitOperations.Log2(uint32 n))
 
 /// Optimize a list of Text segment statements.
 let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
@@ -88,8 +95,6 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
         (RV.LI(rd1, 1), comment1) ::
         (RV.MV(rd2, rs1), $"{comment2} (reduced / 1)") :: optimizeText rest
 
-    // General Strength Reduction for Powers of 2 (2^k)
-
     // Branch / Jump to the Immediately Following Label
 
     // Inverting Conditional Branches over Unconditional Jumps
@@ -100,20 +105,31 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
 
     // Self-Substraction & Self-XOR (Yield Loaded Zero)
 
-    // Strength reduction
+    // General Strength Reduction for Arbitrary Powers of 2 (2^k)
     | (RV.LI(rd1, value), comment1) ::
       (RV.MUL(rd2, rs1, rs2), comment2) ::
-      rest when value = 2 && rd1 = rs2 ->
+      rest when (rs1 = rd1 || rs2 = rd1) && isPositivePowerOfTwo value ->
+        let other_reg = if rs1 = rd1 then rs2 else rs1
+        let k_shift = log2 value
         (RV.LI(rd1, value), comment1) ::
-        (RV.SLLI(rd2, rs1, Shamt(1u)), comment2) ::
+        (RV.SLLI(rd2, other_reg, Shamt(k_shift)), $"{comment2} (strength reduction << {k_shift})") ::
         optimizeText rest
 
     | (RV.LI(rd1, value), comment1) ::
       (RV.DIV(rd2, rs1, rs2), comment2) ::
-      rest when value = 64 && rd1 = rs2 ->
+      rest when rd1 = rs2 && isPositivePowerOfTwo value ->
+        let k_shift = log2 value
         (RV.LI(rd1, value), comment1) ::
-        (RV.SRAI(rd2, rs1, Shamt(6u)), comment2) ::
+        (RV.SRAI(rd2, rs1, Shamt(k_shift)), $"{comment2} (strength reduction >> {k_shift})") ::
         optimizeText rest
+
+    // // Specific Strength Reduction
+    // | (RV.LI(rd1, value), comment1) :: (RV.MUL(rd2, rs1, rs2), comment2) :: rest
+    //     when value = 2 && rd1 = rs2 ->
+    //     (RV.LI(rd1, value), comment1) :: (RV.SLLI(rd2, rs1, Shamt(1u)), comment2) :: optimizeText rest
+    // | (RV.LI(rd1, value), comment1) :: (RV.DIV(rd2, rs1, rs2), comment2) :: rest
+    //     when value = 64 && rd1 = rs2 ->
+    //     (RV.LI(rd1, value), comment1) :: (RV.SRAI(rd2, rs1, Shamt(6u)), comment2) :: optimizeText rest
 
     // Removal of redundant assignments
     | (RV.MV(rd1, rs1), comment1) ::
