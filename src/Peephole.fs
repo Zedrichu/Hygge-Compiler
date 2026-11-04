@@ -17,6 +17,13 @@ let private log2 (n: int32) : uint32 =
     uint32 (System.Numerics.BitOperations.Log2(uint32 n))
 
 /// Optimize a list of Text segment statements.
+/// Many pattern-matching cases for different optimization methods are organized and
+/// ordered based on 4 core principles:
+/// 1. Specific identities before general reductions (special constants, identity & zero)
+/// 2. Larger instruction windows before smaller windows.
+/// 3. Memory & arithmetic simplification before redundant move elimination.
+/// 4. Strict directionality (never reverse transformations, commutative swapping rules)
+/// Peephole optimization must form a strictly acyclic, terminating rewriting system (avoid infinite loops).
 let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
     match text with
     // _____________________Optimization Tier 1_______________________
@@ -79,20 +86,11 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
       rest when rd = rt ->
         (RV.BEQZ(rs, label), $"{comment1} {comment2} (bypass SEQZ, fuse in BEQZ)") :: optimizeText rest
 
-    // If a small-enough constant integer is loaded and then added, perform
-    // a direct `addi` operation instead
-    | (RV.LI(rd1, value), comment1) ::
-      (RV.ADD(rd2, rs1, rs2), comment2) ::
-      rest when rd1 = rs2 && (isImm12 value) ->
-        (RV.LI(rd1, value), comment1) ::
-        (RV.ADDI(rd2, rs1, Imm12(value)), comment2) ::
-        optimizeText rest
+    // ________________________Optimization Tier 3________________________________
+    // Memory / Stack Optimizations (store-forwarding, reload elimination, fusion)
+    // ___________________________________________________________________________
 
-    // Self-move Elimination
-    | (RV.MV(rd, rs), comment) :: rest when rd = rs ->
-        optimizeText rest
-
-    // Store-forwarding / Reload Elimination
+    // --- Store-forwarding / Reload Elimination
     | (RV.SW(rs0, imm1, rs1), comment) ::
       (RV.LW(rd, imm2, rs2), comment1) ::
       rest when imm1 = imm2 && rs1 = rs2 ->
@@ -102,7 +100,7 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
             (RV.SW(rs0, imm1, rs1), comment) ::
             (RV.MV(rd, rs0), comment1) :: optimizeText rest
 
-    // Stack Pointer Adjustment Fusion and Cancellation
+    // --- Stack Pointer Adjustment Fusion and Cancellation
     | (RV.ADDI(rd1, rs1, imm1), comment1) ::
       (RV.ADDI(rd2, rs2, imm2), comment2) ::
       rest when rd1 = rs1 && rd1 = Reg.sp &&
@@ -113,9 +111,14 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
             | 0 -> [] // Cancellation
             | x when isImm12 x -> // Fusion
                 [RV.ADDI(rd1, rs1, Imm12(x)), $"{comment1} {comment2}"]
+            | _ -> failwith "Stack pointer adjustment overflow: cannot fuse {comment1} and {comment2}"
         potentialStatements @ optimizeText rest
 
-    // Algebraic Identity: Adding / Subtracting Zero
+    // ________________________Optimization Tier 4__________________________
+    // Algebraic Zero & Unit Identities (special cases: *1, /1, *0, +0, -0)
+    // _____________________________________________________________________
+
+    // --- Algebraic Identity: Adding / Subtracting Zero
     | (RV.ADDI(rd, rs, imm), comment) :: rest when imm.Value = 0 ->
         if rd = rs then optimizeText rest
         else (RV.MV(rd, rs), comment) :: optimizeText rest
@@ -128,8 +131,8 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
     | (RV.SUB(rd, rs1, rs2), comment) :: rest when rs2 = Reg.zero ->
         if rd = rs1 then optimizeText rest
         else (RV.MV(rd, rs1), comment) :: optimizeText rest
-    
-    // Algebraic Identity: Multiplying / Dividing Identity & Zero
+
+    // --- Algebraic Identity: Multiplying / Dividing Identity & Zero
     // Multiplication by 1 (identity) -> result is the other register
     | (RV.LI(rd1, 1), comment1) ::
       (RV.MUL(rd2, rs1, rs2), comment2) ::
@@ -156,7 +159,25 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
         (RV.LI(rd1, 1), comment1) ::
         (RV.MV(rd2, rs1), $"{comment2} (reduced / 1)") :: optimizeText rest
 
-    // Dead Store Elimination (Consecutive Stores to Same Address)
+    // If a small-enough constant integer is loaded and then added, perform
+    // a direct `addi` operation instead
+    | (RV.LI(rd1, value), comment1) ::
+      (RV.ADD(rd2, rs1, rs2), comment2) ::
+      rest when rd1 = rs2 && (isImm12 value) ->
+        (RV.LI(rd1, value), comment1) ::
+        (RV.ADDI(rd2, rs1, Imm12(value)), comment2) ::
+        optimizeText rest
+
+    // Self-move Elimination
+    | (RV.MV(rd, rs), comment) :: rest when rd = rs ->
+        optimizeText rest
+
+
+    // --- Dead Store Elimination (Consecutive Stores to Same Address)
+    | (RV.SW(_, imm1, rp1), _) ::
+      (RV.SW(rs2, imm2, rp2), comment2) ::
+      rest when imm1.Value = imm2.Value && rp1 = rp2 ->
+        (RV.SW(rs2, imm2, rp2), comment2) :: optimizeText rest
 
     // Self-Substraction & Self-XOR (Yield Loaded Zero)
 
