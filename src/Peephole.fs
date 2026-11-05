@@ -58,9 +58,9 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
         (RV.BEQZ(rs1, target2), $"{comment1} (inverted branch over jump)") ::
         (RV.LABEL(label), comment3) :: optimizeText rest
 
-    // _____________________Optimization Tier 2_______________________
+    // ________________________Optimization Tier 2__________________________
     // Redundant Branching & Control Flow Fallthrough (2-instruction window)
-    // _______________________________________________________________
+    // _____________________________________________________________________
 
     // --- Branch / Jump to the Immediately Following Label
     // Eliminate unconditional jump to the next line (labeled instruction)
@@ -159,41 +159,25 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
         (RV.LI(rd1, 1), comment1) ::
         (RV.MV(rd2, rs1), $"{comment2} (reduced / 1)") :: optimizeText rest
 
-    // If a small-enough constant integer is loaded and then added, perform
-    // a direct `addi` operation instead
-    | (RV.LI(rd1, value), comment1) ::
-      (RV.ADD(rd2, rs1, rs2), comment2) ::
-      rest when rd1 = rs2 && (isImm12 value) ->
-        (RV.LI(rd1, value), comment1) ::
-        (RV.ADDI(rd2, rs1, Imm12(value)), comment2) ::
-        optimizeText rest
+    // ________________________Optimization Tier 5__________________________________
+    // General Strength Reduction & Immediate Folding (shifts, immediate arithmetic)
+    // _____________________________________________________________________________
 
-    // Self-move Elimination
-    | (RV.MV(rd, rs), comment) :: rest when rd = rs ->
-        optimizeText rest
-
-
-    // --- Dead Store Elimination (Consecutive Stores to Same Address)
-    | (RV.SW(_, imm1, rp1), _) ::
-      (RV.SW(rs2, imm2, rp2), comment2) ::
-      rest when imm1.Value = imm2.Value && rp1 = rp2 ->
-        (RV.SW(rs2, imm2, rp2), comment2) :: optimizeText rest
-
-    // Self-Substraction & Self-XOR (Yield Loaded Zero)
-
-    // General Strength Reduction for Arbitrary Powers of 2 (2^k)
+    // --- General Strength Reduction for Arbitrary Powers of 2 (2^k)
+    // Multiplication by any 2^k ->> shift logical left by k
     | (RV.LI(rd1, value), comment1) ::
       (RV.MUL(rd2, rs1, rs2), comment2) ::
-      rest when (rs1 = rd1 || rs2 = rd1) && isPositivePowerOfTwo value ->
+      rest when (rs1 = rd1 || rs2 = rd1) && isPositivePowerOfTwo value && value > 1 ->
         let other_reg = if rs1 = rd1 then rs2 else rs1
         let k_shift = log2 value
         (RV.LI(rd1, value), comment1) ::
         (RV.SLLI(rd2, other_reg, Shamt(k_shift)), $"{comment2} (strength reduction << {k_shift})") ::
         optimizeText rest
 
+    // Division by any 2^k ->> shift arithmetic right by k
     | (RV.LI(rd1, value), comment1) ::
       (RV.DIV(rd2, rs1, rs2), comment2) ::
-      rest when rd1 = rs2 && isPositivePowerOfTwo value ->
+      rest when rd1 = rs2 && isPositivePowerOfTwo value && value > 1 ->
         let k_shift = log2 value
         (RV.LI(rd1, value), comment1) ::
         (RV.SRAI(rd2, rs1, Shamt(k_shift)), $"{comment2} (strength reduction >> {k_shift})") ::
@@ -206,20 +190,65 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
     // | (RV.LI(rd1, value), comment1) :: (RV.DIV(rd2, rs1, rs2), comment2) :: rest
     //     when value = 64 && rd1 = rs2 ->
     //     (RV.LI(rd1, value), comment1) :: (RV.SRAI(rd2, rs1, Shamt(6u)), comment2) :: optimizeText rest
+    
+    // --- Immediate Addition Folding
+    | (RV.LI(rd1, value), comment1) ::
+      (RV.ADD(rd2, rs1, rs2), comment2) ::
+      rest when rd1 = rs2 && (isImm12 value) ->
+        (RV.LI(rd1, value), comment1) ::
+        (RV.ADDI(rd2, rs1, Imm12(value)), comment2) ::
+        optimizeText rest
 
-    // Removal of redundant assignments
+    // _____________________Optimization Tier 6_______________________
+    // Redundant Assignments, Duplicate Instructions & No-Op Cleanups
+    // _______________________________________________________________
+
+    // --- Dead Store Elimination (Consecutive Stores to Same Address)
+    | (RV.SW(_, imm1, rp1), _) ::
+      (RV.SW(rs2, imm2, rp2), comment2) ::
+      rest when imm1.Value = imm2.Value && rp1 = rp2 ->
+        (RV.SW(rs2, imm2, rp2), comment2) :: optimizeText rest
+
+    // -- Redundant Assignment Elimination
+    // Duplicate immediate load removal
+    | (RV.LI(rd1, _), _) ::
+      (RV.LI(rd2, imm2), comment2) ::
+      rest when rd1 = rd2 ->
+        (RV.LI(rd2, imm2), comment2) :: optimizeText rest
+
+    // Duplicate move removal
+    | (RV.MV(rd1, rs1), comment1) ::
+      (RV.MV(rd2, rs2), _) ::
+      rest when rd1 = rd2 && rs1 = rs2 ->
+        (RV.MV(rd1, rs1), comment1) :: optimizeText rest
+
+    // Cross-move simplification
     | (RV.MV(rd1, rs1), comment1) ::
       (RV.MV(rd2, rs2), comment2) ::
       rest when rd1 = rs2 && rd2 = rs1 ->
         (RV.MV(rd1, rd2), $"{comment1} {comment2}") ::
         optimizeText rest
 
+    // Overwritten-move removal    
     | (RV.MV(rd1, rs1), comment1) ::
       (RV.LI(rd2, value), comment2) ::
       rest when rd1 = rd2 && (isImm12 value) ->
         (RV.LI(rd1, value), $"{comment1} {comment2}") ::
         optimizeText rest
 
+    // --- Self-Substraction & Self-XOR (Yield Loaded Zero)
+    | (RV.SUB(rd, rs1, rs2), comment) ::
+      rest when rs1 = rs2 ->
+        (RV.LI(rd, 0), $"{comment} (self-sub zero)") :: optimizeText rest
+    | (RV.XOR(rd, rs1, rs2), comment) ::
+      rest when rs1 = rs2 ->
+        (RV.MV(rd, Reg.zero), $"{comment} (self-xor zero)") :: optimizeText rest
+
+    // --- Self-move Elimination
+    | (RV.MV(rd, rs), comment) :: rest when rd = rs ->
+        optimizeText rest
+
+    // TIER 7: Default Fallthrough
     | stmt :: rest ->
         // If we are here, we did not find any pattern to optimize: we skip the
         // first assembly statement and try with the rest
