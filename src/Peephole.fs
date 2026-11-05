@@ -12,7 +12,8 @@ open RISCV
 let private isPositivePowerOfTwo (n: int32) : bool =
     n > 0 && (n &&& (n - 1)) = 0
 
-/// Compute log2 of a positive power of 2
+/// Compute log2 of a positive power of 2.
+/// NOTE: only valid for n that are positive powers of 2 (i.e. isPositivePowerOfTwo n = true).
 let private log2 (n: int32) : uint32 =
     uint32 (System.Numerics.BitOperations.Log2(uint32 n))
 
@@ -74,6 +75,12 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
     | (RV.BNE(_, _, label1), _) :: (RV.LABEL(label2), comment) ::
       rest when label1 = label2 ->
         (RV.LABEL(label1), comment) :: optimizeText rest
+    | (RV.BEQZ(_, label1), _) :: (RV.LABEL(label2), comment) ::
+      rest when label1 = label2 ->
+        (RV.LABEL(label1), comment) :: optimizeText rest
+    | (RV.BNEZ(_, label1), _) :: (RV.LABEL(label2), comment) ::
+      rest when label1 = label2 ->
+        (RV.LABEL(label1), comment) :: optimizeText rest
 
     // --- Boolean Comparison Bypass & Branch Fusion
     // Fuse boolean test with conditional branch
@@ -93,7 +100,7 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
     // --- Store-forwarding / Reload Elimination
     | (RV.SW(rs0, imm1, rs1), comment) ::
       (RV.LW(rd, imm2, rs2), comment1) ::
-      rest when imm1 = imm2 && rs1 = rs2 ->
+      rest when imm1.Value = imm2.Value && rs1 = rs2 ->
         if rs0 = rd then // forward store
             (RV.SW(rs0, imm1, rs1), comment) :: optimizeText rest
         else // eliminate reload
@@ -111,7 +118,8 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
             | 0 -> [] // Cancellation
             | x when isImm12 x -> // Fusion
                 [RV.ADDI(rd1, rs1, Imm12(x)), $"{comment1} {comment2}"]
-            | _ -> failwith "Stack pointer adjustment overflow: cannot fuse {comment1} and {comment2}"
+            | _ -> // Cannot fuse — emit both unchanged
+                [RV.ADDI(rd1, rs1, imm1), comment1; RV.ADDI(rd2, rs2, imm2), comment2]
         potentialStatements @ optimizeText rest
 
     // ________________________Optimization Tier 4__________________________
