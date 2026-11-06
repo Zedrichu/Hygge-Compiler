@@ -122,7 +122,7 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
                 [RV.ADDI(rd1, rs1, imm1), comment1; RV.ADDI(rd2, rs2, imm2), comment2]
         potentialStatements @ optimizeText rest
 
-    // ________________________Optimization Tier 4__________________________
+    // ________________________Optimization Tier 4a_________________________
     // Algebraic Zero & Unit Identities (special cases: *1, /1, *0, +0, -0)
     // _____________________________________________________________________
 
@@ -139,6 +139,90 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
     | (RV.SUB(rd, rs1, rs2), comment) :: rest when rs2 = Reg.zero ->
         if rd = rs1 then optimizeText rest
         else (RV.MV(rd, rs1), comment) :: optimizeText rest
+
+    // ________________________Optimization Tier 4b_______________________________
+    // Logical Identities, Absorbers & Bitwise Canonicalization (Zero / All-Ones)
+    // ___________________________________________________________________________
+
+    // --- AND/ANDI: Absorbers, register-register identities and bitmask identity
+    // AND with zero register → move zero (zero absorbs AND)
+    | (RV.AND(rd, _, rs2), comment) :: rest when rs2 = Reg.zero ->
+        (RV.MV(rd, Reg.zero), $"{comment} (AND absorber: & zero = 0)") :: optimizeText rest
+    | (RV.AND(rd, rs1, _), comment) :: rest when rs1 = Reg.zero ->
+        (RV.MV(rd, Reg.zero), $"{comment} (AND absorber: zero & = 0)") :: optimizeText rest
+    // AND with self → move (or no-op if same register)
+    | (RV.AND(rd, rs1, rs2), comment) :: rest when rs1 = rs2 ->
+        if rd = rs1 then optimizeText rest
+        else (RV.MV(rd, rs1), $"{comment} (AND self-idempotent: x & x = x)") :: optimizeText rest
+    // ANDI with 0 → move zero (immediate zero absorbs AND)
+    | (RV.ANDI(rd, _, imm), comment) :: rest when imm.Value = 0 ->
+        (RV.MV(rd, Reg.zero), $"{comment} (ANDI absorber: & 0 = 0)") :: optimizeText rest
+    // ANDI with -1 identity (all-ones, 2's complement signed) -> MV (or no-op if same register)
+    | (RV.ANDI(rd, rs, imm), comment) :: rest when imm.Value = -1 ->
+        if rd = rs then optimizeText rest
+        else (RV.MV(rd, rs), $"{comment} (ANDI bitmask identity: & 11...111 = self)") :: optimizeText rest
+
+    // --- OR/ORI: Absorbers, register-register identities and bitmask identity
+    // OR with zero register → move (zero is identity for OR)
+    | (RV.OR(rd, rs1, rs2), comment) :: rest when rs2 = Reg.zero ->
+        if rd = rs1 then optimizeText rest
+        else (RV.MV(rd, rs1), $"{comment} (OR identity: | zero = self)") :: optimizeText rest
+    | (RV.OR(rd, rs1, rs2), comment) :: rest when rs1 = Reg.zero ->
+        if rd = rs2 then optimizeText rest
+        else (RV.MV(rd, rs2), $"{comment} (OR identity: zero | = self)") :: optimizeText rest
+    // OR with self → move (idempotent)
+    | (RV.OR(rd, rs1, rs2), comment) :: rest when rs1 = rs2 ->
+        if rd = rs1 then optimizeText rest
+        else (RV.MV(rd, rs1), $"{comment} (OR self-idempotent: x | x = x)") :: optimizeText rest
+    // ORI with all-ones → load -1 (all-ones bitmask absorbs OR, 2's complement signed)
+    | (RV.ORI(rd, _, imm), comment) :: rest when imm.Value = -1 ->
+        (RV.LI(rd, -1), $"{comment} (ORI absorber: | 11...11 = 11...11)") :: optimizeText rest
+    // ORI with zero (identity) -> MV (or no-op if same register)
+    | (RV.ORI(rd, rs, imm), comment) :: rest when imm.Value = 0 ->
+        if rd = rs then optimizeText rest
+        else (RV.MV(rd, rs), $"{comment} (ORI identity: | 0 = self)") :: optimizeText rest
+
+    // --- XOR: Canonical forms and simplifications
+    // XOR with 0 → move (zero is identity for XOR)
+    | (RV.XOR(rd, rs1, rs2), comment) :: rest when rs2 = Reg.zero ->
+        if rd = rs1 then optimizeText rest
+        else (RV.MV(rd, rs1), $"{comment} (XOR identity: ^ zero = self)") :: optimizeText rest
+    | (RV.XOR(rd, rs1, rs2), comment) :: rest when rs1 = Reg.zero ->
+        if rd = rs2 then optimizeText rest
+        else (RV.MV(rd, rs2), $"{comment} (XOR identity: ^ zero = self)") :: optimizeText rest
+    // XORI with 0 → move (zero is identity for XOR)
+    | (RV.XORI(rd, rs, imm), comment) :: rest when imm.Value = 0 ->
+        if rd = rs then optimizeText rest
+        else (RV.MV(rd, rs), $"{comment} (XORI identity: ^ 0 = self)") :: optimizeText rest
+    // XORI with -1 (all-ones) → NOT (bitwise complement)
+    | (RV.XORI(rd, rs, imm), comment) :: rest when imm.Value = -1 ->
+        (RV.NOT(rd, rs), $"{comment} (XORI -1 = NOT)") :: optimizeText rest
+
+    // Double NOT cancellation → move (or no-op)
+    | (RV.NOT(rd1, rs), _) ::
+      (RV.NOT(rd2, rt), comment2) :: rest when rd1 = rt ->
+        if rd2 = rs then optimizeText rest
+        else (RV.MV(rd2, rs), $"{comment2} (double NOT = identity)") :: optimizeText rest
+
+    // --- Shifts: Identity and absorber simplifications
+    // Shift by 0 → move (or no-op) — shift by zero is identity
+    | (RV.SLLI(rd, rs, shamt), comment) :: rest when shamt.Value = 0u ->
+        if rd = rs then optimizeText rest
+        else (RV.MV(rd, rs), $"{comment} (SLLI 0 = identity)") :: optimizeText rest
+    | (RV.SRLI(rd, rs, shamt), comment) :: rest when shamt.Value = 0u ->
+        if rd = rs then optimizeText rest
+        else (RV.MV(rd, rs), $"{comment} (SRLI 0 = identity)") :: optimizeText rest
+    | (RV.SRAI(rd, rs, shamt), comment) :: rest when shamt.Value = 0u ->
+        if rd = rs then optimizeText rest
+        else (RV.MV(rd, rs), $"{comment} (SRAI 0 = identity)") :: optimizeText rest
+
+    // Shift of zero register → move zero (shifting zero always yields zero)
+    | (RV.SLLI(rd, rs, _), comment) :: rest when rs = Reg.zero ->
+        (RV.MV(rd, Reg.zero), $"{comment} (SLLI zero reg = 0)") :: optimizeText rest
+    | (RV.SRLI(rd, rs, _), comment) :: rest when rs = Reg.zero ->
+        (RV.MV(rd, Reg.zero), $"{comment} (SRLI zero reg = 0)") :: optimizeText rest
+    | (RV.SRAI(rd, rs, _), comment) :: rest when rs = Reg.zero ->
+        (RV.MV(rd, Reg.zero), $"{comment} (SRAI zero reg = 0)") :: optimizeText rest
 
     // --- Algebraic Identity: Multiplying / Dividing Identity & Zero
     // Multiplication by 1 (identity) -> result is the other register
@@ -244,7 +328,7 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
         (RV.LI(rd1, value), $"{comment1} {comment2}") ::
         optimizeText rest
 
-    // --- Self-Substraction & Self-XOR (Yield Loaded Zero)
+    // --- Self-Subtraction & Self-XOR (Yield Loaded Zero)
     | (RV.SUB(rd, rs1, rs2), comment) ::
       rest when rs1 = rs2 ->
         (RV.LI(rd, 0), $"{comment} (self-sub zero)") :: optimizeText rest
