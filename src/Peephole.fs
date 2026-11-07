@@ -291,6 +291,36 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
         (RV.ADDI(rd2, rs1, Imm12(value)), comment2) ::
         optimizeText rest
 
+    // ____________________Optimization Tier 5b______________________________
+    // Logical Immediate Folding (LI + logical-op -> logical-op-immediate)
+    // Canonical direction only (immediate register is the right operand),
+    // to preserve strict directionality and prevent termination hazards.
+    // ______________________________________________________________________
+
+    // LI + OR -> ORI (fold constant into OR instruction)
+    | (RV.LI(rd1, value), comment1) ::
+      (RV.OR(rd2, rs1, rs2), comment2) ::
+      rest when rd1 = rs2 && rd1 <> rs1 && isImm12 value ->
+        (RV.LI(rd1, value), comment1) ::
+        (RV.ORI(rd2, rs1, Imm12(value)), $"{comment2} (OR immediate folding)") ::
+        optimizeText rest
+
+    // LI + AND -> ANDI (fold constant into AND instruction)
+    | (RV.LI(rd1, value), comment1) ::
+      (RV.AND(rd2, rs1, rs2), comment2) ::
+      rest when rd1 = rs2 && rd1 <> rs1 && isImm12 value ->
+        (RV.LI(rd1, value), comment1) ::
+        (RV.ANDI(rd2, rs1, Imm12(value)), $"{comment2} (AND immediate folding)") ::
+        optimizeText rest
+
+    // LI + XOR -> XORI (fold constant into XOR instruction)
+    | (RV.LI(rd1, value), comment1) ::
+      (RV.XOR(rd2, rs1, rs2), comment2) ::
+      rest when rd1 = rs2 && rd1 <> rs1 && isImm12 value ->
+        (RV.LI(rd1, value), comment1) ::
+        (RV.XORI(rd2, rs1, Imm12(value)), $"{comment2} (XOR immediate folding)") ::
+        optimizeText rest
+
     // _____________________Optimization Tier 6_______________________
     // Redundant Assignments, Duplicate Instructions & No-Op Cleanups
     // _______________________________________________________________
@@ -359,4 +389,10 @@ let optimize (asm: Asm): Asm =
         let optText = optimizeText text
         if (optText = text) then text
                             else optimizeRec optText
-    asm.SetText (optimizeRec asm.GetText)
+    let optAsm = optimizeRec asm.GetText
+    let rawCount = asm.GetText |> List.length
+    let optCount = optAsm |> List.length
+    let reduction = rawCount - optCount
+    let pct = if rawCount > 0 then (float reduction / float rawCount) * 100.0 else 0.0
+    Log.info $"Peephole optimization complete: {rawCount} → {optCount} instructions (reduced by {reduction}, {pct:F1}%%)"
+    asm.SetText optAsm
