@@ -381,18 +381,24 @@ let rec internal optimizeText (text: List<TextStmt>): List<TextStmt> =
 
 /// Optimize the given assembly code.
 let optimize (asm: Asm): Asm =
+    let maxPasses = 5 // Round fuel
     Log.info "Starting peephole optimization"
     /// Recursively perform peephole optimization, until the result stops
-    /// changing (i.e. there is nothing more we can optimize).
-    let rec optimizeRec (text: List<TextStmt>): List<TextStmt> =
+    /// changing (i.e. there is nothing more we can optimize, optimization fixed-point).
+    let rec optimizeRec (pass: int) (text: List<TextStmt>): List<TextStmt> =
+        if pass > maxPasses then
+            failwith $"Peephole optimization cycle detected: exceeded {maxPasses} passes without converging."
         /// Optimized assembly code
         let optText = optimizeText text
-        if (optText = text) then text
-                            else optimizeRec optText
-    let optAsm = optimizeRec asm.GetText
+        Log.info $"Peephole optimisation round: ___ Reduction: {text.Length} -> {optText.Length}"
+        // if (optText = text) // #TODO: This check is flaky !!!
+        if (optText.Length = text.Length) then text
+                                          else optimizeRec (pass + 1) optText // Aim for fixed-point
+    let optAsm = optimizeRec 1 asm.GetText
     let rawCount = asm.GetText |> List.length
     let optCount = optAsm |> List.length
     let reduction = rawCount - optCount
     let pct = if rawCount > 0 then (float reduction / float rawCount) * 100.0 else 0.0
     Log.info $"Peephole optimization complete: {rawCount} → {optCount} instructions (reduced by {reduction}, {pct:F1}%%)"
+    printf $"Peephole optimization complete: {rawCount} → {optCount} instructions (reduced by {reduction}, {pct:F1}%%)"
     asm.SetText optAsm

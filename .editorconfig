@@ -1,7 +1,43 @@
 root = true
 
-[root]
+[*]
 charset = utf-8
+end_of_line = lf
+insert_final_newline = true
 indent_style = space
-indent_size = 2
-tab_width = 2
+indent_size = 4
+tab_width = 4
+trim_trailing_whitespace = true
+
+# F# source files
+[*.{fs,fsi,fsx}]
+indent_size = 4
+
+# --- Line Wrapping & Page Width ---
+# Standard EditorConfig line length
+max_line_length = 100
+
+# Fantomas formatter settings (used by Rider's built-in F# formatter)
+fsharp_page_width = 100
+fsharp_max_line_length = 100
+
+# Pattern matching & control flow wrapping
+fsharp_match_expression_each_clause_on_new_line = true
+fsharp_bar_before_discriminated_union_declaration = true
+fsharp_multiline_block_brackets_on_same_column = true
+
+# Function and signature wrapping
+fsharp_align_function_signature_to_indentation = true
+fsharp_wrap_expression_bodies = true
+
+# Spacing rules consistent with F# guidelines & fsharplint
+fsharp_space_before_parameter = true
+fsharp_space_before_colon = false
+fsharp_space_after_comma = true
+fsharp_space_after_semicolon = true
+fsharp_space_around_delimiter = true
+
+# --- JetBrains Rider Specific Overrides ---
+ij_fsharp_wrap_long_lines = true
+ij_fsharp_keep_blank_lines_in_code = 1
+ij_fsharp_keep_blank_lines_in_declarations = 1
