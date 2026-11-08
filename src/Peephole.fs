@@ -81,15 +81,6 @@ let internal optimizeText (text: List<TextStmt>): List<TextStmt> =
             let inst = (RV.LABEL(label1), comment)
             loop (inst :: acc) rest
 
-        // --- Boolean Comparison Bypass & Branch Fusion
-        // Fuse boolean test with conditional branch
-        | (RV.SNEZ(rd, rs), comment1) :: (RV.BNEZ(rt, label), comment2) :: rest when rd = rt ->
-            let inst = (RV.BNEZ(rs, label), $"{comment1} {comment2} (bypass SNEZ, fuse in BNEZ)")
-            loop (inst :: acc) rest
-        | (RV.SEQZ(rd, rs), comment1) :: (RV.BNEZ(rt, label), comment2) :: rest when rd = rt ->
-            let inst = (RV.BEQZ(rs, label), $"{comment1} {comment2} (bypass SEQZ, fuse in BEQZ)")
-            loop (inst :: acc) rest
-
         // ________________________Optimization Tier 3________________________________
         // Memory / Stack Optimizations (store-forwarding, reload elimination, fusion)
         // ___________________________________________________________________________
