@@ -180,7 +180,7 @@ let tests = testList "tests" [
             testANFCodegen file 0
         <| fun file ->
             testANFCodegen file RISCVCodegen.assertExitCode
-    createTestList "optimisation"
+    createTestList "opt-peephole"
         <| fun file ->
             testCodegenOptimised file 0
         <| fun file ->

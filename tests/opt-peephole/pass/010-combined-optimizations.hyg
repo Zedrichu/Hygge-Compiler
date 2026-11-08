@@ -1,0 +1,10 @@
+// Tests combined optimization effects: arithmetic chains
+let a = 4;
+let b = a * 2;    // strength reduction
+let c = b + 0;    // identity elimination
+let d = c * 1;    // mul-identity
+let e = d - 0;    // sub-identity
+assert(e = 8);
+let x = 16 / 4;   // strength reduction div
+assert(x = 4);
+assert(x * 1 = 4) // mul-identity chain

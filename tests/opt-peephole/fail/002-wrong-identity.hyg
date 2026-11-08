@@ -1,0 +1,2 @@
+// This should FAIL
+assert(42 * 1 = 43)

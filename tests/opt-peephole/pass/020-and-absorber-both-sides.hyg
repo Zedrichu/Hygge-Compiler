@@ -1,0 +1,4 @@
+// Tests AND absorber from both sides: false and x = false, x and false = false
+let x = true;
+assert(not (x and false));
+assert(not (false and x))

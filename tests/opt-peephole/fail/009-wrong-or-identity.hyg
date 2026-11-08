@@ -1,0 +1,3 @@
+// OR with false = x (true), NOT false — this assert fires exit 42
+let x = true;
+assert(not (x or false))

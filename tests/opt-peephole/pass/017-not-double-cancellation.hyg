@@ -1,0 +1,6 @@
+// Tests double NOT cancellation: not (not x) = x
+// codegen: SEQZ followed by SEQZ -> identity chain
+let x = true;
+assert(not (not x));
+let y = false;
+assert(not (not (not y)))

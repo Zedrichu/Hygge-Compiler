@@ -1,0 +1,11 @@
+// Tests mutable variable optimizations with arithmetic
+let mutable counter = 0;
+counter <- counter + 1;
+counter <- counter + 1;
+counter <- counter + 1;
+assert(counter = 3);
+let mutable n = 8;
+n <- n / 2;    // strength reduction
+assert(n = 4);
+n <- n * 4;    // strength reduction
+assert(n = 16)

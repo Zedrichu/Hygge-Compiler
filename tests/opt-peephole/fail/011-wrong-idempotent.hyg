@@ -1,0 +1,3 @@
+// AND x x = x (true here), NOT false — fires exit 42
+let x = true;
+assert(not (x and x))

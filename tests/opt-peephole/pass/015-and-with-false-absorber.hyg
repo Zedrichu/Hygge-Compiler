@@ -1,0 +1,4 @@
+// Tests AND absorber: x and false = false (AND with zero -> MV Reg.zero)
+let x = true;
+assert(not (x and false));
+assert(not (false and x))

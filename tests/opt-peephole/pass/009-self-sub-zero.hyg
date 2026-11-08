@@ -1,0 +1,7 @@
+// Tests self-subtraction: x - x = 0
+let x = 999;
+let result = x - x;
+assert(result = 0);
+let mutable y = 42;
+let result2 = y - y;
+assert(result2 = 0)

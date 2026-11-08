@@ -1,0 +1,6 @@
+// Tests algebraic identity: x + 0 = x, x - 0 = x
+let x = 42;
+assert(x + 0 = 42);
+assert(x - 0 = 42);
+let y = 0;
+assert(x + y = 42)

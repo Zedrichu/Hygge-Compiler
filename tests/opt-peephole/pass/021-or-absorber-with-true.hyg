@@ -1,0 +1,6 @@
+// Tests that OR with true absorbs: true or x = true
+// ORI with all-ones (-1) -> LI rd, -1 (non-zero -> truthy)
+let x = false;
+assert(true or x);
+let y = true;
+assert(true or y)

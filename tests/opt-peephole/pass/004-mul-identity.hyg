@@ -1,0 +1,5 @@
+// Tests algebraic identity: x * 1 = x, x / 1 = x
+let x = 15;
+assert(x * 1 = 15);
+assert(x / 1 = 15);
+assert(1 * x = 15)

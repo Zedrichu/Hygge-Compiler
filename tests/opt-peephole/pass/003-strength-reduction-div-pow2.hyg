@@ -1,0 +1,5 @@
+// Tests strength reduction: div by powers of 2
+assert(10 / 2 = 5);
+assert(16 / 4 = 4);
+assert(64 / 8 = 8);
+assert(128 / 16 = 8)

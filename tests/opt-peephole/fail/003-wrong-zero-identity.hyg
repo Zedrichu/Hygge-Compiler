@@ -1,0 +1,2 @@
+// This should FAIL
+assert(5 * 0 = 1)

@@ -1,0 +1,13 @@
+// Tests chains of conditionals with branch optimization
+let x = 10;
+let result =
+    if x > 5 then
+        if x > 8 then 3 else 2
+    else 1;
+assert(result = 3);
+let y = 3;
+let result2 =
+    if y > 5 then 10
+    else if y > 1 then 5
+    else 0;
+assert(result2 = 5)
