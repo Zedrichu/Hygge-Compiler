@@ -54,6 +54,29 @@ let internal testCodegen (file: string) (expected: int) =
                                         + $"got %d{exit} (%s{explainExit})")
 
 
+/// Compile a source file with peephole optimization and run the resulting
+/// Assembly code on RARS, checking whether its return code matches the expected
+/// one. Peephole optimization may be more meaningful after ANF transformation.
+let internal testCodegenOptimised (file: string) (expected: int) =
+    match (Util.parseFile file) with
+    | Error(e) -> failwith $"Parsing failed: %s{e}"
+    | Ok(ast) ->
+        match (Typechecker.typecheck ast) with
+        | Error(es) -> failwith $"Typing failed: %s{formatErrors es}"
+        | Ok(typedAst) ->
+            let asm = RISCVCodegen.codegen typedAst
+            let optAsm = Peephole.optimize asm
+            let beforeCount = asm.GetText |> List.length
+            let afterCount = optAsm.GetText |> List.length
+            let reduction = beforeCount - afterCount
+            Log.info $"Peephole: {beforeCount} → {afterCount} instructions (reduced by {reduction})"
+            let explainExpected = RARS.explainExitCode expected
+            let exit = RARS.launchOpt (optAsm.ToString()) false true
+            let explainExit = RARS.explainExitCode exit
+            Expect.equal exit expected ($"RARS should have exited with code %d{expected} (%s{explainExpected}), "
+                                        + $"got %d{exit} (%s{explainExit})")
+
+
 /// Compile a source file after transforming it into ANF, and run the resulting
 /// assembly code on RARS, checking whether its return code matches the expected
 /// one. For this test, the ANF-based compilation uses just 3 registers.
@@ -157,6 +180,11 @@ let tests = testList "tests" [
             testANFCodegen file 0
         <| fun file ->
             testANFCodegen file RISCVCodegen.assertExitCode
+    createTestList "optimisation"
+        <| fun file ->
+            testCodegenOptimised file 0
+        <| fun file ->
+            testCodegenOptimised file RISCVCodegen.assertExitCode
 ]
 
 
