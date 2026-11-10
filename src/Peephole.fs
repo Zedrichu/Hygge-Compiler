@@ -391,7 +391,7 @@ let internal optimizeText (text: List<TextStmt>): List<TextStmt> =
             // first assembly statement and try with the rest
             loop (stmt :: acc) rest
 
-        | [] -> acc
+        | [] -> List.rev acc
     // Trigger one full optimization loop over the ASM text (chain of statements).
     loop [] text
 
@@ -416,5 +416,4 @@ let optimize (asm: Asm): Asm =
     let reduction = rawCount - optCount
     let pct = if rawCount > 0 then (float reduction / float rawCount) * 100.0 else 0.0
     Log.info $"Peephole optimization complete: {rawCount} → {optCount} instructions (reduced by {reduction}, {pct:F1}%%)"
-    printf $"Peephole optimization complete: {rawCount} → {optCount} instructions (reduced by {reduction}, {pct:F1}%%)"
     asm.SetText optAsm
