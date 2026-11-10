@@ -6,7 +6,10 @@
 /// Compiler test suite.
 module Test
 
-open Expecto // See https://github.com/haf/expecto
+open Expecto
+
+open RISCV
+// See https://github.com/haf/expecto
 
 
 /// Collect and sort the test files in a test directory (which is obtained by
@@ -57,21 +60,38 @@ let internal testCodegen (file: string) (expected: int) =
 /// Compile a source file with peephole optimization and run the resulting
 /// Assembly code on RARS, checking whether its return code matches the expected
 /// one. Peephole optimization may be more meaningful after ANF transformation.
-let internal testCodegenOptimised (file: string) (expected: int) =
+let internal testPeepholeOptimisedCodegen (file: string) (expected: int) =
     match (Util.parseFile file) with
     | Error(e) -> failwith $"Parsing failed: %s{e}"
     | Ok(ast) ->
         match (Typechecker.typecheck ast) with
         | Error(es) -> failwith $"Typing failed: %s{formatErrors es}"
         | Ok(typedAst) ->
+            let logMetrics (cls: string) (asm: Asm) (opt: Asm) =
+                let beforeCount = asm.GetText |> List.length
+                let afterCount = opt.GetText |> List.length
+                let reduction = beforeCount - afterCount
+                Log.info $"Peephole {cls}: {beforeCount} → {afterCount} instructions (reduced by {reduction})"
+
+            // Apply Peephole optimization on normal AST codegen
             let asm = RISCVCodegen.codegen typedAst
             let optAsm = Peephole.optimize asm
-            let beforeCount = asm.GetText |> List.length
-            let afterCount = optAsm.GetText |> List.length
-            let reduction = beforeCount - afterCount
-            Log.info $"Peephole: {beforeCount} → {afterCount} instructions (reduced by {reduction})"
+
+            logMetrics "Typed AST Codegen" asm optAsm
             let explainExpected = RARS.explainExitCode expected
             let exit = RARS.launchOpt (optAsm.ToString()) false true
+            let explainExit = RARS.explainExitCode exit
+            Expect.equal exit expected ($"RARS should have exited with code %d{expected} (%s{explainExpected}), "
+                                        + $"got %d{exit} (%s{explainExit})")
+
+            // Apply Peephole optimization after ANF transform & codegen
+            let anf = ANF.transform typedAst
+            let anfAsm = ANFRISCVCodegen.codegen anf 3u
+            let optAnfAsm = Peephole.optimize anfAsm
+
+            logMetrics "ANF Transform & Codegen" anfAsm optAnfAsm
+            let explainExpected = RARS.explainExitCode expected
+            let exit = RARS.launchOpt (optAnfAsm.ToString()) false true
             let explainExit = RARS.explainExitCode exit
             Expect.equal exit expected ($"RARS should have exited with code %d{expected} (%s{explainExpected}), "
                                         + $"got %d{exit} (%s{explainExit})")
@@ -182,9 +202,9 @@ let tests = testList "tests" [
             testANFCodegen file RISCVCodegen.assertExitCode
     createTestList "opt-peephole"
         <| fun file ->
-            testCodegenOptimised file 0
+            testPeepholeOptimisedCodegen file 0
         <| fun file ->
-            testCodegenOptimised file RISCVCodegen.assertExitCode
+            testPeepholeOptimisedCodegen file RISCVCodegen.assertExitCode
 ]
 
 
