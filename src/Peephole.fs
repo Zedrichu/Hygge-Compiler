@@ -56,6 +56,19 @@ let internal optimizeText (text: List<TextStmt>): List<TextStmt> =
             let inst1 = (RV.BEQZ(rs1, target2), $"{comment1} (inverted branch over jump)")
             let inst2 = (RV.LABEL(label), comment3)
             loop (inst2 :: inst1 :: acc) rest
+        // BNE/BNEZ over JR to immediate label -> BEQ/BEQZ
+        | (RV.BNE(rs1, rs2, target1), comment1) :: (RV.LA(rAddr, target2), _) ::
+          (RV.JR(rJump), _) :: (RV.LABEL(label), comment3) ::
+          rest when label = target1 && rAddr = rJump ->
+            let inst1 = (RV.BEQ(rs1, rs2, target2), $"{comment1} (inverted branch over JR)")
+            let inst2 = (RV.LABEL(label), comment3)
+            loop (inst2 :: inst1 :: acc) rest
+        | (RV.BNEZ(rs1, target1), comment1) :: (RV.LA(rAddr, target2), _) ::
+          (RV.JR(rJump), _) :: (RV.LABEL(label), comment3) ::
+          rest when label = target1 && rAddr = rJump ->
+            let inst1 = (RV.BEQZ(rs1, target2), $"{comment1} (inverted branch over JR)")
+            let inst2 = (RV.LABEL(label), comment3)
+            loop (inst2 :: inst1 :: acc) rest
 
         // ________________________Optimization Tier 2__________________________
         // Redundant Branching & Control Flow Fallthrough (2-instruction window)
@@ -406,14 +419,14 @@ let optimize (asm: Asm): Asm =
             failwith $"Peephole optimization cycle detected: exceeded {maxPasses} passes without converging."
         /// Optimized assembly code
         let optText = optimizeText text
-        Log.info $"Peephole optimisation round: ___ Reduction: {text.Length} -> {optText.Length}"
-        // if (optText = text) // #TODO: This check is flaky !!!
-        if (optText.Length = text.Length) then text
-                                          else optimizeRec (pass + 1) optText // Aim for fixed-point
+        if (optText = text) then text
+                            else optimizeRec (pass + 1) optText // Aim for fixed-point
+
     let optAsm = optimizeRec 1 asm.GetText
     let rawCount = asm.GetText |> List.length
     let optCount = optAsm |> List.length
     let reduction = rawCount - optCount
     let pct = if rawCount > 0 then (float reduction / float rawCount) * 100.0 else 0.0
     Log.info $"Peephole optimization complete: {rawCount} → {optCount} instructions (reduced by {reduction}, {pct:F1}%%)"
+    printf $"Peephole optimization complete: {rawCount} → {optCount} instructions (reduced by {reduction}, {pct:F1}%%)"
     asm.SetText optAsm

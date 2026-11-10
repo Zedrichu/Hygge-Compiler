@@ -169,7 +169,7 @@ let rec internal addVarNode (node: Node<TypingEnv, Type>) (var: string) (tpe: Ty
                                        Env.Vars = node.Env.Vars.Add (var, tpe)}
     | Copy arg -> {node with Expr = Copy(addVarNode arg var tpe)
                              Env.Vars = node.Env.Vars.Add (var, tpe)}
-    
+
 /// Code generation function: compile the expression in the given AST node so
 /// that it writes its results on the 'Target' and 'FPTarget' generic register
 /// numbers (specified in the given codegen 'env'ironment).  IMPORTANT: the
@@ -202,7 +202,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
               (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)), $"Move float value %f{v} to FP register")
               (RV.LW(Reg.r(env.Target), Imm12(0), Reg.sp), "Restore env.Target register from stack")
               (RV.ADDI(Reg.sp, Reg.sp, Imm12(4)), "Deallocate stack space") ])
-    
+
     | StringVal(v) ->
         // Label marking the string constant in the data segment
         let label = Util.genSymbol "string_val"
@@ -312,7 +312,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         | t when isSubtypeOf node.Env t TInt ->
                             Asm(RV.FCVT_S_W(FPReg.r(rfptarget), Reg.r(env.Target)))
                         | _ -> Asm()
-            
+
             let label = Util.genSymbol "minmax_done"
             /// Generated code for the numerical operation
             let opAsm =
@@ -553,11 +553,11 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 ])
                 ++ (afterSysCall [Reg.a0] [])
         | TStruct fields ->
-            let nodes = 
+            let nodes =
                 [{ node with Expr = Print(
                             { node with Expr = StringVal("struct { "); Type = TString }) }] @
                 (List.collect (fun (name, tpe, _) ->
-                    let strVals = 
+                    let strVals =
                         match tpe with
                         | TString -> (name + @" = \"""), @"\""; "
                         | _ -> (name + " = "), "; "
@@ -582,11 +582,11 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             ]
             doCodegen env { node with Expr = Seq(nodes) }
         | TFun _ as t ->
-            doCodegen env 
+            doCodegen env
                 { node with Expr = Print(
                         { node with Expr = StringVal(t.ToString()); Type = TString }) }
         | TUnion (_: List<string * Type>) as t ->
-            doCodegen env 
+            doCodegen env
                 { node with Expr = Print(
                         { node with Expr = StringVal(t.ToString()); Type = TString }) }
         | t ->
@@ -623,6 +623,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         (doCodegen env condition)
             .AddText([ (RV.BNEZ(Reg.r(env.Target), labelTrue),
                         "Jump when 'if' condition is true")
+                        // LA (reg, label); JR (reg) === J (label) - equivalent formulation
                        (RV.LA(Reg.r(env.Target), labelFalse),
                         "Load the address of the 'false' branch of the 'if' code")
                        (RV.JR(Reg.r(env.Target)),
@@ -710,7 +711,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let refCellType = TStruct(["value", init.Type, true])
         let refCell = {init with Expr = StructCons(["value", init])
                                  Type = refCellType}
-        
+
         let valueAccess = {node with Expr = FieldSelect({node with Expr = Var(name)
                                                                    Type = refCellType}, "value")
                                      Type = init.Type}
@@ -720,7 +721,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         // Code generation for the immutable let binder after heap promotion
         doCodegen env {node with Expr = Let(name, refCell, scope')}
-    
+
     | Let(name, init, scope)
     | LetT(name, _, init, scope)
     | LetMut(name, init, scope) ->
@@ -877,7 +878,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             let indexCode = doCodegen {env with Target = env.Target + 1u} index
             /// Code for the 'rhs', leaving its result in the target+2 register
             let rhsCode = doCodegen {env with Target = env.Target + 2u} rhs
-            
+
             let indexOutBoundsCode =
                 let array' = {target with Expr = Var("~trg")}
                 let index' = {index with Expr = Var("~idx")}
@@ -996,9 +997,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             List.except [Reg.r(env.Target)]
                         (Reg.ra :: [for i in 0u..7u do yield Reg.a(i)]
                          @ [for i in 0u..6u do yield Reg.t(i)])
-        // Here we also create a list of FP registers to save as per callee and caller convention. For caller we save fa and ft registers. 
-        // We use filter and compare for the list because of a small bug/issue with .except that sometimes it wouldn't exclude the target register and hence overwrite it                
-        let saveFPRegs = 
+        // Here we also create a list of FP registers to save as per callee and caller convention. For caller we save fa and ft registers.
+        // We use filter and compare for the list because of a small bug/issue with .except that sometimes it wouldn't exclude the target register and hence overwrite it
+        let saveFPRegs =
             List.filter (fun (e: FPReg) -> e.Number <> env.FPTarget)
                         ([for i in 0u..7u do yield FPReg.fa(i)]
                         @ [for i in 0u..11u do yield FPReg.ft(i)])
@@ -1088,22 +1089,22 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                ++ (saveRegisters saveRegs saveFPRegs)
                ++ argsLoadCode // Code to load arg values into arg registers
                   .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
-        
+
         /// Code that handles the function return value (if any)
         /// If the expression is a function then we check the return type
         /// to target the correct output register, FPReg for float, Reg for int.
         let retCode =
             match expr.Type with
-            | TFun (_, retType) -> 
+            | TFun (_, retType) ->
                 match retType with
                 | TFloat ->
                     Asm(RV.FMV_S(FPReg.r(env.FPTarget), FPReg.fa0),
                     $"Copy function return value to target floating point register")
-                | _ -> 
+                | _ ->
                     Asm(RV.MV(Reg.r(env.Target), Reg.a0),
                     $"Copy function return value to target register")
             | _ -> failwith ""
-            
+
 
         // Put everything together, and restore the caller-saved registers
         callCode
@@ -1115,7 +1116,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                        (RV.COMMENT("Restore caller-saved registers"),"")
                         ])
                   ++ (restoreRegisters saveRegs saveFPRegs)
-        
+
     | StructCons(fields) ->
         // To compile a structure constructor, we allocate heap space for the
         // whole struct instance, and then compile its field initialisations
@@ -1380,28 +1381,28 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // without a new container, hence only a struct with 2 fields: `length` and `data`.
         // The struct heap address will end up in the 'target' register. The `data` field
         // contains a pointer to the memory address of the first slice element from the container.
-        
+
         /// Compile the start index of the slice
         let startIndexCode = doCodegen env startIdx
-        
+
         /// Compile the end index of the slice
         let endIndexCode = doCodegen { env with Target = env.Target + 1u } endIdx
-        
+
         /// Compile the parent array as target
         let parentCode = doCodegen { env with Target = env.Target + 2u } parent
-        
+
         let array' = {parent with Expr = Var("~parent")}
         let startIdx' = {startIdx with Expr = Var("~idx_start")}
         let endIdx' = {endIdx with Expr = Var("~idx_end")}
-        
+
         let newStorage = env.VarStorage
                              .Add("~idx_start", Storage.Reg(Reg.r(env.Target)))
                              .Add("~idx_end", Storage.Reg(Reg.r(env.Target + 1u)))
                              .Add("~parent", Storage.Reg(Reg.r(env.Target + 2u)))
         let env' = {env with VarStorage = newStorage
-                             Target = env.Target + 3u} 
+                             Target = env.Target + 3u}
         let indexOutBoundsCode = checkIndexOutOfBounds env' array' (startIdx', endIdx') node
-        
+
         /// Assembly code to compute the updated data pointer of the slice based on start offset
         let dataPointerCode =
             let parentType = expandType node.Env parent.Type
@@ -1452,7 +1453,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 (RV.SW(Reg.r(env.Target + 2u), Imm12(4), Reg.r(env.Target + 3u)),
                 "Store array container pointer in data (2nd struct field)")
             ])
-            
+
         let moveSliceObjectCode = Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 3u)),
                                      "Move slice object address to target register")
 
@@ -1467,13 +1468,13 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// Allocate space for the union instance (label ID + value = 2 words = 8 bytes)
         /// kind of like in struct, but with two fields - the union label and the expression.
         let unionAllocCode =
-            (beforeSysCall [Reg.a0] []) 
+            (beforeSysCall [Reg.a0] [])
                 .AddText([
                     (RV.LI(Reg.a0, 8), // Amount of memory for label ID (int) + value (word)
                         "Amount of memory to allocate for a union instance (8 bytes)")
                     (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk") // Syscall to allocate heap in RARS
-                    (RV.ECALL, "") 
-                    (RV.MV(Reg.r(env.Target), Reg.a0), 
+                    (RV.ECALL, "")
+                    (RV.MV(Reg.r(env.Target), Reg.a0),
                         "Move syscall result (Union mem address) to target")
                 ])
             ++ (afterSysCall [Reg.a0] [])
@@ -1482,8 +1483,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let labelId = Util.genSymbolId label
         let labelIdCode =
             Asm([
-                (RV.LI(Reg.r(env.Target + 1u), labelId), $"Load integer ID for label '%s{label}'") 
-                (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)), 
+                (RV.LI(Reg.r(env.Target + 1u), labelId), $"Load integer ID for label '%s{label}'")
+                (RV.SW(Reg.r(env.Target + 1u), Imm12(0), Reg.r(env.Target)),
                     $"Store label ID for '%s{label}' at base address")
             ])
 
@@ -1491,7 +1492,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let exprCompileAndStoreCode =
             match expr.Type with
             | t when (isSubtypeOf expr.Env t TFloat) ->
-                let exprCode = doCodegen { env with Target = env.Target + 1u } expr 
+                let exprCode = doCodegen { env with Target = env.Target + 1u } expr
 
                 // Store the float value from env.FPTarget at offset 4
                 let storeCode = Asm(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(4), Reg.r(env.Target)),
@@ -1591,7 +1592,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             // Error node for no matching case
             let nonExhaustiveMatchErrorNode =
                 let errorMsgLiteralNode =
-                    { node with 
+                    { node with
                         Expr = StringVal($"RUNTIME ERROR [{node.Pos.FileName}:{node.Pos.LineStart}:{node.Pos.ColStart}]: Non-exhaustive pattern match. Unmatched tag ID: ")
                         Type = TString
                     }
@@ -1612,16 +1613,16 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                     Expr = Seq([ printErrorMsgLiteralNode; printActualTagNode; assertionFailNode ])
                     Type = TUnit // The overall type of the error sequence
                 }
-            
+
             let envForErrorNode =
-                { env with 
+                { env with
                     VarStorage = env.VarStorage.Add(tempVarNameForActualTag, Storage.Reg(actualTagReg))
                 }
             doCodegen envForErrorNode nonExhaustiveMatchErrorNode
 
         let endLabelInstr =
             Asm(RV.LABEL(endLabelSym), "Label for common end of match statement")
-        
+
         // Instruction to copy match result into target register
         let copyMatchResult =
             match expandType node.Env node.Type with
@@ -1638,7 +1639,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         ++ allBodyInstrs       //  The code blocks for each case (only reached by jumps from allCmpInstrs)
         ++ endLabelInstr       //  The common exit label for successful cases (jumped to from caseCodeBlock)
         ++ copyMatchResult     //  Place the result of the match expression into target
-      
+
     | Copy(arg) ->
         match arg.Type with
         | TStruct(fields) ->
@@ -1676,7 +1677,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                         match expandType node.Env fType with
                         | TStruct _ ->
                             //Recursively copy the struct field by reusing registers, saving context in the stack
-                            
+
                             let stackSpace = 8 // Space for 2 registers (4 bytes each)
 
                             // 1. Save outer context
@@ -1693,7 +1694,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                      env // Do not recursively increment registers to avoid running out of registers
                                     { node with
                                         Expr =
-                                            Copy( 
+                                            Copy(
                                                 { node with
                                                     Expr = FieldSelect(arg, fName)
                                                     Type = fType }
@@ -1749,11 +1750,11 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                  |> List.mapi (fun i (fName, fType, _) -> (i, (fName, fType))) // Add index as offset
                  |> List.fold folder (Asm()) // Apply folder to generate copy code for all fields
 
-            
+
             targetCode ++ structAllocCode ++ copyCode
 
         | _ -> failwith "BUG: Copy expression on non-struct"
-             
+
 
 /// Generate code to save the given registers on the stack, before a RARS system
 /// call. Register a7 (which holds the system call number) is backed-up by
@@ -2073,7 +2074,7 @@ and internal checkIndexOutOfBounds env target (indexL, indexR) node: Asm =
                 Type = TUnit
                 Pos = node.Pos
             }
- 
+
     Asm().AddText (RV.COMMENT "Check: Array index out of bounds?") ++
                                 doCodegen env indexOutOfBoundsCheck
 
