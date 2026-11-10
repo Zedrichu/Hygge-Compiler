@@ -57,12 +57,6 @@ let internal optimizeText (text: List<TextStmt>): List<TextStmt> =
             let inst2 = (RV.LABEL(label), comment3)
             loop (inst2 :: inst1 :: acc) rest
         // BNE/BNEZ over JR to immediate label -> BEQ/BEQZ
-        | (RV.BNE(rs1, rs2, target1), comment1) :: (RV.LA(rAddr, target2), _) ::
-          (RV.JR(rJump), _) :: (RV.LABEL(label), comment3) ::
-          rest when label = target1 && rAddr = rJump ->
-            let inst1 = (RV.BEQ(rs1, rs2, target2), $"{comment1} (inverted branch over JR)")
-            let inst2 = (RV.LABEL(label), comment3)
-            loop (inst2 :: inst1 :: acc) rest
         | (RV.BNEZ(rs1, target1), comment1) :: (RV.LA(rAddr, target2), _) ::
           (RV.JR(rJump), _) :: (RV.LABEL(label), comment3) ::
           rest when label = target1 && rAddr = rJump ->
@@ -73,6 +67,11 @@ let internal optimizeText (text: List<TextStmt>): List<TextStmt> =
         // ________________________Optimization Tier 2__________________________
         // Redundant Branching & Control Flow Fallthrough (2-instruction window)
         // _____________________________________________________________________
+
+        // --- Canonicalized Fold of Address Load + Register Jump to Direct Jump
+        | (RV.LA(r1, target), _) :: (RV.JR(r2), comment) :: rest when r1 = r2 ->
+            let inst = (RV.J(target), comment)
+            loop (inst :: acc) rest
 
         // --- Branch / Jump to the Immediately Following Label
         // Eliminate unconditional jump to the next line (labeled instruction)
