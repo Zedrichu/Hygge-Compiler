@@ -1,0 +1,4 @@
+// Tests algebraic zero: x * 0 = 0
+let x = 99;
+assert(x * 0 = 0);
+assert(0 * x = 0)

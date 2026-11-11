@@ -1,0 +1,6 @@
+// Tests AND idempotence: (x and x) = x for boolean values
+// codegen emits AND rd, rs, rs; peephole folds to MV rd, rs
+let x = true;
+assert(x and x);
+let y = false;
+assert(not (y and y))

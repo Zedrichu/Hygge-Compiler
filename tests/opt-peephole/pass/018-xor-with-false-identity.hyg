@@ -1,0 +1,5 @@
+// Tests XOR identity: x xor false = x  (XORI with 0 -> MV identity)
+let x = true;
+assert(x xor false);
+let y = false;
+assert(not (y xor false))

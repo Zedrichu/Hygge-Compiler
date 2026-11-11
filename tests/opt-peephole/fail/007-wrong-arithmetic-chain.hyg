@@ -1,0 +1,5 @@
+// This should FAIL
+let a = 4;
+let b = a * 2;   // = 8
+let c = b + 0;   // = 8
+assert(c = 9)

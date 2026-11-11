@@ -122,7 +122,7 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
                     doInterpret tast (opt.LogLevel = Log.LogLevel.debug || opt.Verbose)
 
 
-/// Auxiliary function that attempts to compile the assembly code in the fiven
+/// Auxiliary function that attempts to compile the assembly code in the given
 /// filename, and returns Ok (with the compiled assembly code) or Error.
 let internal generateAsm (filename: string)
                          (anf: bool) (maxRegisters: uint)
@@ -152,6 +152,7 @@ let internal generateAsm (filename: string)
                             18u // Default
                         else
                             failwith $"The number of registers must be between 3 and 18 (got %d{maxRegisters} instead)"
+                    Log.info "Administrative Normal Form (ANF) transformation succeeded."
                     ANFRISCVCodegen.codegen anf registers
                 else
                     RISCVCodegen.codegen tast

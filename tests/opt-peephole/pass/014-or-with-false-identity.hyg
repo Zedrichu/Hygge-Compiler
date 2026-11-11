@@ -1,0 +1,7 @@
+// Tests OR identity: x or false = x  (false ~ Reg.zero; OR with zero -> MV)
+let x = true;
+assert(x or false);
+assert(false or x);
+let y = false;
+assert(not (y or false));
+assert(not (false or y))

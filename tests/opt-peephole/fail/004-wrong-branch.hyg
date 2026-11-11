@@ -1,0 +1,5 @@
+// This should FAIL: 3 = 7 is false, so result should be 20 not 10
+let a = 3;
+let b = 7;
+let result = if a = b then 10 else 20;
+assert(result = 10)

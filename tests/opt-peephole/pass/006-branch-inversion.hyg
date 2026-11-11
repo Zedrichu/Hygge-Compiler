@@ -1,0 +1,11 @@
+// Tests that branch inversion preserves correct control flow
+let x = 5;
+let y = 5;
+let result =
+    if x = y then 1 else 2;
+assert(result = 1);
+let a = 3;
+let b = 7;
+let result2 =
+    if a = b then 10 else 20;
+assert(result2 = 20)

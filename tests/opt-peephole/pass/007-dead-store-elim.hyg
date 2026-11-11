@@ -1,0 +1,8 @@
+// Tests that overwriting a mutable variable works correctly after DSE
+let mutable x = 10;
+x <- 20;
+x <- 30;
+assert(x = 30);
+let mutable y = 0;
+y <- y + 5;
+assert(y = 5)

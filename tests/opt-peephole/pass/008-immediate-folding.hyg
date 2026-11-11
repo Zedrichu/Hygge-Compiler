@@ -1,0 +1,6 @@
+// Tests immediate folding: LI + ADD -> ADDI
+let x = 10;
+let y = x + 5;
+assert(y = 15);
+let z = x + 20;
+assert(z = 30)

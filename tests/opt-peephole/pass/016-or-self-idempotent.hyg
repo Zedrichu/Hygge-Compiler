@@ -1,0 +1,5 @@
+// Tests OR idempotence: x or x = x  (codegen OR rd, rs, rs -> MV rd, rs)
+let x = true;
+assert(x or x);
+let y = false;
+assert(not (y or y))

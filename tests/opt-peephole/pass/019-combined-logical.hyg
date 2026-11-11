@@ -1,0 +1,8 @@
+// Tests chains of logical optimizations across AND, OR, XOR, NOT
+let a = true;
+let b = false;
+assert(a and a);        // AND idempotence -> MV
+assert(not (b or b));   // OR idempotence -> MV
+assert(a or false);     // OR identity -> MV
+assert(not (b and a));  // AND absorber (b=false): false and _ = false
+assert(not (not a))     // double NOT -> identity (not(not(true)) = true)
