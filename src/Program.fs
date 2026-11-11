@@ -152,6 +152,7 @@ let internal generateAsm (filename: string)
                             18u // Default
                         else
                             failwith $"The number of registers must be between 3 and 18 (got %d{maxRegisters} instead)"
+                    Log.info "Administrative Normal Form (ANF) transformation succeeded."
                     ANFRISCVCodegen.codegen anf registers
                 else
                     RISCVCodegen.codegen tast

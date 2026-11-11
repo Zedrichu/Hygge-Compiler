@@ -410,7 +410,7 @@ let internal optimizeText (text: List<TextStmt>): List<TextStmt> =
 /// Optimize the given assembly code.
 let optimize (asm: Asm): Asm =
     let maxPasses = 5 // Round fuel
-    Log.info "Starting peephole optimization"
+    Log.info "Applying peephole optimization."
     /// Recursively perform peephole optimization, until the result stops
     /// changing (i.e. there is nothing more we can optimize, optimization fixed-point).
     let rec optimizeRec (pass: int) (text: List<TextStmt>): List<TextStmt> =
